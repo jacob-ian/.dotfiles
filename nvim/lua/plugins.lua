@@ -19,12 +19,7 @@ return require("packer").startup(function(use)
 	-- PDE
 	use({
 		"folke/tokyonight.nvim",
-		config = function()
-			require("tokyonight").setup({
-				style = "moon",
-			})
-			vim.cmd([[colorscheme tokyonight]])
-		end,
+		config = "vim.cmd[[colorscheme tokyonight]]",
 	})
 
 	use({
