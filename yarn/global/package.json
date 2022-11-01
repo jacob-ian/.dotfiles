@@ -1,5 +1,5 @@
 {
   "dependencies": {
-    "@tailwindcss/language-server": "^0.0.7"
+    "@tailwindcss/language-server": "^0.0.10"
   }
 }
