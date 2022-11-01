@@ -113,6 +113,9 @@ return require("packer").startup(function(use)
 		config = function()
 			local lspconfig = require("lspconfig")
 			local capabilities = require("cmp_nvim_lsp").default_capabilities()
+			lspconfig.dockerls.setup({
+				capabilities = capabilities,
+			})
 			lspconfig.sumneko_lua.setup({
 				capabilities = capabilities,
 				on_attach = function(client)
