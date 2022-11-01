@@ -37,7 +37,7 @@ return require("packer").startup(function(use)
 				filters = {
 					dotfiles = false,
 					custom = { ".git", "node_modules" },
-					exclude = { ".gitignore" },
+					exclude = { ".gitignore", ".github" },
 				},
 				git = {
 					ignore = false,
@@ -277,6 +277,7 @@ return require("packer").startup(function(use)
 		end,
 	})
 	use("sindrets/diffview.nvim")
+	use("kdheepak/lazygit.nvim")
 
 	if packer_bootstrap then
 		require("packer").sync()

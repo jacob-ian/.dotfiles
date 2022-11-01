@@ -2,7 +2,7 @@
 vim.g.mapleader = " "
 
 function nnoremap(shortcut, command)
-    vim.api.nvim_set_keymap("n", shortcut, command, { noremap = true, silent = true })
+	vim.api.nvim_set_keymap("n", shortcut, command, { noremap = true, silent = true })
 end
 
 -- NvimTree
@@ -31,6 +31,8 @@ nnoremap("<leader>fh", ":Telescope help_tags<cr>")
 nnoremap("<leader>dvo", ":DiffviewOpen<cr>")
 nnoremap("<leader>dvc", ":DiffviewClose<cr>")
 nnoremap("<leader>dvr", ":DiffviewRefresh<cr>")
+
+nnoremap("<leader>lg", ":LazyGit<cr>")
 
 -- Misc
 nnoremap("<leader>gf", ":e <cfile><cr>")
