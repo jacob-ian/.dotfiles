@@ -2,3 +2,4 @@
 tmux-client-*.log
 nvim/plugin/packer_compiled.lua
 yarn/global/node_modules
+configstore
