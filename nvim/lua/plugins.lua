@@ -16,6 +16,14 @@ end
 return require("packer").startup(function(use)
 	use("wbthomason/packer.nvim")
 
+	-- TMUX
+	use({
+		"aserowy/tmux.nvim",
+		config = function()
+			require("tmux").setup()
+		end,
+	})
+
 	-- PDE
 	use({
 		"folke/tokyonight.nvim",
