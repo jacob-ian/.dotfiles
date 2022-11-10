@@ -128,6 +128,7 @@ return require("packer").startup(function(use)
 					client.server_capabilities.documentFormattingProvider = false -- Use null-ls prettierd
 				end,
 			})
+			lspconfig.phpactor.setup({})
 			lspconfig.cssls.setup({
 				capabilities = capabilities,
 				on_attach = function(client)
