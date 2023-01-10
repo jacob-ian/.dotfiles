@@ -121,6 +121,9 @@ return require("packer").startup(function(use)
 		config = function()
 			local lspconfig = require("lspconfig")
 			local capabilities = require("cmp_nvim_lsp").default_capabilities()
+            lspconfig.metals.setup({
+                capabilities = capabilities,
+            })
 			lspconfig.dockerls.setup({
 				capabilities = capabilities,
 			})
@@ -214,7 +217,7 @@ return require("packer").startup(function(use)
 			vim.cmd([[
                 augroup formatting
                     autocmd! 
-                    autocmd BufWritePre * lua vim.lsp.buf.formatting_sync(nil, 1000)
+                    autocmd BufWritePre * lua vim.lsp.buf.format(nil, 1000)
                 augroup END
             ]])
 		end,
@@ -245,6 +248,7 @@ return require("packer").startup(function(use)
 					"python",
 					"regex",
 					"scss",
+                    "scala",
 				},
 				highlight = {
 					enable = true,
