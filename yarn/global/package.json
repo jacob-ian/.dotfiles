@@ -1,6 +1,8 @@
 {
   "dependencies": {
+    "@nestjs/cli": "^9.1.8",
     "@tailwindcss/language-server": "^0.0.10",
+    "cssmodules-language-server": "^1.2.1",
     "dockerfile-language-server-nodejs": "^0.9.0",
     "eslint_d": "^12.2.1",
     "typescript": "^4.9.4",

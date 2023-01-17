@@ -27,12 +27,9 @@ nnoremap("<leader>FF", ":Telescope live_grep hidden=true<cr>")
 nnoremap("<leader>fb", ":Telescope buffers<cr>")
 nnoremap("<leader>fh", ":Telescope help_tags<cr>")
 
--- Diffview
-nnoremap("<leader>dvo", ":DiffviewOpen<cr>")
-nnoremap("<leader>dvc", ":DiffviewClose<cr>")
-nnoremap("<leader>dvr", ":DiffviewRefresh<cr>")
-
+-- Git
 nnoremap("<leader>lg", ":LazyGit<cr>")
+nnoremap("<leader>gb", ":Gitsigns toggle_current_line_blame<cr>")
 
 -- Misc
 nnoremap("<leader>gf", ":e <cfile><cr>")

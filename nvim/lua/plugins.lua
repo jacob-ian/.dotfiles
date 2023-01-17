@@ -121,9 +121,12 @@ return require("packer").startup(function(use)
 		config = function()
 			local lspconfig = require("lspconfig")
 			local capabilities = require("cmp_nvim_lsp").default_capabilities()
-            lspconfig.metals.setup({
-                capabilities = capabilities,
-            })
+			lspconfig.terraformls.setup({
+				capabilities = capabilities,
+			})
+			lspconfig.metals.setup({
+				capabilities = capabilities,
+			})
 			lspconfig.dockerls.setup({
 				capabilities = capabilities,
 			})
@@ -248,7 +251,9 @@ return require("packer").startup(function(use)
 					"python",
 					"regex",
 					"scss",
-                    "scala",
+					"scala",
+					"hcl",
+					"terraform",
 				},
 				highlight = {
 					enable = true,
@@ -286,7 +291,7 @@ return require("packer").startup(function(use)
 		"lewis6991/gitsigns.nvim",
 		config = function()
 			require("gitsigns").setup({
-				current_line_blame = true,
+				current_line_blame = false,
 				current_line_blame_opts = {
 					virt_text_pos = "right_align",
 					delay = 500,

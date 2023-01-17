@@ -4,3 +4,4 @@ yarn/global/node_modules
 configstore
 nvim/plugin/packer_compiled.lua
 gh
+gcloud
