@@ -121,6 +121,9 @@ return require("packer").startup(function(use)
 		config = function()
 			local lspconfig = require("lspconfig")
 			local capabilities = require("cmp_nvim_lsp").default_capabilities()
+			lspconfig.rust_analyzer.setup({
+				capabilities = capabilities,
+			})
 			lspconfig.terraformls.setup({
 				capabilities = capabilities,
 			})
@@ -130,7 +133,7 @@ return require("packer").startup(function(use)
 			lspconfig.dockerls.setup({
 				capabilities = capabilities,
 			})
-			lspconfig.sumneko_lua.setup({
+			lspconfig.lua_ls.setup({
 				capabilities = capabilities,
 				on_attach = function(client)
 					client.server_capabilities.documentFormattingProvider = false -- Use null-ls stylua
