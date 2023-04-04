@@ -2,14 +2,14 @@
 vim.g.mapleader = " "
 
 function nnoremap(shortcut, command)
-	vim.api.nvim_set_keymap("n", shortcut, command, { noremap = true, silent = true })
+  vim.api.nvim_set_keymap("n", shortcut, command, { noremap = true, silent = true })
 end
 
 -- NvimTree
 nnoremap("<leader>n", ":NvimTreeToggle<cr>")
 
 -- LSP
-nnoremap("<leader>lf", ":lua vim.lsp.buf.format(nil, 1000)<cr>")
+nnoremap("<leader>lf", ":lua vim.lsp.buf.format()<cr>")
 nnoremap("<leader>li", ":lua vim.lsp.buf.implementation()<cr>")
 nnoremap("<leader>ld", ":lua vim.lsp.buf.definition()<cr>")
 nnoremap("<leader>ln", ":lua vim.lsp.buf.rename()<cr>")
@@ -33,3 +33,9 @@ nnoremap("<leader>gb", ":Gitsigns toggle_current_line_blame<cr>")
 
 -- Misc
 nnoremap("<leader>gf", ":e <cfile><cr>")
+
+-- Auto formatting
+vim.api.nvim_create_autocmd("BufWritePre", {
+  pattern = "*",
+  callback = function() vim.lsp.buf.format() end,
+})

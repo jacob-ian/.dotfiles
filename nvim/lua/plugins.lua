@@ -45,7 +45,7 @@ return require("packer").startup(function(use)
         filters = {
           dotfiles = false,
           custom = { ".git", "node_modules" },
-          exclude = { ".gitignore", ".github" },
+          exclude = { ".gitignore", ".gitattributes", ".github" },
         },
         git = {
           ignore = false,
@@ -117,39 +117,35 @@ return require("packer").startup(function(use)
   })
 
   use({
-    "lukas-reineke/lsp-format.nvim"
-  })
-
-  use({
     "neovim/nvim-lspconfig",
     config = function()
       local lspconfig = require("lspconfig")
       local capabilities = require("cmp_nvim_lsp").default_capabilities()
+      lspconfig.eslint.setup({
+        capabilities = capabilities,
+        settings = {
+          packageManager = "yarn"
+        }
+      })
       lspconfig.rust_analyzer.setup({
         capabilities = capabilities,
-        on_attach = require("lsp-format").on_attach,
       })
       lspconfig.terraformls.setup({
         capabilities = capabilities,
-        on_attach = require("lsp-format").on_attach,
       })
       lspconfig.metals.setup({
         capabilities = capabilities,
-        on_attach = require("lsp-format").on_attach,
       })
       lspconfig.dockerls.setup({
         capabilities = capabilities,
-        on_attach = require("lsp-format").on_attach,
       })
       lspconfig.lua_ls.setup({
         capabilities = capabilities,
-        on_attach = require("lsp-format").on_attach,
       })
       lspconfig.tsserver.setup({
         capabilities = capabilities,
         on_attach = function(client)
           client.server_capabilities.documentFormattingProvider = false -- Use null-ls prettierd
-          require("lsp-format").on_attach(client)
         end,
       })
       lspconfig.phpactor.setup({
@@ -159,14 +155,12 @@ return require("packer").startup(function(use)
         capabilities = capabilities,
         on_attach = function(client)
           client.server_capabilities.documentFormattingProvider = false -- Use null-ls prettierd
-          require("lsp-format").on_attach(client)
         end,
       })
       lspconfig.cssmodules_ls.setup({
         capabilities = capabilities,
         on_attach = function(client)
           client.server_capabilities.documentFormattingProvider = false -- Use null-ls prettierd
-          require("lsp-format").on_attach(client)
         end,
       })
       lspconfig.tailwindcss.setup({
@@ -190,14 +184,12 @@ return require("packer").startup(function(use)
         capabilities = capabilities,
         on_attach = function(client)
           client.server_capabilities.documentFormattingProvider = false -- Use null-ls prettierd
-          require("lsp-format").on_attach(client)
         end,
       })
       lspconfig.jsonls.setup({
         capabilities = capabilities,
         on_attach = function(client)
           client.server_capabilities.documentFormattingProvider = false -- Use null-ls prettierd
-          require("lsp-format").on_attach(client)
         end,
       })
       lspconfig.gopls.setup({
@@ -205,7 +197,6 @@ return require("packer").startup(function(use)
         cmd = { "gopls", "serve" },
         filetypes = { "go", "gomod" },
         root_dir = require("lspconfig/util").root_pattern("go.work", "go.mod", ".git"),
-        on_attach = require("lsp-format").on_attach,
       })
     end,
   })
@@ -218,8 +209,6 @@ return require("packer").startup(function(use)
       null_ls.setup({
         sources = {
           null_ls.builtins.formatting.prettierd,
-          null_ls.builtins.code_actions.eslint_d,
-          null_ls.builtins.diagnostics.eslint_d,
           null_ls.builtins.completion.spell.with({
             filetypes = { "markdown" },
           }),
