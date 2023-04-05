@@ -2,6 +2,6 @@
 tmux-client-*.log
 yarn/global/node_modules
 configstore
-nvim/plugin/packer_compiled.lua
+/nvim/plugin/packer_compiled.lua
 gh
 gcloud
