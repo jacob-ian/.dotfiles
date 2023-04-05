@@ -191,6 +191,16 @@ return require("packer").startup(function(use)
         on_attach = function(client)
           client.server_capabilities.documentFormattingProvider = false -- Use null-ls prettierd
         end,
+        settings = {
+          json = {
+            schemas = {
+              {
+                fileMatch = { 'package.json' },
+                url = 'https://json.schemastore.org/package.json'
+              }
+            }
+          }
+        }
       })
       lspconfig.gopls.setup({
         capabilities = capabilities,
