@@ -45,7 +45,7 @@ return require("packer").startup(function(use)
         filters = {
           dotfiles = false,
           custom = { ".git", "node_modules" },
-          exclude = { ".gitignore", ".gitattributes", ".github" },
+          exclude = { ".gitignore", ".gitkeep", ".gitattributes", ".github" },
         },
         git = {
           ignore = false,
@@ -124,7 +124,8 @@ return require("packer").startup(function(use)
       lspconfig.eslint.setup({
         capabilities = capabilities,
         settings = {
-          packageManager = "yarn"
+          packageManager = "yarn",
+          nodePath = ''
         }
       })
       lspconfig.rust_analyzer.setup({
