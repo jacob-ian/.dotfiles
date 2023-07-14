@@ -1,7 +1,7 @@
 .DS_Store
 tmux-client-*.log
 yarn/global/node_modules
+yarn/global/yarn-error.log
 configstore
-/nvim/plugin/packer_compiled.lua
 gh
 gcloud
