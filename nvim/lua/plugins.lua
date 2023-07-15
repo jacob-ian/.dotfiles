@@ -83,7 +83,7 @@ return require("packer").startup(function(use)
     requires = { "nvim-lua/plenary.nvim" },
     config = function()
       require("telescope").setup({
-        defaults = { file_ignore_patterns = { "node_modules", ".git/" } },
+        defaults = { file_ignore_patterns = { "node_modules/*" } },
       })
     end,
   })
