@@ -5,8 +5,8 @@ function nnoremap(shortcut, command)
   vim.api.nvim_set_keymap("n", shortcut, command, { noremap = true, silent = true })
 end
 
--- NvimTree
-nnoremap("<leader>n", ":NvimTreeToggle<cr>")
+-- neo-tree
+nnoremap("<leader>n", ":Neotree toggle<cr>")
 
 -- LSP
 nnoremap("<leader>lf", ":lua vim.lsp.buf.format()<cr>")

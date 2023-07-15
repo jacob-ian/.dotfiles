@@ -30,34 +30,32 @@ return require("packer").startup(function(use)
     config = "vim.cmd[[colorscheme tokyonight-night]]",
   })
 
-  use({
-    "kyazdani42/nvim-tree.lua",
+
+  use {
+    "nvim-neo-tree/neo-tree.nvim",
+    branch = "v2.x",
     requires = {
-      "kyazdani42/nvim-web-devicons",
+      "nvim-lua/plenary.nvim",
+      "MunifTanjim/nui.nvim",
     },
     config = function()
-      require("nvim-tree").setup({
-        renderer = {
-          icons = {
-            webdev_colors = true,
+      vim.cmd([[ let g:neo_tree_remove_legacy_commands = 1 ]])
+      require('neo-tree').setup({
+        enable_git_status = true,
+        filesystem = {
+          filtered_items = {
+            hide_dotfiles = false,
+            hide_gitignored = false,
+            hide_by_name = {
+              "node_modules",
+            }
           },
-        },
-        filters = {
-          dotfiles = false,
-          custom = { ".git", "node_modules" },
-          exclude = { ".gitignore", ".gitkeep", ".gitattributes", ".github", "lazygit" },
-        },
-        git = {
-          ignore = false,
-        },
-        actions = {
-          open_file = {
-            quit_on_open = true,
-          },
-        },
+          follow_current_file = true,
+          hijack_netrw_behavior = "open_default"
+        }
       })
-    end,
-  })
+    end
+  }
 
   use({
     "nvim-lualine/lualine.nvim",
