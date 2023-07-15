@@ -24,7 +24,6 @@ return require("packer").startup(function(use)
     end,
   })
 
-  -- PDE
   use({
     "folke/tokyonight.nvim",
     config = "vim.cmd[[colorscheme tokyonight-night]]",
@@ -42,6 +41,17 @@ return require("packer").startup(function(use)
       vim.cmd([[ let g:neo_tree_remove_legacy_commands = 1 ]])
       require('neo-tree').setup({
         enable_git_status = true,
+        default_component_configs = {
+          icon = {
+            folder_closed = "›",
+            folder_open = "⌄",
+            folder_empty = "-",
+            default = "∗"
+          },
+          name = {
+            trailing_slash = true
+          },
+        },
         filesystem = {
           filtered_items = {
             hide_dotfiles = false,
