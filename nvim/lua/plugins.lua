@@ -244,6 +244,7 @@ return require("packer").startup(function(use)
         ensure_installed = {
           "typescript",
           "javascript",
+          "json",
           "jsonc",
           "markdown",
           "tsx",
@@ -264,6 +265,7 @@ return require("packer").startup(function(use)
           "scala",
           "hcl",
           "terraform",
+          "rust"
         },
         highlight = {
           enable = true,
@@ -272,8 +274,6 @@ return require("packer").startup(function(use)
           enable = true,
         },
       })
-      local ft_to_parser = require("nvim-treesitter.parsers").filetype_to_parsername
-      ft_to_parser.json = "jsonc"
     end,
   })
 
@@ -309,7 +309,6 @@ return require("packer").startup(function(use)
       })
     end,
   })
-  use("sindrets/diffview.nvim")
   use("kdheepak/lazygit.nvim")
 
   if packer_bootstrap then
