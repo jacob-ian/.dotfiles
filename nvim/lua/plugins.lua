@@ -45,7 +45,7 @@ return require("packer").startup(function(use)
         filters = {
           dotfiles = false,
           custom = { ".git", "node_modules" },
-          exclude = { ".gitignore", ".gitkeep", ".gitattributes", ".github" },
+          exclude = { ".gitignore", ".gitkeep", ".gitattributes", ".github", "lazygit" },
         },
         git = {
           ignore = false,

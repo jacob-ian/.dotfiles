@@ -1,5 +1,6 @@
 .DS_Store
 tmux-client-*.log
+lazygit/state.yml
 yarn/global/node_modules
 yarn/global/yarn-error.log
 configstore
