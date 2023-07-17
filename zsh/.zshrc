@@ -69,3 +69,4 @@ export NVM_DIR=~/.nvm
 
 source ~/.zsh/aliases
 alias lzd=lazydocker
+alias uuid="uuidgen | tr '[:upper:]' '[:lower:]' | pbcopy"
