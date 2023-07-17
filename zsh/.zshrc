@@ -1,5 +1,5 @@
 # Path to your oh-my-zsh installation.
-export ZSH="/Users/jacob-ian/.oh-my-zsh"
+export ZSH="/Users/jacob/.oh-my-zsh"
 
 # Set name of the theme to load --- if set to "random", it will
 # load a random theme each time oh-my-zsh is loaded, in which case,
@@ -67,6 +67,5 @@ export PATH=~/.nvm/versions/node/v18.15.0/bin:$PATH
 export NVM_DIR=~/.nvm
 [[ -s "$NVM_DIR/nvm.sh" ]] && source "$NVM_DIR/nvm.sh" --no-use
 
-source ~/.zsh/aliases
 alias lzd=lazydocker
 alias uuid="uuidgen | tr '[:upper:]' '[:lower:]' | pbcopy"
