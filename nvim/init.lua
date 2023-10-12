@@ -8,3 +8,6 @@ require("plugins")
 
 -- Mappings
 require("mappings")
+
+-- Autocmds
+require("autocmds")
