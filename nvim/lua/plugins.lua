@@ -24,11 +24,10 @@ return require("packer").startup(function(use)
     end,
   })
 
-  use({
-    "folke/tokyonight.nvim",
-    config = "vim.cmd[[colorscheme tokyonight-night]]",
-  })
-
+  use {
+    "rebelot/kanagawa.nvim",
+    config = "vim.cmd[[colorscheme kanagawa-dragon]]"
+  }
 
   use {
     "nvim-neo-tree/neo-tree.nvim",
@@ -70,11 +69,7 @@ return require("packer").startup(function(use)
   use({
     "nvim-lualine/lualine.nvim",
     config = function()
-      require("lualine").setup({
-        options = {
-          theme = "tokyonight",
-        },
-      })
+      require("lualine").setup({})
     end,
   })
 
