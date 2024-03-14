@@ -6,3 +6,4 @@ yarn/global/yarn-error.log
 configstore
 gh
 gcloud
+tmux/plugins

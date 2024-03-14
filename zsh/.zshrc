@@ -69,3 +69,5 @@ export NVM_DIR=~/.nvm
 
 source ~/.zsh/aliases
 alias lzd=lazydocker
+
+export PATH=~/go/bin:$PATH
