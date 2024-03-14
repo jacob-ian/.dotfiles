@@ -124,20 +124,17 @@ return require("packer").startup(function(use)
     config = function()
       local lspconfig = require("lspconfig")
       local capabilities = require("cmp_nvim_lsp").default_capabilities()
-      lspconfig.eslint.setup({
+      lspconfig.htmx.setup({
         capabilities = capabilities,
-        settings = {
-          packageManager = "yarn",
-          nodePath = ''
-        }
+        filetypes = { "html", "templ" },
+      })
+      lspconfig.clangd.setup({
+        capabilities = capabilities,
       })
       lspconfig.rust_analyzer.setup({
         capabilities = capabilities,
       })
       lspconfig.terraformls.setup({
-        capabilities = capabilities,
-      })
-      lspconfig.metals.setup({
         capabilities = capabilities,
       })
       lspconfig.dockerls.setup({
@@ -168,6 +165,8 @@ return require("packer").startup(function(use)
         end,
       })
       lspconfig.tailwindcss.setup({
+        capabilities = capabilities,
+        init_options = { userLanguages = { templ = "html" } },
         settings = {
           tailwindCSS = {
             classAttributes = { "class", "className", "classList", "ngClass" },
@@ -189,22 +188,13 @@ return require("packer").startup(function(use)
         on_attach = function(client)
           client.server_capabilities.documentFormattingProvider = false -- Use null-ls prettierd
         end,
+        filetypes = { "html", "templ" },
       })
       lspconfig.jsonls.setup({
         capabilities = capabilities,
         on_attach = function(client)
           client.server_capabilities.documentFormattingProvider = false -- Use null-ls prettierd
         end,
-        settings = {
-          json = {
-            schemas = {
-              {
-                fileMatch = { 'package.json' },
-                url = 'https://json.schemastore.org/package.json'
-              }
-            }
-          }
-        }
       })
       lspconfig.gopls.setup({
         capabilities = capabilities,
@@ -260,7 +250,8 @@ return require("packer").startup(function(use)
           "scala",
           "hcl",
           "terraform",
-          "rust"
+          "rust",
+          "templ"
         },
         highlight = {
           enable = true,
@@ -268,8 +259,15 @@ return require("packer").startup(function(use)
         indent = {
           enable = true,
         },
+        additional_vim_regex_highlighting = false,
       })
     end,
+  })
+
+  vim.filetype.add({
+    extension = {
+      templ = "templ",
+    },
   })
 
   use({
