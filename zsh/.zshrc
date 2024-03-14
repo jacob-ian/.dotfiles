@@ -67,7 +67,6 @@ export PATH=~/.nvm/versions/node/v18.15.0/bin:$PATH
 export NVM_DIR=~/.nvm
 [[ -s "$NVM_DIR/nvm.sh" ]] && source "$NVM_DIR/nvm.sh" --no-use
 
-source ~/.zsh/aliases
 alias lzd=lazydocker
 
 export PATH=~/go/bin:$PATH
