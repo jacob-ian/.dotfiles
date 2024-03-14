@@ -56,7 +56,7 @@ ZSH_THEME="jacobmatthews"
 # Custom plugins may be added to $ZSH_CUSTOM/plugins/
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
-plugins=(git docker)
+plugins=(git docker nvm)
 
 source $ZSH/oh-my-zsh.sh
 
@@ -69,3 +69,6 @@ export NVM_DIR=~/.nvm
 
 alias lzd=lazydocker
 alias uuid="uuidgen | tr '[:upper:]' '[:lower:]' | pbcopy"
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+
+export PATH=~/go/bin:$PATH

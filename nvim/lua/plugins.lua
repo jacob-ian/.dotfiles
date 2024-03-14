@@ -222,7 +222,9 @@ return require("packer").startup(function(use)
       local null_ls = require("null-ls")
       null_ls.setup({
         sources = {
-          null_ls.builtins.formatting.prettierd,
+          null_ls.builtins.formatting.prettierd.with({
+            extra_filetypes = { "htmldjango" },
+          }),
           null_ls.builtins.completion.spell.with({
             filetypes = { "markdown" },
           }),
