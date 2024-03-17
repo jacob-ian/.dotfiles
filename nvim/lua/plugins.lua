@@ -192,9 +192,6 @@ return require("packer").startup(function(use)
       })
       lspconfig.jsonls.setup({
         capabilities = capabilities,
-        on_attach = function(client)
-          client.server_capabilities.documentFormattingProvider = false -- Use null-ls prettierd
-        end,
       })
       lspconfig.gopls.setup({
         capabilities = capabilities,
