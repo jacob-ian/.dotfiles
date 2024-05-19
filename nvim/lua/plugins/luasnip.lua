@@ -8,6 +8,6 @@ return {
       update_events = "TextChanged,TextChangedI",
     }
     local loader = require "luasnip.loaders.from_lua"
-    loader.load { paths = { "~/.config/nvim/snippets" } }
+    loader.lazy_load { paths = { "~/.config/nvim/snippets" } }
   end,
 }
