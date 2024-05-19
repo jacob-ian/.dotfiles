@@ -20,7 +20,7 @@ return {
       vim.keymap.set("n", "<leader>gg", neogit.open)
       vim.keymap.set("n", "<leader>gb", telescope.git_branches)
       vim.keymap.set("n", "<leader>gp", function()
-        neogit.action("pull", "pull", { "--verbose" })
+        neogit.open { "pull" }
       end)
     end,
   },
