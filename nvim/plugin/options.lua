@@ -18,5 +18,5 @@ opt.hlsearch = false
 opt.ignorecase = true
 opt.smartcase = true
 
-opt.colorcolumn = "100"
+opt.colorcolumn = "90"
 opt.signcolumn = "yes"
