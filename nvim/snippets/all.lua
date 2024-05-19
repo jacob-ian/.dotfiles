@@ -1,0 +1,20 @@
+local ls = require "luasnip"
+
+local s = ls.snippet
+local f = ls.function_node
+
+local random = math.random
+
+return {
+  s(
+    "uuid",
+    f(function()
+      math.randomseed(os.time())
+      local template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
+      return string.gsub(template, "[xy]", function(c)
+        local v = (c == "x") and random(0, 0xf) or random(8, 0xb)
+        return string.format("%x", v)
+      end)
+    end)
+  ),
+}
