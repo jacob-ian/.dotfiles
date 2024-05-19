@@ -1,0 +1,20 @@
+{
+    "workspace.library": [
+        "/Users/jacob-ian/.local/share/nvim/lazy/neodev.nvim/types/stable",
+        "/opt/homebrew/Cellar/neovim/0.9.1/share/nvim/runtime/lua",
+        "/Users/jacob-ian/.local/share/nvim/lazy/cmp-buffer/lua",
+        "/Users/jacob-ian/.local/share/nvim/lazy/LuaSnip/lua",
+        "/Users/jacob-ian/.local/share/nvim/lazy/lazy.nvim/lua",
+        "/Users/jacob-ian/.local/share/nvim/lazy/nvim-cmp/lua",
+        "/Users/jacob-ian/.local/share/nvim/lazy/cmp_luasnip/lua",
+        "/Users/jacob-ian/.local/share/nvim/lazy/nvim-lspconfig/lua",
+        "/Users/jacob-ian/.local/share/nvim/lazy/cmp-cmdline/lua",
+        "/Users/jacob-ian/.local/share/nvim/lazy/SchemaStore.nvim/lua",
+        "/Users/jacob-ian/.local/share/nvim/lazy/cmp-nvim-lsp/lua",
+        "/Users/jacob-ian/.local/share/nvim/lazy/cmp-path/lua",
+        "/Users/jacob-ian/.local/share/nvim/lazy/conform.nvim/lua",
+        "/Users/jacob-ian/.local/share/nvim/lazy/neodev.nvim/lua",
+        "/Users/jacob-ian/.config/nvim/lua",
+        "${3rd}/luv/library"
+    ]
+}

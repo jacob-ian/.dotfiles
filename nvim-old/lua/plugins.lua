@@ -124,6 +124,12 @@ return require("packer").startup(function(use)
     config = function()
       local lspconfig = require("lspconfig")
       local capabilities = require("cmp_nvim_lsp").default_capabilities()
+      lspconfig.beancount.setup({
+        capabilities = capabilities,
+        init_options = {
+          journal_file = "~/Documents/Finances/Ledger/journal.beancount"
+        },
+      })
       lspconfig.htmx.setup({
         capabilities = capabilities,
         filetypes = { "html", "templ" },
@@ -248,7 +254,8 @@ return require("packer").startup(function(use)
           "hcl",
           "terraform",
           "rust",
-          "templ"
+          "templ",
+          "beancount"
         },
         highlight = {
           enable = true,
