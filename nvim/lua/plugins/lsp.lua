@@ -49,7 +49,10 @@ return {
         filetypes = { "go", "gomod" },
         root_dir = require("lspconfig/util").root_pattern("go.work", "go.mod", ".git"),
       }
-      lspconfig.lua_ls.setup { capabilities = capabilities }
+      lspconfig.lua_ls.setup {
+        capabilities = capabilities,
+        settings = { Lua = { diagnostics = { globals = { "vim" } } } },
+      }
       lspconfig.jsonls.setup {
         capabilities = capabilities,
         settings = {

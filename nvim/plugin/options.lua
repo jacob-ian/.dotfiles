@@ -11,10 +11,12 @@ opt.expandtab = true
 
 opt.number = true
 opt.scrolloff = 16
-opt.signcolumn = "yes"
 opt.wrap = false
 opt.cursorline = true
 opt.incsearch = true
 opt.hlsearch = false
 opt.ignorecase = true
 opt.smartcase = true
+
+opt.colorcolumn = "100"
+opt.signcolumn = "yes"
