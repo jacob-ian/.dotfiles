@@ -6,3 +6,4 @@ Currently using alacritty rather than kitty.
 
 Recently rewritten to use lazy.nvim as the plugin manager.
 
+
