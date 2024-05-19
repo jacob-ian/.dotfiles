@@ -2,6 +2,7 @@ return {
   {
     "neovim/nvim-lspconfig",
     dependencies = {
+      "folke/neodev.nvim",
       "b0o/SchemaStore.nvim",
       "stevearc/conform.nvim",
     },
@@ -11,8 +12,9 @@ return {
         capabilities = require("cmp_nvim_lsp").default_capabilities()
       end
 
-      local lspconfig = require "lspconfig"
+      require("neodev").setup {}
 
+      local lspconfig = require "lspconfig"
       lspconfig.beancount.setup {
         capabilities = capabilities,
         init_options = { journal_file = "~/Documents/Finances/Ledger/journal.beancount" },
