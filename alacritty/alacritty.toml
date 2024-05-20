@@ -1,0 +1,37 @@
+import = [
+  "~/.config/alacritty/themes/everforest_dark_medium.toml"
+]
+
+[env]
+TERM = "xterm-256color"
+
+[window]
+decorations = "buttonless"
+dynamic_padding = true
+
+[window.dimensions]
+columns = 130
+lines = 40 
+
+[window.padding]
+x = 5
+y = 2
+
+[font]
+size = 18
+
+[font.bold]
+family = "Iosevka"
+style = "Bold"
+
+[font.bold_italic]
+family = "Iosevka"
+style = "Bold Italic"
+
+[font.italic]
+family = "Iosevka"
+style = "Italic"
+
+[font.normal]
+family = "Iosevka"
+style = "Regular"

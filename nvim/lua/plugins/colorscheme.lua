@@ -1,12 +1,13 @@
 return {
   {
-    "projekt0n/github-nvim-theme",
+    "neanias/everforest-nvim",
     lazy = false,
     priority = 1000,
     config = function()
-      require("github-theme").setup()
-      vim.cmd "colorscheme github_dark_high_contrast"
+      require("everforest").setup()
+      vim.cmd "colorscheme everforest"
     end,
   },
+  "projekt0n/github-nvim-theme",
   "rebelot/kanagawa.nvim",
 }
