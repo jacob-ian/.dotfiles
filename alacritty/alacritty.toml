@@ -15,7 +15,7 @@ lines = 40
 
 [window.padding]
 x = 5
-y = 2
+y = 5
 
 [font]
 size = 18
