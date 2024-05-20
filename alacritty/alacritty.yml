@@ -13,7 +13,7 @@ window:
     columns: 130
 
 font:
-  size: 16
+  size: 18 
   normal:
     family: Iosevka 
     style: Regular
