@@ -23,6 +23,7 @@ return {
       lspconfig.terraformls.setup { capabilities = capabilities }
       lspconfig.tsserver.setup { capabilities = capabilities }
       lspconfig.cssls.setup { capabilities = capabilities }
+      lspconfig.dockerls.setup { capabilities = capabilities }
       lspconfig.tailwindcss.setup {
         capabilities = capabilities,
         init_options = { userLanguages = { templ = "html" } },
