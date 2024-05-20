@@ -17,7 +17,7 @@ return {
       local lspconfig = require "lspconfig"
       lspconfig.beancount.setup {
         capabilities = capabilities,
-        init_options = { journal_file = "~/Documents/Finances/Ledger/journal.beancount" },
+        init_options = { journal_file = "~/acc/journal.beancount" },
       }
       lspconfig.rust_analyzer.setup { capabilities = capabilities }
       lspconfig.terraformls.setup { capabilities = capabilities }
