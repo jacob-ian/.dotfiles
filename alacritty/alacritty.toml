@@ -15,23 +15,23 @@ lines = 40
 
 [window.padding]
 x = 5
-y = 5
+y = 2 
 
 [font]
 size = 18
 
 [font.bold]
-family = "Iosevka"
+family = "BlexMono Nerd Font"
 style = "Bold"
 
 [font.bold_italic]
-family = "Iosevka"
+family = "BlexMono Nerd Font"
 style = "Bold Italic"
 
 [font.italic]
-family = "Iosevka"
-style = "Italic"
+family = "BlexMono Nerd Font"
+style = "Regular Italic"
 
 [font.normal]
-family = "Iosevka"
+family = "BlexMono Nerd Font"
 style = "Regular"
