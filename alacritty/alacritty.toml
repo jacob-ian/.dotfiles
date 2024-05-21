@@ -18,21 +18,21 @@ x = 5
 y = 2 
 
 [font]
-size = 18
+size = 18 
 offset = { x=0, y=0 }
 
 [font.bold]
-family = "0xProto Nerd Font Mono"
+family = "SauceCodePro Nerd Font Mono"
 style = "Bold"
 
 [font.bold_italic]
-family = "0xProto Nerd Font Mono"
+family = "SauceCodePro Nerd Font Mono"
 style = "Bold Italic"
 
 [font.italic]
-family = "0xProto Nerd Font Mono"
-style = "Regular Italic"
+family = "SauceCodePro Nerd Font Mono"
+style = "Medium Italic"
 
 [font.normal]
-family = "0xProto Nerd Font Mono"
-style = "Regular"
+family = "SauceCodePro Nerd Font Mono"
+style = "Medium"
