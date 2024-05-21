@@ -15,6 +15,7 @@ return {
       require("neodev").setup {}
 
       local lspconfig = require "lspconfig"
+      vim.filetype.add { extension = { beancount = "beancount" } }
       lspconfig.beancount.setup {
         capabilities = capabilities,
         init_options = { journal_file = "~/acc/journal.beancount" },
