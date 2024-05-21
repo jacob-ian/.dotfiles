@@ -19,6 +19,7 @@ y = 2
 
 [font]
 size = 18
+offset = { x=1, y=0 }
 
 [font.bold]
 family = "BlexMono Nerd Font"
