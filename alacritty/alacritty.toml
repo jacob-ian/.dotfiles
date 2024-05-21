@@ -18,7 +18,7 @@ x = 2
 y = 2 
 
 [font]
-size = 18 
+size = 17
 offset = { x=0, y=0 }
 
 [font.bold]
