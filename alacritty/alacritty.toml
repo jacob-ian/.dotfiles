@@ -19,20 +19,20 @@ y = 2
 
 [font]
 size = 18
-offset = { x=1, y=0 }
+offset = { x=0, y=0 }
 
 [font.bold]
-family = "BlexMono Nerd Font"
+family = "0xProto Nerd Font Mono"
 style = "Bold"
 
 [font.bold_italic]
-family = "BlexMono Nerd Font"
+family = "0xProto Nerd Font Mono"
 style = "Bold Italic"
 
 [font.italic]
-family = "BlexMono Nerd Font"
+family = "0xProto Nerd Font Mono"
 style = "Regular Italic"
 
 [font.normal]
-family = "BlexMono Nerd Font"
+family = "0xProto Nerd Font Mono"
 style = "Regular"
