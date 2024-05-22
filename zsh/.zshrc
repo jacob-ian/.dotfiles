@@ -69,6 +69,7 @@ export NVM_DIR=~/.nvm
 
 alias lzd=lazydocker
 
+export PATH=/usr/local/go/bin:$PATH
 export PATH=~/go/bin:$PATH
 export PATH=~/.yarn/bin:$PATH
 export BEANCOUNT_JOURNAL=~/Documents/Finances/Ledger/journal.beancount

@@ -6,7 +6,7 @@
 !/lazygit/
 !/lazygit/*
 !/nvim/
-!/nvim/*
+!/nvim/**/*
 !/sway/
 !/sway/*
 !/tmux/
