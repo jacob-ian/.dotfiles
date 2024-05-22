@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "@fsouza/prettierd": "^0.25.3",
     "@nestjs/cli": "^9.1.8",
     "@tailwindcss/language-server": "^0.0.10",
     "cssmodules-language-server": "^1.2.1",
