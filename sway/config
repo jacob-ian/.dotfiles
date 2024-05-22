@@ -84,6 +84,13 @@ output * bg /usr/share/backgrounds/sway/Sway_Wallpaper_Blue_1920x1080.png fill
     # Exit sway (logs you out of your Wayland session)
     bindsym $mod+Shift+e exec swaynag -t warning -m 'You pressed the exit shortcut. Do you really want to exit sway? This will end your Wayland session.' -B 'Yes, exit sway' 'swaymsg exit'
 
+    # Appearance
+    gaps inner 10
+    default_border none
+    default_floating_border none
+    titlebar_padding 1
+    titlebar_border_thickness 0
+
     # Notifications
     exec mako
 
@@ -212,21 +219,8 @@ mode "resize" {
 bindsym $mod+r mode "resize"
 
 #
-# Status Bar:
+# Status Bar
 #
-# Read `man 5 sway-bar` for more information about this section.
-bar {
-    position top
-
-    # When the status_command prints a new line to stdout, swaybar updates.
-    # The default just shows the current date and time.
-    status_command while date +'%Y-%m-%d %X'; do sleep 1; done
-
-    colors {
-        statusline #ffffff
-        background #323232
-        inactive_workspace #32323200 #32323200 #5c5c5c
-    }
-}
+bar swaybar_command waybar
 
 include /etc/sway/config.d/*

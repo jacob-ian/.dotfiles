@@ -61,7 +61,7 @@ plugins=(git docker)
 source $ZSH/oh-my-zsh.sh
 
 # Add default node to path
-export PATH=~/.nvm/versions/node/v18.15.0/bin:$PATH
+export PATH=~/.nvm/versions/node/v20.13.1/bin:$PATH
 
 # Load NVM
 export NVM_DIR=~/.nvm
