@@ -85,7 +85,7 @@ output * bg /home/jacob/Downloads/waves.jpg fill
     bindsym $mod+Shift+e exec swaynag -t warning -m 'You pressed the exit shortcut. Do you really want to exit sway? This will end your Wayland session.' -B 'Yes, exit sway' 'swaymsg exit'
 
     # Appearance
-    gaps inner 10
+    gaps inner 20
     default_border none
     default_floating_border none
     titlebar_padding 1
