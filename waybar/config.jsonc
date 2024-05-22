@@ -19,8 +19,6 @@
     "mpd",
     "pulseaudio",
     "network",
-    "cpu",
-    "memory",
     "battery",
     "battery#bat2",
     "clock",
@@ -189,10 +187,10 @@
   "pulseaudio": {
     // "scroll-step": 1, // %, can be a float
     "format": "{volume}% {icon} {format_source}",
-    "format-bluetooth": "{volume}% {icon} {format_source}",
-    "format-bluetooth-muted": " {icon} {format_source}",
+    "format-bluetooth": "{format_source}  {volume}% {icon}",
+    "format-bluetooth-muted": "{format_source}   {icon}",
     "format-muted": " {format_source}",
-    "format-source": "{volume}% ",
+    "format-source": "",
     "format-source-muted": "",
     "format-icons": {
       "headphone": "",
