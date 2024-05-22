@@ -102,8 +102,7 @@ output * bg /home/jacob/Downloads/waves.jpg fill
     bindsym XF86AudioPrev exec playerctl previous ; exec notify-send -u low -t 1000 "Media Previous"
 
     # Bluetooth
-
-
+    exec blueman
 
 #
 # Moving around:
