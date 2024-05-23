@@ -1,13 +1,13 @@
 return {
   {
-    "neanias/everforest-nvim",
+    "AlexvZyl/nordic.nvim",
     lazy = false,
     priority = 1000,
     config = function()
-      require("everforest").setup {}
-      vim.cmd "colorscheme everforest"
+      require("nordic").load {}
     end,
   },
+  "neanias/everforest-nvim",
   "projekt0n/github-nvim-theme",
   "rebelot/kanagawa.nvim",
 }

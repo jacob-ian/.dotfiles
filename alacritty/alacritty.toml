@@ -1,5 +1,5 @@
 import = [
-  "~/.config/alacritty/themes/everforest_dark_medium.toml"
+  "~/.config/alacritty/themes/nordic.toml"
 ]
 
 [env]
