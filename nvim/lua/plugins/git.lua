@@ -13,7 +13,7 @@ return {
           diffview = true,
           telescope = true,
         },
-        console_timeout = 3000,
+        console_timeout = 10000,
         auto_show_console = false
       }
 
