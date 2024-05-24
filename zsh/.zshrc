@@ -61,7 +61,7 @@ plugins=(git docker)
 source $ZSH/oh-my-zsh.sh
 
 # Add default node to path
-export PATH=~/.nvm/versions/node/v20.13.1/bin:$PATH
+export PATH=~/.nvm/versions/node/v18.20.3/bin:$PATH
 
 # Load NVM
 export NVM_DIR=~/.nvm
@@ -73,3 +73,6 @@ export PATH=/usr/local/go/bin:$PATH
 export PATH=~/go/bin:$PATH
 export PATH=~/.yarn/bin:$PATH
 export BEANCOUNT_JOURNAL=~/Documents/Finances/Ledger/journal.beancount
+
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+[ -s "~/.tfenv/bin" ] && export PATH="$HOME/.tfenv/bin:$PATH"

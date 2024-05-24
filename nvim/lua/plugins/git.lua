@@ -13,6 +13,8 @@ return {
           diffview = true,
           telescope = true,
         },
+        console_timeout = 3000,
+        auto_show_console = false
       }
 
       local telescope = require "telescope.builtin"
