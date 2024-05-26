@@ -21,3 +21,5 @@
 !/.gitignore
 !/waybar/
 !/waybar/*
+!/pop-shell/
+!/pop-shell/*
