@@ -1,6 +1,8 @@
 *
 !/alacritty/
 !/alacritty/*
+!/alacritty/themes/
+!/alacritty/themes/*
 !/lazydocker/
 !/lazydocker/*
 !/lazygit/
