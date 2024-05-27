@@ -1,13 +1,16 @@
 return {
   {
-    "ellisonleao/gruvbox.nvim",
+    "sainnhe/gruvbox-material",
     lazy = false,
     priority = 1000,
     config = function()
-      vim.o.background = "dark"
-      vim.cmd "colorscheme gruvbox"
+      vim.g.gruvbox_material_enable_italic = true
+      vim.g.background = "dark"
+      vim.g.gruvbox_material_background = "medium"
+      vim.cmd "colorscheme gruvbox-material"
     end,
   },
+  "ellisonleao/gruvbox.nvim",
   "navarasu/onedark.nvim",
   "AlexvZyl/nordic.nvim",
   "neanias/everforest-nvim",
