@@ -7,7 +7,7 @@ return {
       vim.g.gruvbox_material_enable_italic = true
       vim.g.gruvbox_material_enable_bold = true
       vim.g.background = "dark"
-      vim.g.gruvbox_material_background = "medium"
+      vim.g.gruvbox_material_background = "hard"
       vim.cmd "colorscheme gruvbox-material"
     end,
   },
