@@ -6,4 +6,8 @@ return {
       require("tmux").setup()
     end,
   },
+  {
+    "tpope/vim-obsession",
+    lazy = false,
+  },
 }
