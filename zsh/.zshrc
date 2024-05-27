@@ -72,7 +72,7 @@ alias lzd=lazydocker
 export PATH=/usr/local/go/bin:$PATH
 export PATH=~/go/bin:$PATH
 export PATH=~/.yarn/bin:$PATH
+export PATH="$HOME/.tfenv/bin:$PATH"
 export BEANCOUNT_JOURNAL=~/Documents/Finances/Ledger/journal.beancount
 
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
-[ -s "~/.tfenv/bin" ] && export PATH="$HOME/.tfenv/bin:$PATH"
