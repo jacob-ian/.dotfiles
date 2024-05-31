@@ -36,6 +36,7 @@ input * {
 output * bg /home/jacob/Downloads/interstellar-black-hole.jpg fill
 
 ## Appearance
+font pango:Source Code Pro Regular 15
 gaps inner 20
 default_border none
 default_floating_border none
@@ -54,6 +55,9 @@ bindsym $mod+B exec $browser
 
 # Open launcher 
 bindsym $mod+Space exec $menu
+
+# Screenshot
+bindsym $mod+minus exec grimshot save anything
 
 # Dragging modifier
 floating_modifier $mod normal
@@ -133,6 +137,7 @@ for_window [app_id = $browser ] inhibit_idle fullscreen
 for_window [app_id = "blueman"] floating enable, resize set width 500 height 300, move position cursor, move left 100 px, move down 50 px
 for_window [app_id = "pavucontrol"] floating enable, resize set width 800 height 500, move position cursor, move down 50 px
 for_window [app_id = "calculator"] floating enable
+for_window [app_id = $brower] floating disable
 for_window [window_type = "dialog"] floating enable
 for_window [window_role = "dialog"] floating enable
 for_window [window_role = "pop-up"] floating enable
