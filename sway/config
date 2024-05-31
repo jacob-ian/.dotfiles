@@ -64,7 +64,7 @@ bindsym $mod+Return exec $term
 bindsym $mod+B exec $browser
 
 # Open launcher 
-bindsym $mod+Space exec $menu
+bindsym $mod+slash exec $menu
 
 # Screenshot
 bindsym $mod+minus exec XDG_SCREENSHOTS_DIR=~/Pictures/Screenshots grimshot save area
