@@ -43,14 +43,17 @@ titlebar_padding 1
 titlebar_border_thickness 0
 
 ## Key bindings
-# Open terminal
-bindsym $mod+Return exec $term
-
 # Kill window
 bindsym $mod+q kill
 
+# Open terminal
+bindsym $mod+Return exec $term
+
+# Open browser
+bindsym $mod+B exec $browser
+
 # Open launcher 
-bindsym $mod+d exec $menu
+bindsym $mod+Space exec $menu
 
 # Dragging modifier
 floating_modifier $mod normal
@@ -109,7 +112,7 @@ bindsym $mod+f fullscreen
 bindsym $mod+Shift+space floating toggle
 
 # Toggle floating focus
-bindsym $mod+space focus mode_toggle
+bindsym $mod+Control+space focus mode_toggle
 
 # Resizing containers:
 mode "resize" {
