@@ -5,9 +5,9 @@
 }
 
 window#waybar {
-  background-color: rgba(43, 48, 59, 0.2);
+  background-color: #1d2021;
   border-bottom: none;
-  color: #ffffff;
+  color: #d4be98;
   transition-property: background-color;
   transition-duration: .5s;
 }

@@ -20,16 +20,22 @@ bar swaybar_command waybar
 ## Startup apps
 # Notifications
 exec mako
+
 # Bluetooth manager
-#exec blueman
+exec blueman
+exec_always --no-startup-id pactl load-module module-switch-on-connect
+
 # Display manager
 exec kanshi
+
+# XDG
+exec /usr/lib/xdg-desktop-portal-wlr
 
 ## Inputs
 # Keyboard speed!
 input * {
-  repeat_delay 350
-  repeat_rate 25
+  repeat_delay 300
+  repeat_rate 30
 }
 
 ## Outputs 
@@ -61,13 +67,15 @@ bindsym $mod+q kill
 bindsym $mod+Return exec $term
 
 # Open browser
-bindsym $mod+B exec $browser
+bindsym $mod+b exec $browser
+bindsym $mod+Shift+b exec $browser --profile-directory="Profile 2"
 
 # Open launcher 
 bindsym $mod+slash exec $menu
 
 # Screenshot
 bindsym $mod+minus exec XDG_SCREENSHOTS_DIR=~/Pictures/Screenshots grimshot --notify save area
+bindsym $mod+equal exec wf-recorder -g "$(slurp)"
 
 # Dragging modifier
 floating_modifier $mod normal
@@ -144,14 +152,13 @@ bindsym $mod+r mode "resize"
 ## Extras!
 # Floating defaults
 for_window [app_id = $browser ] inhibit_idle fullscreen
-for_window [app_id = "blueman"] floating enable, resize set width 500 height 300, move position cursor, move left 100 px, move down 50 px
 for_window [app_id = "pavucontrol"] floating enable, resize set width 800 height 500, move position cursor, move down 50 px
 for_window [app_id = "calculator"] floating enable
-for_window [app_id = $brower] floating disable
 for_window [window_type = "dialog"] floating enable
 for_window [window_role = "dialog"] floating enable
 for_window [window_role = "pop-up"] floating enable
 for_window [window_role = "bubble"] floating enable
+for_window [class = "Brave-browser"] floating disable
 
 # Fedora
 include /etc/sway/config.d/*
