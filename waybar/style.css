@@ -1,7 +1,7 @@
 * {
   /* `otf-font-awesome` is required to be installed for icons */
   font-family: SauceCodePro Nerd Font, FontAwesome, monospace;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 window#waybar {
@@ -50,7 +50,7 @@ button:hover {
 #workspaces button {
   padding: 0 5px;
   background-color: transparent;
-  color: #ffffff;
+  color: #d4be98;
 }
 
 #workspaces button:hover {
@@ -91,7 +91,7 @@ button:hover {
 #power-profiles-daemon,
 #mpd {
   padding: 0 10px;
-  color: #ffffff;
+  color: #d4be98;
 }
 
 #window,

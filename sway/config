@@ -28,8 +28,8 @@ exec_always --no-startup-id pactl load-module module-switch-on-connect
 # Display manager
 exec kanshi
 
-# XDG
-exec /usr/lib/xdg-desktop-portal-wlr
+# Screensharing, etc.
+exec_always --no-startup-id /usr/lib/xdg-desktop-portal-wlr
 
 ## Inputs
 # Keyboard speed!

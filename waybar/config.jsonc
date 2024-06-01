@@ -146,8 +146,8 @@
       "warning": 30,
       "critical": 15
     },
-    "format": "{icon} {capacity}%",
-    "format-full": "{icon} {capacity}%",
+    "format": "{icon}  {capacity}%",
+    "format-full": "{icon}  {capacity}%",
     "format-charging": " {capacity}%",
     "format-plugged": " {capacity}%",
     "format-alt": "{time} {icon}",
@@ -177,7 +177,7 @@
   },
   "network": {
     // "interface": "wlp2*", // (Optional) To force the use of this interface
-    "format-wifi": " {ipaddr}",
+    "format-wifi": "  {ipaddr}",
     "format-ethernet": "{ipaddr}/{cidr} ",
     "tooltip-format": "{ifname} via {gwaddr} ",
     "format-linked": "{ifname} (No IP) ",
@@ -186,9 +186,9 @@
   },
   "pulseaudio": {
     // "scroll-step": 1, // %, can be a float
-    "format": "{icon} {volume}%",
-    "format-bluetooth": "{icon}  {volume}%",
-    "format-bluetooth-muted": "{icon}  ",
+    "format": "{icon}  {desc} {volume}%",
+    "format-bluetooth": "{icon}  {desc} {volume}%",
+    "format-bluetooth-muted": "{desc} {icon} ",
     "format-muted": "{icon} ",
     "format-source": "",
     "format-source-muted": "",
