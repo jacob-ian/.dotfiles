@@ -19,7 +19,7 @@ bar swaybar_command waybar
 
 ## Startup apps
 # Notifications
-exec mako
+exec mako --default-timeout 3000
 
 # Bluetooth manager
 exec blueman

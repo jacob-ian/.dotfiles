@@ -16,7 +16,6 @@
     "sway/window"
   ],
   "modules-right": [
-    "mpd",
     "pulseaudio",
     "network",
     "battery",
@@ -104,7 +103,7 @@
     // "timezone": "America/New_York",
     "tooltip-format": "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>",
     "format-alt": "{:%Y-%m-%d}",
-    "format": "{:%a %d %b  %I:%M %p}"
+    "format": "{:%a %d %b  %OI:%M %p}"
   },
   "cpu": {
     "format": "{usage}% ",
@@ -186,8 +185,8 @@
   },
   "pulseaudio": {
     // "scroll-step": 1, // %, can be a float
-    "format": "{icon}  {desc} {volume}%",
-    "format-bluetooth": "{icon}  {desc} {volume}%",
+    "format": "{icon} {volume}%  {desc}",
+    "format-bluetooth": "{icon} {volume}%  {desc}",
     "format-bluetooth-muted": "{desc} {icon} ",
     "format-muted": "{icon} ",
     "format-source": "",
