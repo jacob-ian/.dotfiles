@@ -26,7 +26,7 @@ exec blueman
 exec_always --no-startup-id pactl load-module module-switch-on-connect
 
 # Display manager
-exec kanshi
+exec_always kanshi
 
 # Screensharing, etc.
 exec_always --no-startup-id /usr/lib/xdg-desktop-portal-wlr
