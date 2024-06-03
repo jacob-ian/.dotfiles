@@ -228,7 +228,7 @@
     // "exec": "$HOME/.config/waybar/mediaplayer.py --player spotify 2> /dev/null" // Filter player based on name
   },
   "custom/screencast": {
-    "format": "󰑊 Stop Recording",
+    "format": "󰙧 Stop Recording",
     "interval": 1,
     "exec": "pgrep wf-recorder",
     "exec-if": "pgrep wf-recorder",
