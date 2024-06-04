@@ -68,7 +68,7 @@ bindsym $mod+q kill
 bindsym $mod+Return exec $term
 
 # Open browser
-bindsym $mod+b exec $browser
+bindsym $mod+b exec $browser --profile-directory="Default"
 bindsym $mod+Shift+b exec $browser --profile-directory="Profile 2"
 
 # Open launcher 
