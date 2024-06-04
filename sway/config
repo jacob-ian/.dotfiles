@@ -19,11 +19,11 @@ bar swaybar_command waybar
 
 ## Startup apps
 # Notifications
-exec mako --default-timeout 3000
+exec_always mako -c ~/.config/mako/config
 exec_always swayosd-server
 
 # Bluetooth manager
-exec blueman
+exec_always blueman
 exec_always --no-startup-id pactl load-module module-switch-on-connect
 
 # Display manager
