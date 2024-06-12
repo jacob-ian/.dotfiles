@@ -9,14 +9,14 @@
     "idle_inhibitor",
     "sway/workspaces",
     "sway/mode",
-    "sway/scratchpad",
-    "custom/media"
+    "sway/scratchpad"
   ],
   "modules-center": [
     "sway/window"
   ],
   "modules-right": [
     "custom/screencast",
+    "custom/media",
     "pulseaudio",
     "network",
     "battery",
@@ -216,16 +216,15 @@
     "on-click": "pavucontrol"
   },
   "custom/media": {
-    "format": "{icon} {}",
+    "format": "{}",
     "return-type": "json",
     "max-length": 40,
     "format-icons": {
       "spotify": "",
-      "default": "🎜"
+      "default": "󰐍"
     },
     "escape": true,
-    "exec": "$HOME/.config/waybar/mediaplayer.py 2> /dev/null" // Script in resources folder
-    // "exec": "$HOME/.config/waybar/mediaplayer.py --player spotify 2> /dev/null" // Filter player based on name
+    "exec": "$HOME/.config/waybar/mediaplayer.py 2> /dev/null" // "exec": "$HOME/.config/waybar/mediaplayer.py --player spotify 2> /dev/null" // Filter player based on name
   },
   "custom/screencast": {
     "format": "󰙧 Stop Recording",
