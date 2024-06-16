@@ -76,7 +76,7 @@ bindsym $mod+slash exec $menu
 
 # Screenshot
 bindsym $mod+minus exec XDG_SCREENSHOTS_DIR=~/Pictures/Screenshots grimshot --notify save area
-bindsym $mod+equal exec wf-recorder -g "$(slurp)" -f "$HOME/Videos/Screencasts/Screencast from $(date '+%Y-%m-%d %H-%M-%S').mkv"
+bindsym $mod+equal exec wf-recorder -g "$(slurp)" -f "$HOME/Videos/Screencasts/Screencast from $(date '+%Y-%m-%d %H-%M-%S').mp4"
 bindsym $mod+Shift+equal exec killall -s SIGINT wf-recorder
 
 # Dragging modifier
