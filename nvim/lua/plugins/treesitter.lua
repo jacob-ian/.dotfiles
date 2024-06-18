@@ -29,6 +29,7 @@ return {
           "terraform",
           "templ",
           "beancount",
+          "comment",
         },
         highlight = {
           enable = true,
