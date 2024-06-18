@@ -13,6 +13,7 @@ set $term alacritty
 set $menu fuzzel
 set $browser brave-browser
 set $font "SauceCodePro Nerd Font Regular"
+set $wallpaper /home/jacob/Downloads/interstellar-black-hole.jpg
 
 ## Status Bar
 bar swaybar_command waybar
@@ -41,7 +42,7 @@ input * {
 
 ## Outputs 
 # Wallpaper
-output * bg /home/jacob/Downloads/interstellar-black-hole.jpg fill
+output * bg $wallpaper fill
 
 ## Appearance
 font pango:$font 15
@@ -89,7 +90,7 @@ bindsym $mod+Shift+c reload
 bindsym $mod+Shift+e exec swaynag -t warning -m 'You pressed the exit shortcut. Do you really want to exit sway? This will end your Wayland session.' -B 'Yes, exit sway' 'swaymsg exit'
 
 # Lock sway
-bindsym $mod+Shift+q exec swaylock
+bindsym $mod+Shift+q exec swaylock --image $wallpaper --show-failed-attempts
 
 # Function Keys
 bindsym XF86AudioRaiseVolume exec swayosd-client --output-volume raise
