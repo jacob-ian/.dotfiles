@@ -1,8 +1,13 @@
-profile {
+profile lid-opened {
     output HDMI-A-1 enable position 0,0
-    output eDP-1 disable
+    output eDP-1 enable 
 }
 
-profile {
+profile lid-closed {
+    output HDMI-A-1 enable position 0,0
+    output eDP-1 disable 
+}
+
+profile solo {
     output eDP-1 enable position 0,0
 }

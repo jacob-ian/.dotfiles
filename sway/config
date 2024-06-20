@@ -29,6 +29,8 @@ exec_always --no-startup-id pactl load-module module-switch-on-connect
 
 # Display manager
 exec_always kanshi
+bindswitch --reload --locked lid:off exec kanshictl switch lid-opened
+bindswitch --reload --locked lid:on exec kanshictl switch lid-closed
 
 # Screensharing, etc.
 exec_always --no-startup-id /usr/lib/xdg-desktop-portal-wlr
