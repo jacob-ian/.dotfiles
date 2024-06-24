@@ -213,7 +213,7 @@
         ""
       ]
     },
-    "on-click": "pavucontrol"
+    "on-click": "pavucontrol -t 3"
   },
   "custom/media": {
     "format": "{}",
