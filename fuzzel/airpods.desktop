@@ -5,3 +5,4 @@ Name=Connect AirPods Pro
 Comment=Connects to Jacob's AirPods Pro with Bluetooth
 Terminal=true
 Exec=/home/jacob/.config/fuzzel/airpods.sh
+Icon=/home/jacob/.config/fuzzel/airpods.png
