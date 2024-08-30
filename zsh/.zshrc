@@ -76,3 +76,7 @@ export PATH="$HOME/.tfenv/bin:$PATH"
 export BEANCOUNT_JOURNAL=~/Documents/Finances/Ledger/journal.beancount
 
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+
+alias rollout=~/tm/scripts/prod-rollout.sh
+alias prod-devops='. $HOME/tm/scripts/prod-devops.sh'
+alias dev-devops='. $HOME/tm/scripts/dev-devops.sh'
