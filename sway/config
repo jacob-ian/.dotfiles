@@ -58,10 +58,12 @@ output * bg $wallpaper fill
 ## Appearance
 font pango:$font 15
 gaps inner 20
-default_border none
+default_border pixel 1
 default_floating_border none
 titlebar_padding 1
 titlebar_border_thickness 0
+set $border "#d4be98"
+client.focused $border $border $border $border $border
 
 # Gnome settings
 set $gnome-schema org.gnome.desktop.interface
