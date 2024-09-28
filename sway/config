@@ -47,7 +47,7 @@ input "1452:850:Apple_MTP_multi-touch" {
   dwt enabled
   tap enabled
   middle_emulation enabled
-  pointer_accel 0.3
+  pointer_accel 0.4
   scroll_factor 0.3
 }
 
