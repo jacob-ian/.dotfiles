@@ -36,10 +36,19 @@ bindswitch --reload --locked lid:on exec kanshictl switch lid-closed
 exec_always --no-startup-id /usr/lib/xdg-desktop-portal-wlr
 
 ## Inputs
-# Keyboard speed!
-input * {
+# Keyboard speed
+input type:keyboard {
   repeat_delay 300
   repeat_rate 30
+}
+
+# Trackpad
+input "1452:850:Apple_MTP_multi-touch" {
+  dwt enabled
+  tap enabled
+  middle_emulation enabled
+  pointer_accel 0.3
+  scroll_factor 0.3
 }
 
 ## Outputs 

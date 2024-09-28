@@ -78,6 +78,7 @@ return {
           },
         },
       }
+      lspconfig.sqls.setup { capabilities = capabilities }
 
       local conform = require "conform"
       conform.setup {
@@ -89,6 +90,7 @@ return {
           html = { { "prettierd", "prettier" } },
           yaml = { { "prettierd", "prettier" } },
           markdown = { { "prettierd", "prettier" } },
+          sql = { "sql_formatter" },
         },
       }
 

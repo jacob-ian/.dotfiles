@@ -20,3 +20,6 @@ opt.smartcase = true
 
 opt.colorcolumn = "90"
 opt.signcolumn = "yes"
+
+-- Make sql stuff better
+vim.g.omni_sql_no_default_maps = 1
