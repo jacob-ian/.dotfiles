@@ -12,7 +12,7 @@ set $right l
 set $term alacritty
 set $menu fuzzel
 set $browser brave-browser
-set $font "SauceCodePro Nerd Font Regular"
+set $font "Cantarell"
 set $wallpaper /home/jacob/Downloads/interstellar-black-hole.jpg
 
 ## Status Bar
@@ -58,6 +58,7 @@ output * bg $wallpaper fill
 ## Appearance
 font pango:$font 15
 gaps inner 20
+smart_borders on
 default_border pixel 1
 default_floating_border none
 titlebar_padding 1
