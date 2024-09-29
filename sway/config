@@ -32,6 +32,9 @@ exec_always kanshi
 bindswitch --reload --locked lid:off exec kanshictl switch lid-opened
 bindswitch --reload --locked lid:on exec kanshictl switch lid-closed
 
+# Idle and sleep
+exec_always swayidle -w timeout 600 'swaylock -f' timeout 1200 'swaymsg "output * dpms off"' resume 'swaymsg "output *   dpms on"' before-sleep 'swaylock -f'
+
 # Screensharing, etc.
 exec_always --no-startup-id /usr/lib/xdg-desktop-portal-wlr
 
@@ -104,7 +107,7 @@ bindsym $mod+Shift+c reload
 bindsym $mod+Shift+e exec swaynag -t warning -m 'You pressed the exit shortcut. Do you really want to exit sway? This will end your Wayland session.' -B 'Yes, exit sway' 'swaymsg exit'
 
 # Lock sway
-bindsym $mod+Shift+q exec swaylock --image $wallpaper --show-failed-attempts
+bindsym $mod+Shift+q exec swaylock -f
 
 # Function Keys
 bindsym XF86AudioRaiseVolume exec swayosd-client --output-volume raise
