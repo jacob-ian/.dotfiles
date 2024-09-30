@@ -114,6 +114,7 @@ bindsym $mod+Shift+q exec swaylock -f
 # Function Keys
 bindsym XF86AudioRaiseVolume exec swayosd-client --output-volume raise
 bindsym XF86AudioLowerVolume exec swayosd-client --output-volume lower
+bindsym XF86AudioMute exec swayosd-client --output-volume mute-toggle
 bindsym XF86MonBrightnessUp exec swayosd-client --brightness raise
 bindsym XF86MonBrightnessDown exec swayosd-client --brightness lower 
 bindsym XF86AudioPlay exec playerctl play-pause ; exec notify-send -u low -t 1000 "Media Play/Pause"
