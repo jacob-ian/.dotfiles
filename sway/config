@@ -186,7 +186,7 @@ for_window [class = "Brave-browser"] floating disable
 for_window [app_id = "foot"] floating enable
 
 # Screensharing, etc.
-exec dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=sway
+#exec dbus-update-activation-environment --systemd WAYLAND_DISPLAY SWAYSOCK XDG_CURRENT_DESKTOP=sway
 
 # Fedora
 include /etc/sway/config.d/*

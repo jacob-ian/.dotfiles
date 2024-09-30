@@ -100,8 +100,6 @@
     "spacing": 10
   },
   "clock": {
-    // "timezone": "America/New_York",
-    "tooltip-format": "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>",
     "format": "{:%a %d %b  %I:%M %p}"
   },
   "cpu": {
@@ -180,7 +178,6 @@
     "tooltip-format": "{ifname} via {gwaddr}",
     "format-linked": "{ifname} (No IP) ",
     "format-disconnected": "󰤮",
-    "format-alt": "{ifname}: {ipaddr}/{cidr}",
     "format-icons": [
       "󰤯",
       "󰤟",
