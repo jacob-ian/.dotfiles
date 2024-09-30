@@ -33,3 +33,7 @@
 !/mako/*
 !/swaylock/
 !/swaylock/*
+!/xdg-desktop-portal-wlr/
+!/xdg-desktop-portal-wlr/*
+!/swaync/
+!/swaync/*
