@@ -18,7 +18,6 @@
     "pulseaudio",
     "network",
     "battery",
-    "battery#bat2",
     "clock",
     "tray",
     "custom/notifications"
