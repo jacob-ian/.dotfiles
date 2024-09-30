@@ -99,7 +99,8 @@
     "spacing": 10
   },
   "clock": {
-    "format": "{:%a %d %b  %I:%M %p}"
+    "format": "{:%a %d %b  %I:%M %p}",
+    "tooltip": false
   },
   "cpu": {
     "format": "{usage}% ",
