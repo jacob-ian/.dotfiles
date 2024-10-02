@@ -185,7 +185,7 @@
       "󰤥",
       "󰤨"
     ],
-    "on-click-right": "XDG_CURRENT_DESKTOP=GNOME gnome-control-center wifi"
+    "on-click": "XDG_CURRENT_DESKTOP=GNOME gnome-control-center wifi"
   },
   "pulseaudio": {
     // "scroll-step": 1, // %, can be a float
