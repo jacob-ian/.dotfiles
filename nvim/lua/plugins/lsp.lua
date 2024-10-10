@@ -84,11 +84,11 @@ return {
       conform.setup {
         formatters_by_ft = {
           lua = { "stylua" },
-          javascript = { { "prettierd", "prettier" } },
-          typescript = { { "prettierd", "prettier" } },
-          json = { { "prettierd", "prettier" } },
-          html = { { "prettierd", "prettier" } },
-          yaml = { { "prettierd", "prettier" } },
+          javascript = { "prettierd", "prettier", stop_after_first = true },
+          typescript = { "prettierd", "prettier", stop_after_first = true },
+          json = { "prettierd", "prettier", stop_after_first = true },
+          html = { "prettierd", "prettier", stop_after_first = true },
+          yaml = { "prettierd", "prettier", stop_after_first = true },
           markdown = { { "prettierd", "prettier" } },
           sql = { "sql_formatter" },
         },

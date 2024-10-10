@@ -80,3 +80,4 @@ export BEANCOUNT_JOURNAL=~/Documents/Finances/Ledger/journal.beancount
 alias rollout=~/tm/scripts/prod-rollout.sh
 alias prod-devops='. $HOME/tm/scripts/prod-devops.sh'
 alias dev-devops='. $HOME/tm/scripts/dev-devops.sh'
+alias vim=nvim

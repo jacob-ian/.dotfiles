@@ -32,6 +32,8 @@ exec_always kanshi
 bindswitch --reload --locked lid:off exec kanshictl switch lid-opened
 bindswitch --reload --locked lid:on exec kanshictl switch lid-closed
 
+# dbus-send --system --dest=org.freedesktop.UPower --print-reply=literal /org/freedesktop/UPower org.freedesktop.DBus.Properties.Get string:'org.freedesktop.UPower' string:'LidIsClosed'
+
 # Idle and sleep
 exec swayidle -w timeout 300 'swaylock -f'
 #Uncomment this once Asahi fixes HDMI after sleep

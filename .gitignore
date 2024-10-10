@@ -37,3 +37,6 @@
 !/xdg-desktop-portal-wlr/*
 !/swaync/
 !/swaync/*
+!/hypr/
+!/hypr/**/*
+
