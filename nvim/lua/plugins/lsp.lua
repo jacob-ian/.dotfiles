@@ -15,6 +15,7 @@ return {
       require("neodev").setup {}
 
       local lspconfig = require "lspconfig"
+      vim.filetype.add { extension = { templ = "templ" } }
       vim.filetype.add { extension = { beancount = "beancount" } }
       lspconfig.beancount.setup {
         capabilities = capabilities,
@@ -27,9 +28,12 @@ return {
       lspconfig.dockerls.setup { capabilities = capabilities }
       lspconfig.tailwindcss.setup {
         capabilities = capabilities,
-        init_options = { userLanguages = { templ = "html" } },
+        filetypes = { "templ", "typescriptreact", "react", "html" },
         settings = {
           tailwindCSS = {
+            includeLanguages = {
+              templ = "html",
+            },
             classAttributes = { "class", "className", "classList", "ngClass" },
             lint = {
               cssConflict = "warning",
@@ -46,7 +50,7 @@ return {
       }
       lspconfig.htmx.setup { capabilities = capabilities, filetypes = { "html", "templ" } }
       lspconfig.html.setup { capabilities = capabilities, filetypes = { "html", "templ" } }
-      vim.filetype.add { extension = { templ = "templ" } }
+      lspconfig.templ.setup { capabilities = capabilities }
       lspconfig.gopls.setup {
         capabilities = capabilities,
         cmd = { "gopls", "serve" },
@@ -91,6 +95,7 @@ return {
           yaml = { "prettierd", "prettier", stop_after_first = true },
           markdown = { { "prettierd", "prettier" } },
           sql = { "sql_formatter" },
+          templ = { "templ" },
         },
       }
 
