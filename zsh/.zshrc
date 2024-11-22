@@ -81,3 +81,9 @@ alias rollout=~/tm/scripts/prod-rollout.sh
 alias prod-devops='. $HOME/tm/scripts/prod-devops.sh'
 alias dev-devops='. $HOME/tm/scripts/dev-devops.sh'
 alias vim=nvim
+
+# The next line updates PATH for the Google Cloud SDK.
+if [ -f '/home/jacob/opt/google-cloud-sdk/path.zsh.inc' ]; then . '/home/jacob/opt/google-cloud-sdk/path.zsh.inc'; fi
+
+# The next line enables shell command completion for gcloud.
+if [ -f '/home/jacob/opt/google-cloud-sdk/completion.zsh.inc' ]; then . '/home/jacob/opt/google-cloud-sdk/completion.zsh.inc'; fi
