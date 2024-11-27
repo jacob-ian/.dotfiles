@@ -93,9 +93,13 @@ return {
           json = { "prettierd", "prettier", stop_after_first = true },
           html = { "prettierd", "prettier", stop_after_first = true },
           yaml = { "prettierd", "prettier", stop_after_first = true },
-          markdown = { { "prettierd", "prettier" } },
-          sql = { "sql_formatter" },
+          markdown = { "prettierd", "prettier", stop_after_first = true },
+          sql = { "sqlfmt" },
           templ = { "templ" },
+        },
+        format_on_save = {
+          timeout_ms = 500,
+          lsp_format = "fallback",
         },
       }
 
@@ -111,17 +115,6 @@ return {
           vim.keymap.set("n", "<leader>do", vim.diagnostic.open_float, { buffer = 0 })
           vim.keymap.set("n", "<leader>d[", vim.diagnostic.goto_prev, { buffer = 0 })
           vim.keymap.set("n", "<leader>d]", vim.diagnostic.goto_next, { buffer = 0 })
-        end,
-      })
-
-      vim.api.nvim_create_autocmd("BufWritePre", {
-        pattern = "*",
-        callback = function(args)
-          conform.format {
-            bufnr = args.buf,
-            lsp_fallback = true,
-            quiet = true,
-          }
         end,
       })
     end,

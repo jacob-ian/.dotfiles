@@ -87,3 +87,6 @@ if [ -f '/home/jacob/opt/google-cloud-sdk/path.zsh.inc' ]; then . '/home/jacob/o
 
 # The next line enables shell command completion for gcloud.
 if [ -f '/home/jacob/opt/google-cloud-sdk/completion.zsh.inc' ]; then . '/home/jacob/opt/google-cloud-sdk/completion.zsh.inc'; fi
+
+# Created by `pipx` on 2024-11-22 05:30:02
+export PATH="$PATH:/home/jacob/.local/bin"
