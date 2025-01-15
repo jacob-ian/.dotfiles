@@ -1,0 +1,4 @@
+include ./themes/gruvbox-material-dark-hard.conf
+
+font_family SauceCodePro Nerd Font Mono
+font_size 14.0

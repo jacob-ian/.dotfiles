@@ -39,4 +39,6 @@
 !/swaync/*
 !/hypr/
 !/hypr/**/*
+!/kitty/
+!/kitty/**/*
 
