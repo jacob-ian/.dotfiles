@@ -56,12 +56,12 @@ ZSH_THEME="jacobmatthews"
 # Custom plugins may be added to $ZSH_CUSTOM/plugins/
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
-plugins=(git docker)
+plugins=(git)
 
 source $ZSH/oh-my-zsh.sh
 
 # Add default node to path
-export PATH=~/.nvm/versions/node/v18.20.3/bin:$PATH
+export PATH="$HOME/.nvm/versions/node/v23.6.0/bin:$PATH"
 
 # Load NVM
 export NVM_DIR=~/.nvm
@@ -69,24 +69,12 @@ export NVM_DIR=~/.nvm
 
 alias lzd=lazydocker
 
-export PATH=/usr/local/go/bin:$PATH
-export PATH=~/go/bin:$PATH
-export PATH=~/.yarn/bin:$PATH
+export PATH="/usr/local/go/bin:$PATH"
+export PATH="$HOME/go/bin:$PATH"
+export PATH="$HOME/.yarn/bin:$PATH"
 export PATH="$HOME/.tfenv/bin:$PATH"
-export BEANCOUNT_JOURNAL=~/Documents/Finances/Ledger/journal.beancount
+export GPG_TTY=$(tty)
 
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 
-alias rollout=~/tm/scripts/prod-rollout.sh
-alias prod-devops='. $HOME/tm/scripts/prod-devops.sh'
-alias dev-devops='. $HOME/tm/scripts/dev-devops.sh'
 alias vim=nvim
-
-# The next line updates PATH for the Google Cloud SDK.
-if [ -f '/home/jacob/opt/google-cloud-sdk/path.zsh.inc' ]; then . '/home/jacob/opt/google-cloud-sdk/path.zsh.inc'; fi
-
-# The next line enables shell command completion for gcloud.
-if [ -f '/home/jacob/opt/google-cloud-sdk/completion.zsh.inc' ]; then . '/home/jacob/opt/google-cloud-sdk/completion.zsh.inc'; fi
-
-# Created by `pipx` on 2024-11-22 05:30:02
-export PATH="$PATH:/home/jacob/.local/bin"
