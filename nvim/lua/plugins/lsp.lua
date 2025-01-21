@@ -24,6 +24,7 @@ return {
       lspconfig.rust_analyzer.setup { capabilities = capabilities }
       lspconfig.terraformls.setup { capabilities = capabilities }
       lspconfig.ts_ls.setup { capabilities = capabilities }
+      lspconfig.graphql.setup { capabilities = capabilities }
       lspconfig.cssls.setup { capabilities = capabilities }
       lspconfig.dockerls.setup { capabilities = capabilities }
       lspconfig.tailwindcss.setup {
@@ -57,7 +58,7 @@ return {
         filetypes = { "go", "gomod" },
         root_dir = require("lspconfig/util").root_pattern("go.work", "go.mod", ".git"),
       }
-      lspconfig.protols.setup {
+      lspconfig.buf_ls.setup {
         capabilities = capabilities,
       }
       lspconfig.lua_ls.setup {
@@ -91,8 +92,8 @@ return {
       conform.setup {
         formatters_by_ft = {
           lua = { "stylua" },
-          javascript = { "prettierd", "prettier", stop_after_first = true },
-          typescript = { "prettierd", "prettier", stop_after_first = true },
+          javascript = { "prettier", "prettierd", stop_after_first = true },
+          typescript = { "prettier", "prettierd", stop_after_first = true },
           json = { "prettierd", "prettier", stop_after_first = true },
           html = { "prettierd", "prettier", stop_after_first = true },
           yaml = { "prettierd", "prettier", stop_after_first = true },
@@ -101,6 +102,7 @@ return {
           templ = { "templ" },
         },
         format_on_save = {
+          async = true,
           timeout_ms = 500,
           lsp_format = "fallback",
         },
