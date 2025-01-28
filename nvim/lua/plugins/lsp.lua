@@ -24,7 +24,9 @@ return {
       lspconfig.rust_analyzer.setup { capabilities = capabilities }
       lspconfig.terraformls.setup { capabilities = capabilities }
       lspconfig.ts_ls.setup { capabilities = capabilities }
+      lspconfig.eslint.setup { capabilities = capabilities }
       lspconfig.graphql.setup { capabilities = capabilities }
+      lspconfig.prismals.setup { capabilities = capabilities }
       lspconfig.cssls.setup { capabilities = capabilities }
       lspconfig.dockerls.setup { capabilities = capabilities }
       lspconfig.tailwindcss.setup {
@@ -102,9 +104,9 @@ return {
           templ = { "templ" },
         },
         format_on_save = {
-          async = true,
           timeout_ms = 500,
           lsp_format = "fallback",
+          stop_after_first = true,
         },
       }
 
