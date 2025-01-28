@@ -14,21 +14,56 @@ return {
 
       require("neodev").setup {}
 
-      local lspconfig = require "lspconfig"
+      -- EXTRA FILETYPES
       vim.filetype.add { extension = { templ = "templ" } }
       vim.filetype.add { extension = { beancount = "beancount" } }
+
+      -- LSP CONFIG
+      local lspconfig = require "lspconfig"
+
       lspconfig.beancount.setup {
         capabilities = capabilities,
         init_options = { journal_file = "~/acc/journal.beancount" },
       }
+
       lspconfig.rust_analyzer.setup { capabilities = capabilities }
-      lspconfig.terraformls.setup { capabilities = capabilities }
+
       lspconfig.ts_ls.setup { capabilities = capabilities }
-      lspconfig.eslint.setup { capabilities = capabilities }
-      lspconfig.graphql.setup { capabilities = capabilities }
-      lspconfig.prismals.setup { capabilities = capabilities }
+
+      lspconfig.lua_ls.setup {
+        capabilities = capabilities,
+        settings = { Lua = { diagnostics = { globals = { "vim" } } } },
+      }
+
+      lspconfig.gopls.setup {
+        capabilities = capabilities,
+        cmd = { "gopls", "serve" },
+        filetypes = { "go", "gomod" },
+        root_dir = require("lspconfig/util").root_pattern("go.work", "go.mod", ".git"),
+      }
+
+      lspconfig.sqls.setup { capabilities = capabilities }
+
+      lspconfig.html.setup { capabilities = capabilities, filetypes = { "html", "templ" } }
+
       lspconfig.cssls.setup { capabilities = capabilities }
+
+      lspconfig.terraformls.setup { capabilities = capabilities }
+
       lspconfig.dockerls.setup { capabilities = capabilities }
+
+      lspconfig.graphql.setup { capabilities = capabilities }
+
+      lspconfig.prismals.setup { capabilities = capabilities }
+
+      lspconfig.eslint.setup { capabilities = capabilities }
+
+      lspconfig.buf_ls.setup { capabilities = capabilities }
+
+      lspconfig.htmx.setup { capabilities = capabilities, filetypes = { "html", "templ" } }
+
+      lspconfig.templ.setup { capabilities = capabilities }
+
       lspconfig.tailwindcss.setup {
         capabilities = capabilities,
         filetypes = { "templ", "typescriptreact", "react", "html" },
@@ -51,22 +86,7 @@ return {
           },
         },
       }
-      lspconfig.htmx.setup { capabilities = capabilities, filetypes = { "html", "templ" } }
-      lspconfig.html.setup { capabilities = capabilities, filetypes = { "html", "templ" } }
-      lspconfig.templ.setup { capabilities = capabilities }
-      lspconfig.gopls.setup {
-        capabilities = capabilities,
-        cmd = { "gopls", "serve" },
-        filetypes = { "go", "gomod" },
-        root_dir = require("lspconfig/util").root_pattern("go.work", "go.mod", ".git"),
-      }
-      lspconfig.buf_ls.setup {
-        capabilities = capabilities,
-      }
-      lspconfig.lua_ls.setup {
-        capabilities = capabilities,
-        settings = { Lua = { diagnostics = { globals = { "vim" } } } },
-      }
+
       lspconfig.jsonls.setup {
         capabilities = capabilities,
         settings = {
@@ -76,6 +96,7 @@ return {
           },
         },
       }
+
       lspconfig.yamlls.setup {
         capabilities = capabilities,
         settings = {
@@ -88,8 +109,8 @@ return {
           },
         },
       }
-      lspconfig.sqls.setup { capabilities = capabilities }
 
+      -- FORMATTING
       local conform = require "conform"
       conform.setup {
         formatters_by_ft = {
@@ -110,6 +131,7 @@ return {
         },
       }
 
+      -- LSP KEYMAPS
       vim.api.nvim_create_autocmd("LspAttach", {
         callback = function()
           vim.opt_local.omnifunc = "v:lua.vim.lsp.omnifunc"
