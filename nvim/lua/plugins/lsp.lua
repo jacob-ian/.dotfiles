@@ -72,6 +72,7 @@ return {
             includeLanguages = {
               templ = "html",
             },
+            classFunctions = { "tw", "clsx" },
             classAttributes = { "class", "className", "classList", "ngClass" },
             lint = {
               cssConflict = "warning",
