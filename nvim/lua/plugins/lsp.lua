@@ -30,6 +30,8 @@ return {
 
       lspconfig.ts_ls.setup { capabilities = capabilities }
 
+      lspconfig.biome.setup { capabilities = capabilities }
+
       lspconfig.lua_ls.setup {
         capabilities = capabilities,
         settings = { Lua = { diagnostics = { globals = { "vim" } } } },
@@ -116,9 +118,6 @@ return {
       conform.setup {
         formatters_by_ft = {
           lua = { "stylua" },
-          javascript = { "prettier", "prettierd", stop_after_first = true },
-          typescript = { "prettier", "prettierd", stop_after_first = true },
-          json = { "prettierd", "prettier", stop_after_first = true },
           html = { "prettierd", "prettier", stop_after_first = true },
           yaml = { "prettierd", "prettier", stop_after_first = true },
           markdown = { "prettierd", "prettier", stop_after_first = true },
