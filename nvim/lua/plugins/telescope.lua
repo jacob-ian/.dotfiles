@@ -11,6 +11,7 @@ return {
       },
       pickers = {
         find_files = {
+          disable_devicons = true,
           find_command = { "rg", "--files", "--hidden" },
         },
       },
