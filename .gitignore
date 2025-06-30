@@ -41,4 +41,5 @@
 !/hypr/**/*
 !/kitty/
 !/kitty/**/*
-
+!/scripts/
+!/scripts/*
