@@ -14,13 +14,12 @@ return {
           telescope = true,
         },
         console_timeout = 10000,
-        auto_show_console = false
+        auto_show_console = false,
       }
 
       local telescope = require "telescope.builtin"
 
       vim.keymap.set("n", "<leader>gg", neogit.open)
-      vim.keymap.set("n", "<leader>gb", telescope.git_branches)
       vim.keymap.set("n", "<leader>gp", function()
         neogit.open { "pull" }
       end)
@@ -31,8 +30,6 @@ return {
     config = function()
       local gitsigns = require "gitsigns"
       gitsigns.setup {}
-
-      vim.keymap.set("n", "<leader>gB", gitsigns.toggle_current_line_blame)
     end,
   },
 }
