@@ -5,19 +5,18 @@ return {
     dependencies = {
       "nvim-lua/plenary.nvim",
       "sindrets/diffview.nvim",
+      "folke/snacks.nvim", -- picker
     },
     config = function()
       local neogit = require "neogit"
       neogit.setup {
         integrations = {
           diffview = true,
-          telescope = true,
+          snacks = true,
         },
         console_timeout = 10000,
         auto_show_console = false,
       }
-
-      local telescope = require "telescope.builtin"
 
       vim.keymap.set("n", "<leader>gg", neogit.open)
       vim.keymap.set("n", "<leader>gp", function()
