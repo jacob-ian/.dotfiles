@@ -7,6 +7,9 @@ return {
     opts = {
       gitbrowse = { enabled = true },
       picker = { enabled = true },
+      notifier = { enabled = true },
+      image = { enabled = true },
+      input = { enabled = true },
     },
     keys = {
       -- Picker

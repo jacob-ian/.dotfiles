@@ -15,7 +15,7 @@ return {
           snacks = true,
         },
         console_timeout = 10000,
-        auto_show_console = false,
+        graph_style = "kitty",
       }
 
       vim.keymap.set("n", "<leader>gg", neogit.open)

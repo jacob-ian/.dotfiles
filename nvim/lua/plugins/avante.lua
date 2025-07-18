@@ -20,18 +20,23 @@ return {
           },
         },
       },
+      file_selector = {
+        provider = "snacks",
+      },
+      selector = {
+        provider = "snacks",
+      },
+      input = {
+        provider = "snacks",
+      },
     },
     dependencies = {
       "nvim-lua/plenary.nvim",
       "MunifTanjim/nui.nvim",
       --- The below dependencies are optional,
-      "echasnovski/mini.pick", -- for file_selector provider mini.pick
       "hrsh7th/nvim-cmp", -- autocompletion for avante commands and mentions
-      "ibhagwan/fzf-lua", -- for file_selector provider fzf
-      "stevearc/dressing.nvim", -- for input provider dressing
       "folke/snacks.nvim", -- for input provider snacks
       "nvim-tree/nvim-web-devicons", -- or echasnovski/mini.icons
-      "zbirenbaum/copilot.lua", -- for providers='copilot'
       {
         -- support for image pasting
         "HakonHarnes/img-clip.nvim",
@@ -55,7 +60,7 @@ return {
         opts = {
           file_types = { "markdown", "Avante" },
         },
-        ft = { "Avante" },
+        ft = { "markdown", "Avante" },
       },
     },
   },
