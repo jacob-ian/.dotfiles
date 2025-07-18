@@ -3,7 +3,16 @@
 if [[ $# -eq 1 ]]; then
     selected=$1
 else
-    selected=$(find ~/euc ~/.config -mindepth 1 -maxdepth 1 -type d  | fzf)
+    current_user=$(whoami)
+    directories=(~/.config ~/dev)
+
+    if [[ "$current_user" == "jacob.matthews" ]]; then
+        directories+=(~/euc)
+    else
+        directories+=(~/net)
+    fi
+
+    selected=$(find ${directories[@]} -mindepth 1 -maxdepth 1 -type d | fzf)
 fi
 
 if [[ -z $selected ]]; then
