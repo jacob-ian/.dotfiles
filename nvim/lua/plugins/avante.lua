@@ -20,9 +20,6 @@ return {
           },
         },
       },
-      file_selector = {
-        provider = "snacks",
-      },
       selector = {
         provider = "snacks",
       },
