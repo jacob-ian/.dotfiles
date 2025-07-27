@@ -16,7 +16,9 @@ return {
       {
         "<leader>ff",
         function()
-          Snacks.picker.files()
+          Snacks.picker.files {
+            hidden = true,
+          }
         end,
         desc = "Find Files",
       },
@@ -30,7 +32,9 @@ return {
       {
         "<leader>FF",
         function()
-          Snacks.picker.grep()
+          Snacks.picker.grep {
+            hidden = true,
+          }
         end,
         desc = "Grep",
       },
