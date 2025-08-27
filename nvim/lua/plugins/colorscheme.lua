@@ -1,11 +1,21 @@
 return {
   {
-    "bluz71/vim-moonfly-colors",
-    name = "moonfly",
+    "catppuccin/nvim",
+    name = "catppuccin",
     lazy = false,
     priority = 1000,
     config = function()
-      vim.cmd "colorscheme moonfly"
+      require("catppuccin").setup {
+        auto_integrations = true,
+        color_overrides = {
+          mocha = {
+            base = "#000000",
+            mantle = "#000000",
+            crust = "#000000",
+          },
+        },
+      }
+      vim.cmd.colorscheme "catppuccin-mocha"
     end,
   },
   "EdenEast/nightfox.nvim",
