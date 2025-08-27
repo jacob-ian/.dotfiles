@@ -58,8 +58,6 @@ return {
 
       lspconfig.prismals.setup { capabilities = capabilities }
 
-      lspconfig.eslint.setup { capabilities = capabilities }
-
       lspconfig.buf_ls.setup { capabilities = capabilities }
 
       lspconfig.htmx.setup { capabilities = capabilities, filetypes = { "html", "templ" } }
