@@ -1,71 +1,73 @@
 return {
+  {                                                                                                                                                                                    │
+      "folke/lazydev.nvim",                                                                                                                                                              │
+      ft = { "lua" },                                                                                                                                                                    │
+      opts = {                                                                                                                                                                           │
+        library = {                                                                                                                                                                      │
+          { path = "${3rd}/luv/library", words = { "vim%.uv" } },                                                                                                                        │
+        },                                                                                                                                                                               │
+      },                                                                                                                                                                                 │
+    }, 
   {
     "neovim/nvim-lspconfig",
     dependencies = {
-      "folke/neodev.nvim",
       "b0o/SchemaStore.nvim",
       "stevearc/conform.nvim",
     },
     config = function()
-      local capabilities = nil
-      if pcall(require, "cmp_nvim_lsp") then
-        capabilities = require("cmp_nvim_lsp").default_capabilities()
-      end
-
-      require("neodev").setup {}
-
       -- EXTRA FILETYPES
       vim.filetype.add { extension = { templ = "templ" } }
       vim.filetype.add { extension = { beancount = "beancount" } }
 
       -- LSP CONFIG
-      local lspconfig = require "lspconfig"
+      vim.lsp.config("*", {
+        root_markers = { '.git' },
+      })
+      vim.lsp.config("beancount", {
+        settings = { journal_file = "~/acc/journal.beancount" },
+      })
+      vim.lsp.enable("beancount")
 
-      lspconfig.beancount.setup {
-        capabilities = capabilities,
-        init_options = { journal_file = "~/acc/journal.beancount" },
-      }
+      vim.lsp.enable("rust_analyzer")
 
-      lspconfig.rust_analyzer.setup { capabilities = capabilities }
+      vim.lsp.enable("ts_ls")
 
-      lspconfig.ts_ls.setup { capabilities = capabilities }
+      vim.lsp.enable("biome")
 
-      lspconfig.biome.setup { capabilities = capabilities }
-
-      lspconfig.lua_ls.setup {
-        capabilities = capabilities,
+      vim.lsp.config("lua_ls", {
         settings = { Lua = { diagnostics = { globals = { "vim" } } } },
-      }
+      })
+      vim.lsp.enable("lua_ls")
 
-      lspconfig.gopls.setup {
-        capabilities = capabilities,
-        cmd = { "gopls", "serve" },
-        filetypes = { "go", "gomod" },
-        root_dir = require("lspconfig/util").root_pattern("go.work", "go.mod", ".git"),
-      }
+      vim.lsp.enable("gopls")
 
-      lspconfig.sqls.setup { capabilities = capabilities }
+      vim.lsp.enable("sqls")
 
-      lspconfig.html.setup { capabilities = capabilities, filetypes = { "html", "templ" } }
+      vim.lsp.config("html", {
+        filetypes = { "html", "templ" },
+      })
+      vim.lsp.enable("html")
 
-      lspconfig.cssls.setup { capabilities = capabilities }
+      vim.lsp.enable("cssls")
 
-      lspconfig.terraformls.setup { capabilities = capabilities }
+      vim.lsp.enable("terraformls")
 
-      lspconfig.dockerls.setup { capabilities = capabilities }
+      vim.lsp.enable("dockerls")
 
-      lspconfig.graphql.setup { capabilities = capabilities }
+      vim.lsp.enable("graphql")
 
-      lspconfig.prismals.setup { capabilities = capabilities }
+      vim.lsp.enable("prismals")
 
-      lspconfig.buf_ls.setup { capabilities = capabilities }
+      vim.lsp.enable("buf_ls")
 
-      lspconfig.htmx.setup { capabilities = capabilities, filetypes = { "html", "templ" } }
+      vim.lsp.config("htmx", {
+        filetypes = { "html", "templ" },
+      })
+      vim.lsp.enable("htmx")
 
-      lspconfig.templ.setup { capabilities = capabilities }
+      vim.lsp.enable("templ")
 
-      lspconfig.tailwindcss.setup {
-        capabilities = capabilities,
+      vim.lsp.config("tailwindcss", {
         filetypes = { "templ", "typescriptreact", "react", "html" },
         settings = {
           tailwindCSS = {
@@ -86,20 +88,20 @@ return {
             validate = true,
           },
         },
-      }
+      })
+      vim.lsp.enable("tailwindcss")
 
-      lspconfig.jsonls.setup {
-        capabilities = capabilities,
+      vim.lsp.config("jsonls", {
         settings = {
           json = {
             schemas = require("schemastore").json.schemas(),
             validate = { enable = true },
           },
         },
-      }
+      })
+      vim.lsp.enable("jsonls")
 
-      lspconfig.yamlls.setup {
-        capabilities = capabilities,
+      vim.lsp.config("yamlls", {
         settings = {
           yaml = {
             schemaStore = {
@@ -109,7 +111,8 @@ return {
             schemas = require("schemastore").yaml.schemas(),
           },
         },
-      }
+      })
+      vim.lsp.enable("yamlls")
 
       -- FORMATTING
       local conform = require "conform"
