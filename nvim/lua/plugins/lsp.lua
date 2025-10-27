@@ -41,6 +41,16 @@ return {
       })
       vim.lsp.enable "lua_ls"
 
+      vim.lsp.config("gopls", {
+        settings = {
+          gopls = {
+            staticcheck = true,
+            analyses = {
+              ST1003 = true,
+            },
+          },
+        },
+      })
       vim.lsp.enable "gopls"
 
       vim.lsp.enable "sqls"
