@@ -1,13 +1,15 @@
 return {
-  {                                                                                                                                                                                    │
-      "folke/lazydev.nvim",                                                                                                                                                              │
-      ft = { "lua" },                                                                                                                                                                    │
-      opts = {                                                                                                                                                                           │
-        library = {                                                                                                                                                                      │
-          { path = "${3rd}/luv/library", words = { "vim%.uv" } },                                                                                                                        │
-        },                                                                                                                                                                               │
-      },                                                                                                                                                                                 │
-    }, 
+  {
+    "folke/lazydev.nvim",
+    ft = "lua", -- only load on lua files
+    opts = {
+      library = {
+        -- See the configuration section for more details
+        -- Load luvit types when the `vim.uv` word is found
+        { path = "${3rd}/luv/library", words = { "vim%.uv" } },
+      },
+    },
+  },
   {
     "neovim/nvim-lspconfig",
     dependencies = {
@@ -21,51 +23,51 @@ return {
 
       -- LSP CONFIG
       vim.lsp.config("*", {
-        root_markers = { '.git' },
+        root_markers = { ".git" },
       })
       vim.lsp.config("beancount", {
         settings = { journal_file = "~/acc/journal.beancount" },
       })
-      vim.lsp.enable("beancount")
+      vim.lsp.enable "beancount"
 
-      vim.lsp.enable("rust_analyzer")
+      vim.lsp.enable "rust_analyzer"
 
-      vim.lsp.enable("ts_ls")
+      vim.lsp.enable "ts_ls"
 
-      vim.lsp.enable("biome")
+      vim.lsp.enable "biome"
 
       vim.lsp.config("lua_ls", {
         settings = { Lua = { diagnostics = { globals = { "vim" } } } },
       })
-      vim.lsp.enable("lua_ls")
+      vim.lsp.enable "lua_ls"
 
-      vim.lsp.enable("gopls")
+      vim.lsp.enable "gopls"
 
-      vim.lsp.enable("sqls")
+      vim.lsp.enable "sqls"
 
       vim.lsp.config("html", {
         filetypes = { "html", "templ" },
       })
-      vim.lsp.enable("html")
+      vim.lsp.enable "html"
 
-      vim.lsp.enable("cssls")
+      vim.lsp.enable "cssls"
 
-      vim.lsp.enable("terraformls")
+      vim.lsp.enable "terraformls"
 
-      vim.lsp.enable("dockerls")
+      vim.lsp.enable "dockerls"
 
-      vim.lsp.enable("graphql")
+      vim.lsp.enable "graphql"
 
-      vim.lsp.enable("prismals")
+      vim.lsp.enable "prismals"
 
-      vim.lsp.enable("buf_ls")
+      vim.lsp.enable "buf_ls"
 
       vim.lsp.config("htmx", {
         filetypes = { "html", "templ" },
       })
-      vim.lsp.enable("htmx")
+      vim.lsp.enable "htmx"
 
-      vim.lsp.enable("templ")
+      vim.lsp.enable "templ"
 
       vim.lsp.config("tailwindcss", {
         filetypes = { "templ", "typescriptreact", "react", "html" },
@@ -89,7 +91,7 @@ return {
           },
         },
       })
-      vim.lsp.enable("tailwindcss")
+      vim.lsp.enable "tailwindcss"
 
       vim.lsp.config("jsonls", {
         settings = {
@@ -99,7 +101,7 @@ return {
           },
         },
       })
-      vim.lsp.enable("jsonls")
+      vim.lsp.enable "jsonls"
 
       vim.lsp.config("yamlls", {
         settings = {
@@ -112,7 +114,7 @@ return {
           },
         },
       })
-      vim.lsp.enable("yamlls")
+      vim.lsp.enable "yamlls"
 
       -- FORMATTING
       local conform = require "conform"
