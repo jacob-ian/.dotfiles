@@ -11,6 +11,9 @@ return {
       image = { enabled = true },
       input = { enabled = true },
     },
+    dependencies = {
+      "nvim-tree/nvim-web-devicons",
+    },
     keys = {
       -- Picker
       {
