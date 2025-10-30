@@ -5,16 +5,12 @@ plugins=(git)
 
 source $ZSH/oh-my-zsh.sh
 
-# fnm
-FNM_PATH="/opt/homebrew/opt/fnm/bin"
-if [ -d "$FNM_PATH" ]; then
-  eval "`fnm env`"
-fi
-
 export PATH="/usr/local/go/bin:$PATH"
 export PATH="$HOME/go/bin:$PATH"
 export PATH="$PATH:$HOME/.config/scripts/"
 export PATH="$HOME/.local/bin:$PATH"
+eval "$(fnm env --use-on-cd --shell zsh)"
+
 export GPG_TTY=$(tty)
 
 alias vim=nvim
