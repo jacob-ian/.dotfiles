@@ -3,23 +3,27 @@
 if [[ $# -eq 1 ]]; then
     selected=$1
 else
-    current_user=$(whoami)
-    directories=(~/dev)
+    directories=()
 
-    if [[ "$current_user" == "jacob.matthews" ]]; then
+    if [[ -d ~/dev ]]; then
+        directories+=(~/dev)
+    fi
+
+    if [[ -d ~/euc ]]; then
         directories+=(~/euc)
-    else
+    fi
+
+    if [[ -d ~/net ]]; then
         directories+=(~/net)
     fi
 
     find_results=$(find ${directories[@]} -mindepth 1 -maxdepth 1 -type d)
     find_results+=$'\n'"$HOME/.config"
 
-    if [[ "$current_user" == "jacob.matthews" ]]; then
-      find_results+=$'\n'"$HOME/euc"
-    else
-      find_results+=$'\n'"$HOME/net"
-    fi
+    # Add the root directories too
+    for dir in "${directories[@]}"; do
+        find_results+=$'\n'"$dir"
+    done
 
     selected=$(echo "$find_results" | fzf)
 fi
