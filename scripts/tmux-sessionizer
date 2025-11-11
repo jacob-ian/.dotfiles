@@ -4,7 +4,7 @@ if [[ $# -eq 1 ]]; then
     selected=$1
 else
     current_user=$(whoami)
-    directories=(~/.config ~/dev)
+    directories=(~/dev)
 
     if [[ "$current_user" == "jacob.matthews" ]]; then
         directories+=(~/euc)
@@ -12,14 +12,27 @@ else
         directories+=(~/net)
     fi
 
-    selected=$(find ${directories[@]} -mindepth 1 -maxdepth 1 -type d | fzf)
+    find_results=$(find ${directories[@]} -mindepth 1 -maxdepth 1 -type d)
+    find_results+=$'\n'"$HOME/.config"
+
+    if [[ "$current_user" == "jacob.matthews" ]]; then
+      find_results+=$'\n'"$HOME/euc"
+    else
+      find_results+=$'\n'"$HOME/net"
+    fi
+
+    selected=$(echo "$find_results" | fzf)
 fi
 
 if [[ -z $selected ]]; then
     exit 0
 fi
 
-selected_name=$(basename "$selected" | tr . _)
+parent_dir=$(basename "$(dirname "$selected")")
+selected_dir=$(basename "$selected")
+
+selected_name=$(echo "${parent_dir}_${selected_dir}" | tr . _)
+
 tmux_running=$(pgrep tmux)
 
 if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
