@@ -51,6 +51,20 @@ return {
         desc = "Git Browse",
         mode = { "n", "v" },
       },
+      {
+        "<leader>gb",
+        function()
+          Snacks.gitbrowse {
+            open = function(url)
+              vim.fn.setreg("+", url)
+            end,
+            notify = true,
+            what = "permalink",
+          }
+        end,
+        desc = "Copy Git URL",
+        mode = { "n", "v" },
+      },
     },
   },
 }
