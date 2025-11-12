@@ -57,12 +57,13 @@ return {
           Snacks.gitbrowse {
             open = function(url)
               vim.fn.setreg("+", url)
+              vim.notify "Copied permalink to clipboard"
             end,
-            notify = true,
+            notify = false,
             what = "permalink",
           }
         end,
-        desc = "Copy Git URL",
+        desc = "Copy Git permalink",
         mode = { "n", "v" },
       },
     },
