@@ -20,6 +20,10 @@ else
     find_results=$(find ${directories[@]} -mindepth 1 -maxdepth 1 -type d)
     find_results+=$'\n'"$HOME/.config"
 
+    if [[ -d ~/.cursor ]]; then
+      find_results+=$'\n'"$HOME/.cursor"
+    fi
+
     # Add the root directories too
     for dir in "${directories[@]}"; do
         find_results+=$'\n'"$dir"
