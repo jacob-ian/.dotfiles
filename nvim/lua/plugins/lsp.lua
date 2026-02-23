@@ -42,8 +42,6 @@ return {
       })
       vim.lsp.enable "gopls"
 
-      vim.lsp.enable "sqls"
-
       vim.lsp.config("html", {
         filetypes = { "html", "templ" },
       })
@@ -141,6 +139,7 @@ return {
           json = formatWithBiomeOrPrettier,
           graphql = formatWithBiomeOrPrettier,
           html = formatWithBiomeOrPrettier,
+          sql = { "pg_format" },
         },
         format_on_save = {
           timeout_ms = 500,
