@@ -43,3 +43,5 @@
 !/kitty/**/*
 !/scripts/
 !/scripts/*
+!/skills/
+!/skills/**/*
