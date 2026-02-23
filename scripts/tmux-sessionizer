@@ -24,6 +24,10 @@ else
       find_results+=$'\n'"$HOME/.cursor"
     fi
 
+    if [[ -d ~/.claude ]]; then
+      find_results+=$'\n'"$HOME/.claude"
+    fi
+
     # Add the root directories too
     for dir in "${directories[@]}"; do
         find_results+=$'\n'"$dir"
