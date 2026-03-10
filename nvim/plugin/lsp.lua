@@ -28,7 +28,6 @@ vim.lsp.enable {
 -- LSP keymaps
 vim.api.nvim_create_autocmd("LspAttach", {
   callback = function()
-    vim.opt_local.omnifunc = "v:lua.vim.lsp.omnifunc"
     vim.keymap.set("n", "<leader>la", vim.lsp.buf.code_action, { buffer = 0 })
     vim.keymap.set("n", "<leader>lr", vim.lsp.buf.rename, { buffer = 0 })
     vim.keymap.set("n", "<leader>do", vim.diagnostic.open_float, { buffer = 0 })
