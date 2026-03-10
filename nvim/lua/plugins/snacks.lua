@@ -12,7 +12,13 @@ return {
       input = { enabled = true },
     },
     dependencies = {
-      "nvim-tree/nvim-web-devicons",
+      {
+        "echasnovski/mini.icons",
+        config = function()
+          require("mini.icons").setup()
+          MiniIcons.mock_nvim_web_devicons()
+        end,
+      },
     },
     keys = {
       -- Picker
