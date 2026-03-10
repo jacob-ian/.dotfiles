@@ -1,4 +1,3 @@
--- LSP config
 vim.lsp.config("*", {
   root_markers = { ".git" },
 })
@@ -25,7 +24,6 @@ vim.lsp.enable {
   "yamlls",
 }
 
--- LSP keymaps
 vim.api.nvim_create_autocmd("LspAttach", {
   callback = function()
     vim.keymap.set("n", "<leader>la", vim.lsp.buf.code_action, { buffer = 0 })
