@@ -1,0 +1,4 @@
+#!/bin/bash
+# Called by terminal-notifier on click
+open -a kitty
+/opt/homebrew/bin/tmux switch-client -t "$1" && /opt/homebrew/bin/tmux select-pane -t "$2"

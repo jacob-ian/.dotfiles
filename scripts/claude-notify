@@ -1,0 +1,27 @@
+#!/bin/bash
+# Sends a macOS notification that focuses the Claude Code tmux pane when clicked
+# Requires: brew install terminal-notifier
+# Receives hook JSON on stdin with type and message fields
+PANE="${TMUX_PANE:-%0}"
+SESSION="$(tmux display-message -p '#{session_name}')"
+WINDOW="$(tmux display-message -p '#{window_index}')"
+TMUX_BIN="$(which tmux)"
+
+INPUT="$(cat)"
+TYPE="$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('type',''))" 2>/dev/null)"
+MSG="$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('message','Needs your attention'))" 2>/dev/null)"
+
+case "$TYPE" in
+    permission_prompt) TITLE="Claude Code — Permission Required" ;;
+    idle_prompt)       TITLE="Claude Code — Waiting for Input" ;;
+    *)                 TITLE="Claude Code" ;;
+esac
+
+if command -v terminal-notifier &>/dev/null; then
+    terminal-notifier \
+        -title "$TITLE" \
+        -message "${MSG:-Needs your attention}" \
+        -execute "$HOME/.config/scripts/claude-notify-click ${SESSION}:${WINDOW} ${PANE}"
+else
+    osascript -e "display notification \"${MSG:-Needs your attention}\" with title \"$TITLE\""
+fi
