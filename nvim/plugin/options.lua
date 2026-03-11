@@ -8,6 +8,7 @@ opt.shiftwidth = 2
 opt.expandtab = true
 
 opt.number = true
+opt.signcolumn = "yes"
 opt.scrolloff = 16
 opt.wrap = false
 opt.cursorline = true
