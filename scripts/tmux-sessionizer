@@ -17,7 +17,21 @@ else
         directories+=(~/net)
     fi
 
-    find_results=$(find ${directories[@]} -mindepth 1 -maxdepth 1 -type d)
+    find_results=""
+
+    for dir in "${directories[@]}"; do
+        for repo in "$dir"/*/; do
+            if [[ "$(git -C "$repo" rev-parse --is-bare-repository 2>/dev/null)" == "true" ]]; then
+                repo_abs=$(cd "$repo" && pwd)
+                worktrees=$(git -C "$repo" worktree list --porcelain | grep '^worktree ' | sed 's/^worktree //' | grep -v "^${repo_abs}$")
+                if [[ -n $worktrees ]]; then
+                    find_results+=$'\n'"$worktrees"
+                fi
+            else
+                find_results+=$'\n'"$repo"
+            fi
+        done
+    done
     find_results+=$'\n'"$HOME/.config"
 
     if [[ -d ~/.cursor ]]; then

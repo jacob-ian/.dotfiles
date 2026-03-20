@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+# Convert a regular git repo to a bare repo with worktrees
+# Usage: convert-to-bare ~/euc/some-repo
+
+set -e
+
+repo="$1"
+
+if [[ -z $repo ]]; then
+    echo "Usage: convert-to-bare <repo-path>"
+    exit 1
+fi
+
+repo=$(cd "$repo" && pwd) # resolve to absolute path
+
+if [[ ! -d "$repo/.git" ]]; then
+    echo "Error: $repo is not a git repository (no .git directory)"
+    exit 1
+fi
+
+# Bail if there are uncommitted changes
+if ! git -C "$repo" diff --quiet || ! git -C "$repo" diff --cached --quiet; then
+    echo "Error: $repo has uncommitted changes, commit or discard first"
+    exit 1
+fi
+
+remote=$(git -C "$repo" remote get-url origin)
+repo_name=$(basename "$repo")
+
+echo "Converting $repo_name to bare repo..."
+rm -rf "$repo"
+git clone --bare "$remote" "$repo"
+
+# Detect default branch
+default_branch=$(git -C "$repo" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+if [[ -z $default_branch ]]; then
+    # Fallback: fetch HEAD from remote
+    default_branch=$(git -C "$repo" remote show origin 2>/dev/null | grep 'HEAD branch' | sed 's/.*: //')
+fi
+if [[ -z $default_branch ]]; then
+    echo "Error: could not detect default branch"
+    exit 1
+fi
+
+echo "  Creating $default_branch worktree..."
+git -C "$repo" worktree add "$repo/$default_branch" "$default_branch"
+
+echo "Done! $repo_name is now bare with worktree at $repo/$default_branch"
