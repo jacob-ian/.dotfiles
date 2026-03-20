@@ -15,7 +15,7 @@ export GPG_TTY=$(tty)
 
 alias vim=nvim
 
-bindkey -s ^f "tmux-sessionizer\n"
+bindkey -s ^f "$HOME/.config/scripts/tmux-sessionizer-go/tmux-sessionizer\n"
 
 [ -s "$HOME/.secrets.sh" ] && source $HOME/.secrets.sh
 
