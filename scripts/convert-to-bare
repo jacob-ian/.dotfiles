@@ -31,6 +31,7 @@ repo_name=$(basename "$repo")
 echo "Converting $repo_name to bare repo..."
 rm -rf "$repo"
 git clone --bare "$remote" "$repo"
+git -C "$repo" config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
 
 # Detect default branch
 default_branch=$(git -C "$repo" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')

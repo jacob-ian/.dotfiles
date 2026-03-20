@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+
+git_root=$(git rev-parse --git-common-dir 2>/dev/null)
+
+if [[ -z $git_root || $git_root == ".git" ]]; then
+    tmux display-message "Not in a bare repo worktree"
+    exit 1
+fi
+
+bare_root=$(cd "$git_root" && pwd)
+
+# List worktrees excluding bare root and main/master
+selected=$(git -C "$bare_root" worktree list --porcelain \
+    | grep '^worktree ' \
+    | sed 's/^worktree //' \
+    | grep -v "^${bare_root}$" \
+    | grep -v '/main$' \
+    | grep -v '/master$' \
+    | fzf --prompt="remove worktree> ")
+
+if [[ -z $selected ]]; then
+    exit 0
+fi
+
+branch=$(basename "$selected")
+parent_dir=$(basename "$bare_root")
+session_name=$(echo "${parent_dir}_${branch}" | tr . _)
+
+tmux kill-session -t="$session_name" 2>/dev/null
+
+if git -C "$bare_root" worktree remove "$selected" --force >/dev/null 2>&1; then
+    tmux display-message "Removed worktree '$branch'"
+else
+    tmux display-message "Failed to remove worktree '$branch'"
+fi

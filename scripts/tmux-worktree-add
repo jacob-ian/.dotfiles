@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+
+# Get the bare repo root from the current pane's directory
+git_root=$(git rev-parse --git-common-dir 2>/dev/null)
+
+if [[ -z $git_root || $git_root == ".git" ]]; then
+    tmux display-message "Not in a bare repo worktree"
+    exit 1
+fi
+
+# Resolve to absolute path
+bare_root=$(cd "$git_root" && pwd)
+
+echo "Fetching origin..."
+git -C "$bare_root" fetch origin 2>/dev/null
+
+# List remote branches, strip origin/ prefix
+branches=$(git -C "$bare_root" branch -r | grep -v HEAD | sed 's|origin/||' | sed 's/^[[:space:]]*//')
+
+# fzf: pick existing or type new name
+branch_name=$(echo "$branches" | fzf --prompt="branch> " --print-query | tail -1)
+
+if [[ -z $branch_name ]]; then
+    exit 0
+fi
+
+worktree_path="$bare_root/$branch_name"
+
+# Try existing branch first, then create new
+if git -C "$bare_root" worktree add "$worktree_path" "$branch_name" >/dev/null 2>&1 \
+    || git -C "$bare_root" worktree add "$worktree_path" -b "$branch_name" >/dev/null 2>&1; then
+    ~/.config/scripts/tmux-sessionizer-go-bin "$worktree_path"
+else
+    tmux display-message "Failed to create worktree '$branch_name'"
+fi
