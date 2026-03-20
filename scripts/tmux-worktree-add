@@ -29,7 +29,7 @@ worktree_path="$bare_root/$branch_name"
 # Try existing branch first, then create new
 if git -C "$bare_root" worktree add "$worktree_path" "$branch_name" >/dev/null 2>&1 \
     || git -C "$bare_root" worktree add "$worktree_path" -b "$branch_name" >/dev/null 2>&1; then
-    ~/.config/scripts/tmux-sessionizer-go-bin "$worktree_path"
+    ~/.config/scripts/tmux-sessionizer-go/tmux-sessionizer "$worktree_path"
 else
     tmux display-message "Failed to create worktree '$branch_name'"
 fi

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,13 +11,28 @@ import (
 	"sync"
 )
 
+var (
+	scanRoots      = []string{"$HOME/dev", "$HOME/euc", "$HOME/net"}
+	additionalDirs = []string{"$HOME/.config", "$HOME/.claude"}
+)
+
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [directory]\n\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(os.Stderr, "Open a tmux session for a project directory.\n")
+		fmt.Fprintf(os.Stderr, "If no directory is given, an fzf picker is shown.\n")
+	}
+	flag.Parse()
+
 	var selected string
 
-	if len(os.Args) == 2 {
-		selected = os.Args[1]
-	} else {
-		dirs := buildDirectoryList()
+	if flag.NArg() == 1 {
+		selected = flag.Arg(0)
+	} else if flag.NArg() == 0 {
+		roots := expandPaths(scanRoots)
+		additional := expandPaths(additionalDirs)
+
+		dirs := buildDirectoryList(roots, additional)
 		if len(dirs) == 0 {
 			os.Exit(0)
 		}
@@ -25,6 +41,9 @@ func main() {
 		if err != nil || selected == "" {
 			os.Exit(0)
 		}
+	} else {
+		flag.Usage()
+		os.Exit(1)
 	}
 
 	selected = strings.TrimRight(selected, "/")
@@ -32,26 +51,24 @@ func main() {
 		os.Exit(0)
 	}
 
-	parentDir := filepath.Base(filepath.Dir(selected))
-	selectedDir := filepath.Base(selected)
-	selectedName := strings.ReplaceAll(parentDir+"_"+selectedDir, ".", "_")
-
-	openTmuxSession(selectedName, selected)
+	openSession(newSessionName(selected), selected)
 }
 
-func buildDirectoryList() []string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "cannot determine home directory: %v\n", err)
-		os.Exit(1)
-	}
+func newSessionName(dir string) string {
+	parent := filepath.Base(filepath.Dir(dir))
+	base := filepath.Base(dir)
+	return strings.ReplaceAll(parent+"_"+base, ".", "_")
+}
 
-	scanRoots := []string{
-		filepath.Join(home, "dev"),
-		filepath.Join(home, "euc"),
-		filepath.Join(home, "net"),
+func expandPaths(paths []string) []string {
+	expanded := make([]string, len(paths))
+	for i, p := range paths {
+		expanded[i] = os.ExpandEnv(p)
 	}
+	return expanded
+}
 
+func buildDirectoryList(scanRoots, additionalDirs []string) []string {
 	// Filter to existing directories
 	var existingRoots []string
 	for _, d := range scanRoots {
@@ -94,21 +111,14 @@ func buildDirectoryList() []string {
 	}
 	wg.Wait()
 
-	// Add special directories
-	results = append(results, filepath.Join(home, ".config"))
-
-	for _, name := range []string{".cursor", ".claude"} {
-		p := filepath.Join(home, name)
-		if info, err := os.Stat(p); err == nil && info.IsDir() {
-			results = append(results, p)
+	// Add additional directories
+	for _, d := range additionalDirs {
+		if info, err := os.Stat(d); err == nil && info.IsDir() {
+			results = append(results, d)
 		}
 	}
 
-	// Add root directories themselves
-	for _, d := range existingRoots {
-		results = append(results, d)
-	}
-
+	results = append(results, existingRoots...)
 	return results
 }
 
@@ -116,46 +126,46 @@ func buildDirectoryList() []string {
 // If bare: returns its worktrees (excluding the bare root).
 // Otherwise: returns the directory itself.
 func scanRepo(dir string) []string {
-	// Check if bare repo
-	cmd := exec.Command("git", "-C", dir, "rev-parse", "--is-bare-repository")
-	out, err := cmd.Output()
-	if err != nil || strings.TrimSpace(string(out)) != "true" {
-		// Not a bare repo (or not a git repo at all) — return the directory itself
+	if !isBareRepo(dir) {
 		return []string{dir}
 	}
 
-	// It's a bare repo — list worktrees
-	cmd = exec.Command("git", "-C", dir, "worktree", "list", "--porcelain")
-	out, err = cmd.Output()
+	worktreesDir := filepath.Join(dir, "worktrees")
+	entries, err := os.ReadDir(worktreesDir)
 	if err != nil {
 		return nil
 	}
 
-	absDir, err := filepath.Abs(dir)
-	if err != nil {
-		absDir = dir
-	}
-	// Resolve symlinks so comparison works reliably
-	absDir, _ = filepath.EvalSymlinks(absDir)
-
 	var worktrees []string
-	for _, line := range strings.Split(string(out), "\n") {
-		if !strings.HasPrefix(line, "worktree ") {
+	for _, e := range entries {
+		if !e.IsDir() {
 			continue
 		}
-		wt := strings.TrimPrefix(line, "worktree ")
-		wtResolved, _ := filepath.EvalSymlinks(wt)
-		if wtResolved == "" {
-			wtResolved = wt
-		}
-		// Exclude the bare root itself
-		if wtResolved == absDir {
+		gitdirFile := filepath.Join(worktreesDir, e.Name(), "gitdir")
+		data, err := os.ReadFile(gitdirFile)
+		if err != nil {
 			continue
 		}
-		worktrees = append(worktrees, wt)
+		wtPath := filepath.Dir(strings.TrimSpace(string(data)))
+		worktrees = append(worktrees, wtPath)
 	}
 
 	return worktrees
+}
+
+// isBareRepo detects a bare git repo by checking for HEAD and refs/
+// at the top level without a .git subdirectory.
+func isBareRepo(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, "HEAD")); err != nil {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, "refs")); err != nil {
+		return false
+	}
+	return true
 }
 
 func runFzf(items []string) (string, error) {
@@ -175,7 +185,7 @@ func runFzf(items []string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-func openTmuxSession(name, dir string) {
+func openSession(name, dir string) {
 	tmuxEnv := os.Getenv("TMUX")
 
 	// Check if tmux is running at all
