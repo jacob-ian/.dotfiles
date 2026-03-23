@@ -11,9 +11,6 @@ fi
 # Resolve to absolute path
 bare_root=$(cd "$git_root" && pwd)
 
-echo "Fetching origin..."
-git -C "$bare_root" fetch origin 2>/dev/null
-
 # List remote branches, strip origin/ prefix
 branches=$(git -C "$bare_root" branch -r | grep -v HEAD | sed 's|origin/||' | sed 's/^[[:space:]]*//')
 
