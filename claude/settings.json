@@ -24,7 +24,9 @@
       "mcp__claude_ai_Linear__list_projects",
       "mcp__claude_ai_Linear__list_teams",
       "mcp__claude_ai_Linear__list_users",
-      "mcp__claude_ai_Linear__search_documentation"
+      "mcp__claude_ai_Linear__search_documentation",
+      "Skill(golang)",
+      "Skill(sql)"
     ]
   },
   "hooks": {
