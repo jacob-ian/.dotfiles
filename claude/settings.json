@@ -26,7 +26,8 @@
       "mcp__claude_ai_Linear__list_users",
       "mcp__claude_ai_Linear__search_documentation",
       "Skill(golang)",
-      "Skill(sql)"
+      "Skill(sql)",
+      "Skill(implement-linear)"
     ]
   },
   "hooks": {
