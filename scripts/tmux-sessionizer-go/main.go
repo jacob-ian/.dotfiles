@@ -17,22 +17,29 @@ var (
 )
 
 func main() {
+	worktreesOnly := flag.Bool("worktrees", false, "Show only non-main/master worktrees")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [directory]\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(os.Stderr, "Open a tmux session for a project directory.\n")
 		fmt.Fprintf(os.Stderr, "If no directory is given, an fzf picker is shown.\n")
+		fmt.Fprintf(os.Stderr, "  -worktrees  Show only non-main/master worktrees\n")
 	}
 	flag.Parse()
 
 	var selected string
 
-	if flag.NArg() == 1 {
+	if flag.NArg() == 1 && !*worktreesOnly {
 		selected = flag.Arg(0)
 	} else if flag.NArg() == 0 {
-		roots := expandPaths(scanRoots)
-		additional := expandPaths(additionalDirs)
-
-		dirs := buildDirectoryList(roots, additional)
+		var dirs []string
+		if *worktreesOnly {
+			roots := expandPaths(scanRoots)
+			dirs = collectWorktrees(roots)
+		} else {
+			roots := expandPaths(scanRoots)
+			additional := expandPaths(additionalDirs)
+			dirs = buildDirectoryList(roots, additional)
+		}
 		if len(dirs) == 0 {
 			os.Exit(0)
 		}
@@ -119,6 +126,70 @@ func buildDirectoryList(scanRoots, additionalDirs []string) []string {
 	}
 
 	results = append(results, existingRoots...)
+	return results
+}
+
+// collectWorktrees scans all repos under scanRoots and returns only
+// non-main/master worktrees from bare repos.
+func collectWorktrees(scanRoots []string) []string {
+	var existingRoots []string
+	for _, d := range scanRoots {
+		if info, err := os.Stat(d); err == nil && info.IsDir() {
+			existingRoots = append(existingRoots, d)
+		}
+	}
+
+	type repoJob struct{ path string }
+	var jobs []repoJob
+	for _, root := range existingRoots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				jobs = append(jobs, repoJob{path: filepath.Join(root, e.Name())})
+			}
+		}
+	}
+
+	var mu sync.Mutex
+	var results []string
+	var wg sync.WaitGroup
+
+	for _, job := range jobs {
+		wg.Add(1)
+		go func(j repoJob) {
+			defer wg.Done()
+			if !isBareRepo(j.path) {
+				return
+			}
+			worktreesDir := filepath.Join(j.path, "worktrees")
+			entries, err := os.ReadDir(worktreesDir)
+			if err != nil {
+				return
+			}
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				name := e.Name()
+				if name == "main" || name == "master" {
+					continue
+				}
+				gitdirFile := filepath.Join(worktreesDir, name, "gitdir")
+				data, err := os.ReadFile(gitdirFile)
+				if err != nil {
+					continue
+				}
+				wtPath := filepath.Dir(strings.TrimSpace(string(data)))
+				mu.Lock()
+				results = append(results, wtPath)
+				mu.Unlock()
+			}
+		}(job)
+	}
+	wg.Wait()
 	return results
 }
 
