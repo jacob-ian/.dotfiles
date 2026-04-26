@@ -22,14 +22,12 @@ if [[ -z $selected ]]; then
     exit 0
 fi
 
-branch=$(basename "$selected")
-parent_dir=$(basename "$bare_root")
-session_name=$(echo "${parent_dir}_${branch}" | tr . _)
-
+session_name=$(~/.config/scripts/tmux-sessionizer-go/tmux-sessionizer -name "$selected")
 tmux kill-session -t="$session_name" 2>/dev/null
 
+display_branch=${selected#"$bare_root"/}
 if git -C "$bare_root" worktree remove "$selected" --force >/dev/null 2>&1; then
-    tmux display-message "Removed worktree '$branch'"
+    tmux display-message "Removed worktree '$display_branch'"
 else
-    tmux display-message "Failed to remove worktree '$branch'"
+    tmux display-message "Failed to remove worktree '$display_branch'"
 fi

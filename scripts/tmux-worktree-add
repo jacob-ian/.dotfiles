@@ -24,9 +24,34 @@ fi
 worktree_path="$bare_root/$branch_name"
 
 # Try existing branch first, then create new
-if git -C "$bare_root" worktree add "$worktree_path" "$branch_name" >/dev/null 2>&1 \
-    || git -C "$bare_root" worktree add "$worktree_path" -b "$branch_name" >/dev/null 2>&1; then
-    ~/.config/scripts/tmux-sessionizer-go/tmux-sessionizer "$worktree_path"
-else
+if ! git -C "$bare_root" worktree add "$worktree_path" "$branch_name" >/dev/null 2>&1 \
+    && ! git -C "$bare_root" worktree add "$worktree_path" -b "$branch_name" >/dev/null 2>&1; then
     tmux display-message "Failed to create worktree '$branch_name'"
+    exit 1
+fi
+
+default_branch=$(git -C "$bare_root" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+main_wt="$bare_root/$default_branch"
+if [[ -n $default_branch && -d $main_wt && $main_wt != "$worktree_path" ]]; then
+    for f in "$main_wt"/.env*; do
+        [[ -f $f ]] || continue
+        cp "$f" "$worktree_path/"
+    done
+fi
+
+~/.config/scripts/tmux-sessionizer-go/tmux-sessionizer -claude "$worktree_path"
+
+install_cmd=""
+if [[ -f "$worktree_path/package.json" ]]; then
+    if [[ -f "$worktree_path/yarn.lock" ]]; then
+        install_cmd="yarn install"
+    elif [[ -f "$worktree_path/package-lock.json" ]]; then
+        install_cmd="npm install"
+    fi
+fi
+
+if [[ -n $install_cmd ]]; then
+    session_name=$(~/.config/scripts/tmux-sessionizer-go/tmux-sessionizer -name "$worktree_path")
+    tmux new-window -d -t "${session_name}:" -n install -c "$worktree_path" \
+        "$install_cmd || { echo; echo '[install failed — press enter to close]'; read; }"
 fi

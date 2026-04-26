@@ -17,215 +17,188 @@ var (
 )
 
 func main() {
+	nameOnly := flag.Bool("name", false, "Print the session name for the given directory and exit")
 	worktreesOnly := flag.Bool("worktrees", false, "Show only non-main/master worktrees")
+	withClaude := flag.Bool("claude", false, "Create an additional window running `claude`")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [directory]\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(os.Stderr, "Open a tmux session for a project directory.\n")
 		fmt.Fprintf(os.Stderr, "If no directory is given, an fzf picker is shown.\n")
 		fmt.Fprintf(os.Stderr, "  -worktrees  Show only non-main/master worktrees\n")
+		fmt.Fprintf(os.Stderr, "  -claude     Create an additional window running `claude`\n")
+		fmt.Fprintf(os.Stderr, "  -name       Print the session name for <directory> and exit\n")
 	}
 	flag.Parse()
 
-	var selected string
+	if *nameOnly {
+		if flag.NArg() != 1 {
+			flag.Usage()
+			os.Exit(1)
+		}
+		fmt.Println(newSessionName(trimSlash(flag.Arg(0))))
+		return
+	}
 
-	if flag.NArg() == 1 && !*worktreesOnly {
-		selected = flag.Arg(0)
-	} else if flag.NArg() == 0 {
-		var dirs []string
-		if *worktreesOnly {
-			roots := expandPaths(scanRoots)
-			dirs = collectWorktrees(roots)
-		} else {
-			roots := expandPaths(scanRoots)
-			additional := expandPaths(additionalDirs)
-			dirs = buildDirectoryList(roots, additional)
-		}
-		if len(dirs) == 0 {
-			os.Exit(0)
-		}
-		var err error
-		selected, err = runFzf(dirs)
-		if err != nil || selected == "" {
-			os.Exit(0)
-		}
-	} else {
+	selected := pickDirectory(*worktreesOnly)
+	if selected == "" {
+		return
+	}
+	openSession(newSessionName(selected), selected, *withClaude)
+}
+
+func pickDirectory(worktreesOnly bool) string {
+	if flag.NArg() == 1 && !worktreesOnly {
+		return trimSlash(flag.Arg(0))
+	}
+	if flag.NArg() != 0 {
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	selected = strings.TrimRight(selected, "/")
-	if selected == "" {
-		os.Exit(0)
+	roots := expandPaths(scanRoots)
+	var dirs []string
+	if worktreesOnly {
+		dirs = scanReposParallel(roots, featureWorktrees)
+	} else {
+		dirs = scanReposParallel(roots, projectDirs)
+		for _, d := range expandPaths(additionalDirs) {
+			if isDir(d) {
+				dirs = append(dirs, d)
+			}
+		}
+		for _, d := range roots {
+			if isDir(d) {
+				dirs = append(dirs, d)
+			}
+		}
 	}
-
-	openSession(newSessionName(selected), selected)
+	if len(dirs) == 0 {
+		return ""
+	}
+	sel, err := runFzf(dirs)
+	if err != nil {
+		return ""
+	}
+	return trimSlash(sel)
 }
 
 func newSessionName(dir string) string {
+	if bareRoot := findBareRoot(dir); bareRoot != "" && bareRoot != dir {
+		rel, err := filepath.Rel(bareRoot, dir)
+		if err != nil {
+			rel = filepath.Base(dir)
+		}
+		name := filepath.Base(bareRoot) + "_" + rel
+		name = strings.ReplaceAll(name, "/", "_")
+		return strings.ReplaceAll(name, ".", "_")
+	}
 	parent := filepath.Base(filepath.Dir(dir))
 	base := filepath.Base(dir)
 	return strings.ReplaceAll(parent+"_"+base, ".", "_")
 }
 
+func findBareRoot(dir string) string {
+	cur := dir
+	for {
+		if isBareRepo(cur) {
+			return cur
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return ""
+		}
+		cur = parent
+	}
+}
+
 func expandPaths(paths []string) []string {
-	expanded := make([]string, len(paths))
+	out := make([]string, len(paths))
 	for i, p := range paths {
-		expanded[i] = os.ExpandEnv(p)
+		out[i] = os.ExpandEnv(p)
 	}
-	return expanded
+	return out
 }
 
-func buildDirectoryList(scanRoots, additionalDirs []string) []string {
-	// Filter to existing directories
-	var existingRoots []string
-	for _, d := range scanRoots {
-		if info, err := os.Stat(d); err == nil && info.IsDir() {
-			existingRoots = append(existingRoots, d)
-		}
-	}
+func trimSlash(s string) string {
+	return strings.TrimRight(s, "/")
+}
 
-	// Collect subdirectories to scan
-	type repoJob struct {
-		path string
-	}
-	var jobs []repoJob
-	for _, root := range existingRoots {
+func isDir(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
+}
+
+func scanReposParallel(roots []string, fn func(string) []string) []string {
+	var subdirs []string
+	for _, root := range roots {
+		if !isDir(root) {
+			continue
+		}
 		entries, err := os.ReadDir(root)
 		if err != nil {
 			continue
 		}
 		for _, e := range entries {
 			if e.IsDir() {
-				jobs = append(jobs, repoJob{path: filepath.Join(root, e.Name())})
+				subdirs = append(subdirs, filepath.Join(root, e.Name()))
 			}
 		}
 	}
 
-	// Scan all repos concurrently
 	var mu sync.Mutex
-	var results []string
+	var out []string
 	var wg sync.WaitGroup
-
-	for _, job := range jobs {
+	for _, p := range subdirs {
 		wg.Add(1)
-		go func(j repoJob) {
+		go func(p string) {
 			defer wg.Done()
-			dirs := scanRepo(j.path)
+			r := fn(p)
 			mu.Lock()
-			results = append(results, dirs...)
+			out = append(out, r...)
 			mu.Unlock()
-		}(job)
+		}(p)
 	}
 	wg.Wait()
-
-	// Add additional directories
-	for _, d := range additionalDirs {
-		if info, err := os.Stat(d); err == nil && info.IsDir() {
-			results = append(results, d)
-		}
-	}
-
-	results = append(results, existingRoots...)
-	return results
+	return out
 }
 
-// collectWorktrees scans all repos under scanRoots and returns only
-// non-main/master worktrees from bare repos.
-func collectWorktrees(scanRoots []string) []string {
-	var existingRoots []string
-	for _, d := range scanRoots {
-		if info, err := os.Stat(d); err == nil && info.IsDir() {
-			existingRoots = append(existingRoots, d)
-		}
-	}
-
-	type repoJob struct{ path string }
-	var jobs []repoJob
-	for _, root := range existingRoots {
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if e.IsDir() {
-				jobs = append(jobs, repoJob{path: filepath.Join(root, e.Name())})
-			}
-		}
-	}
-
-	var mu sync.Mutex
-	var results []string
-	var wg sync.WaitGroup
-
-	for _, job := range jobs {
-		wg.Add(1)
-		go func(j repoJob) {
-			defer wg.Done()
-			if !isBareRepo(j.path) {
-				return
-			}
-			worktreesDir := filepath.Join(j.path, "worktrees")
-			entries, err := os.ReadDir(worktreesDir)
-			if err != nil {
-				return
-			}
-			for _, e := range entries {
-				if !e.IsDir() {
-					continue
-				}
-				name := e.Name()
-				if name == "main" || name == "master" {
-					continue
-				}
-				gitdirFile := filepath.Join(worktreesDir, name, "gitdir")
-				data, err := os.ReadFile(gitdirFile)
-				if err != nil {
-					continue
-				}
-				wtPath := filepath.Dir(strings.TrimSpace(string(data)))
-				mu.Lock()
-				results = append(results, wtPath)
-				mu.Unlock()
-			}
-		}(job)
-	}
-	wg.Wait()
-	return results
-}
-
-// scanRepo checks if a directory is a bare git repo.
-// If bare: returns its worktrees (excluding the bare root).
-// Otherwise: returns the directory itself.
-func scanRepo(dir string) []string {
+func projectDirs(dir string) []string {
 	if !isBareRepo(dir) {
 		return []string{dir}
 	}
+	return bareRepoWorktrees(dir, false)
+}
 
-	worktreesDir := filepath.Join(dir, "worktrees")
+func featureWorktrees(dir string) []string {
+	if !isBareRepo(dir) {
+		return nil
+	}
+	return bareRepoWorktrees(dir, true)
+}
+
+func bareRepoWorktrees(bare string, skipDefault bool) []string {
+	worktreesDir := filepath.Join(bare, "worktrees")
 	entries, err := os.ReadDir(worktreesDir)
 	if err != nil {
 		return nil
 	}
-
-	var worktrees []string
+	var out []string
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		gitdirFile := filepath.Join(worktreesDir, e.Name(), "gitdir")
-		data, err := os.ReadFile(gitdirFile)
+		if skipDefault && (e.Name() == "main" || e.Name() == "master") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(worktreesDir, e.Name(), "gitdir"))
 		if err != nil {
 			continue
 		}
-		wtPath := filepath.Dir(strings.TrimSpace(string(data)))
-		worktrees = append(worktrees, wtPath)
+		out = append(out, filepath.Dir(strings.TrimSpace(string(data))))
 	}
-
-	return worktrees
+	return out
 }
 
-// isBareRepo detects a bare git repo by checking for HEAD and refs/
-// at the top level without a .git subdirectory.
 func isBareRepo(dir string) bool {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		return false
@@ -240,55 +213,34 @@ func isBareRepo(dir string) bool {
 }
 
 func runFzf(items []string) (string, error) {
-	input := strings.Join(items, "\n")
 	cmd := exec.Command("fzf")
-	cmd.Stdin = strings.NewReader(input)
+	cmd.Stdin = strings.NewReader(strings.Join(items, "\n"))
 	cmd.Stderr = os.Stderr
-
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
-
-	err := cmd.Run()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		return "", err
 	}
-
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-func openSession(name, dir string) {
-	tmuxEnv := os.Getenv("TMUX")
-
-	// Check if tmux is running at all
-	tmuxRunning := false
-	if err := exec.Command("pgrep", "tmux").Run(); err == nil {
-		tmuxRunning = true
+func openSession(name, dir string, withClaude bool) {
+	if err := exec.Command("tmux", "has-session", "-t="+name).Run(); err != nil {
+		exec.Command("tmux", "new-session", "-ds", name, "-n", "nvim", "-c", dir, "nvim").Run()
+		if withClaude {
+			exec.Command("tmux", "new-window", "-t", name+":", "-n", "claude", "-c", dir, "claude").Run()
+			exec.Command("tmux", "select-window", "-t", name+":1").Run()
+		}
 	}
 
-	if tmuxEnv == "" && !tmuxRunning {
-		// Not in tmux, tmux not running — create and attach
-		cmd := exec.Command("tmux", "new-session", "-s", name, "-c", dir, "nvim")
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Run()
+	if os.Getenv("TMUX") != "" {
+		exec.Command("tmux", "switch-client", "-t", name).Run()
 		return
 	}
 
-	// Create session if it doesn't exist
-	if err := exec.Command("tmux", "has-session", "-t="+name).Run(); err != nil {
-		exec.Command("tmux", "new-session", "-ds", name, "-c", dir, "nvim").Run()
-	}
-
-	if tmuxEnv == "" {
-		// Not in tmux — attach
-		cmd := exec.Command("tmux", "attach", "-t", name)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Run()
-	} else {
-		// In tmux — switch client
-		exec.Command("tmux", "switch-client", "-t", name).Run()
-	}
+	cmd := exec.Command("tmux", "attach", "-t", name)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Run()
 }
