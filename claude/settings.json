@@ -27,7 +27,12 @@
       "mcp__claude_ai_Linear__search_documentation",
       "Skill(golang)",
       "Skill(sql)",
-      "Skill(linear-implement)"
+      "Skill(linear-implement)",
+      "Bash(gofmt *)",
+      "Bash(go vet *)",
+      "Bash(pg_format *)",
+      "Bash(go doc *)",
+      "Bash(go test *)"
     ]
   },
   "hooks": {
