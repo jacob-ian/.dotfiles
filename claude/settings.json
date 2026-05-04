@@ -1,6 +1,5 @@
 {
   "permissions": {
-    "defaultMode": "default",
     "allow": [
       "mcp__claude_ai_Linear__get_attachment",
       "mcp__claude_ai_Linear__get_document",
@@ -33,7 +32,8 @@
       "Bash(pg_format *)",
       "Bash(go doc *)",
       "Bash(go test *)"
-    ]
+    ],
+    "defaultMode": "default"
   },
   "hooks": {
     "Notification": [
@@ -51,5 +51,6 @@
     "gopls-lsp@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
     "lua-lsp@claude-plugins-official": true
-  }
+  },
+  "skipAutoPermissionPrompt": true
 }
