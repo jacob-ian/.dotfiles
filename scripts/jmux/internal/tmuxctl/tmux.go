@@ -3,6 +3,7 @@ package tmuxctl
 import (
 	"os"
 	"os/exec"
+	"strings"
 )
 
 func DisplayMessage(msg string) {
@@ -69,4 +70,17 @@ func Attach(name string) error {
 
 func InsideTmux() bool {
 	return os.Getenv("TMUX") != ""
+}
+
+// CurrentSession returns the name of the tmux session containing the running
+// process, or "" when not inside tmux.
+func CurrentSession() string {
+	if !InsideTmux() {
+		return ""
+	}
+	out, err := exec.Command("tmux", "display-message", "-p", "#S").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
