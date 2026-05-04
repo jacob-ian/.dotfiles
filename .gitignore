@@ -43,8 +43,8 @@
 !/kitty/**/*
 !/scripts/
 !/scripts/*
-!/scripts/tmux-sessionizer-go/
-!/scripts/tmux-sessionizer-go/*
+!/scripts/jmux/
+!/scripts/jmux/**/*
 !/claude/
 !/claude/*
 !/skills/
