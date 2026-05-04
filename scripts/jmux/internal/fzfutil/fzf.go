@@ -30,10 +30,12 @@ func Run(items []string, opts Options) (string, error) {
 		// fzf with --print-query prints the query on line 1 and any selected
 		// items on subsequent lines. Last non-empty line is what we want
 		// (selection if any, else the query itself).
+		// fzf exits non-zero when there's no match — that's expected here, so
+		// we swallow the error as long as we have a usable string.
 		lines := strings.Split(out, "\n")
 		for i := len(lines) - 1; i >= 0; i-- {
 			if s := strings.TrimSpace(lines[i]); s != "" {
-				return s, err
+				return s, nil
 			}
 		}
 		return "", err
