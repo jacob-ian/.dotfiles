@@ -9,6 +9,7 @@ import (
 	"jmux/internal/fzfutil"
 	"jmux/internal/repo"
 	"jmux/internal/session"
+	"jmux/internal/tmuxctl"
 )
 
 // FeatureWorktrees collects all non-default worktrees across scanned roots.
@@ -32,6 +33,11 @@ func RunPicker(args []string) {
 	}
 
 	if len(dirs) == 0 {
+		if tmuxctl.InsideTmux() {
+			tmuxctl.DisplayMessage("No worktrees found")
+		} else {
+			fmt.Fprintln(os.Stderr, "No worktrees found")
+		}
 		return
 	}
 
