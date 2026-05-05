@@ -7,13 +7,13 @@ import (
 	"strings"
 
 	"jmux/internal/fzfutil"
+	"jmux/internal/notify"
 	"jmux/internal/repo"
 	"jmux/internal/session"
-	"jmux/internal/tmuxctl"
 )
 
-// FeatureWorktrees collects all non-default worktrees across scanned roots.
-func FeatureWorktrees() []string {
+// AllFeatureWorktrees collects non-default worktrees across every scan root.
+func AllFeatureWorktrees() []string {
 	roots := repo.ExpandPaths(repo.ScanRoots)
 	return repo.ScanReposParallel(roots, repo.FeatureWorktrees)
 }
@@ -25,7 +25,7 @@ func RunPicker(args []string) {
 	printOnly := fs.Bool("print", false, "Print worktree paths and exit")
 	fs.Parse(args)
 
-	dirs := FeatureWorktrees()
+	dirs := AllFeatureWorktrees()
 
 	if *printOnly {
 		fmt.Println(strings.Join(dirs, "\n"))
@@ -33,11 +33,7 @@ func RunPicker(args []string) {
 	}
 
 	if len(dirs) == 0 {
-		if tmuxctl.InsideTmux() {
-			tmuxctl.DisplayMessage("No worktrees found")
-		} else {
-			fmt.Fprintln(os.Stderr, "No worktrees found")
-		}
+		notify.Info("No worktrees found")
 		return
 	}
 
@@ -59,5 +55,7 @@ func RunPicker(args []string) {
 	if err != nil || sel == "" {
 		return
 	}
-	session.Open(repo.TrimSlash(sel), session.OpenOptions{})
+	if err := session.Open(repo.TrimSlash(sel), session.OpenOptions{}); err != nil {
+		notify.Error(err.Error())
+	}
 }

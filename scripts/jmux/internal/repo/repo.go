@@ -2,7 +2,6 @@ package repo
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -39,29 +38,6 @@ func FindBareRoot(dir string) string {
 		}
 		cur = parent
 	}
-}
-
-// GitCommonDir resolves the bare repo root for a worktree at dir.
-// Returns "" if dir is not inside a bare repo worktree.
-func GitCommonDir(dir string) string {
-	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	gitDir := strings.TrimSpace(string(out))
-	if gitDir == "" || gitDir == ".git" {
-		return ""
-	}
-	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(dir, gitDir)
-	}
-	abs, err := filepath.Abs(gitDir)
-	if err != nil {
-		return ""
-	}
-	return abs
 }
 
 // AdminDirFor returns the path of the worktree admin entry under

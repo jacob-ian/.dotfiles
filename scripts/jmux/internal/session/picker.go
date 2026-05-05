@@ -2,6 +2,7 @@ package session
 
 import (
 	"jmux/internal/fzfutil"
+	"jmux/internal/notify"
 	"jmux/internal/repo"
 )
 
@@ -23,7 +24,8 @@ func AllDirs() []string {
 	return dirs
 }
 
-// Pick runs the default sessionizer fzf picker.
+// Pick runs the default sessionizer fzf picker and returns the selected dir,
+// or "" if the user canceled.
 func Pick() string {
 	dirs := AllDirs()
 	if len(dirs) == 0 {
@@ -34,4 +36,16 @@ func Pick() string {
 		return ""
 	}
 	return repo.TrimSlash(sel)
+}
+
+// RunPicker handles `jmux` (the default subcommand): picks a session dir
+// and opens it.
+func RunPicker() {
+	dir := Pick()
+	if dir == "" {
+		return
+	}
+	if err := Open(dir, OpenOptions{}); err != nil {
+		notify.Error(err.Error())
+	}
 }

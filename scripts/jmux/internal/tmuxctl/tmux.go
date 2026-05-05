@@ -3,11 +3,17 @@ package tmuxctl
 import (
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
 func DisplayMessage(msg string) {
 	exec.Command("tmux", "display-message", msg).Run()
+}
+
+// DisplayMessageFor shows msg for ms milliseconds (overrides display-time).
+func DisplayMessageFor(msg string, ms int) {
+	exec.Command("tmux", "display-message", "-d", strconv.Itoa(ms), msg).Run()
 }
 
 func HasSession(name string) bool {

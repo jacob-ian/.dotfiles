@@ -9,6 +9,8 @@ import (
 	"syscall"
 
 	"jmux/internal/fzfutil"
+	"jmux/internal/gitctl"
+	"jmux/internal/notify"
 	"jmux/internal/repo"
 	"jmux/internal/session"
 	"jmux/internal/tmuxctl"
@@ -41,15 +43,15 @@ func pickRemoveTarget() (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	bareRoot := repo.GitCommonDir(cwd)
+	bareRoot := gitctl.CommonDir(cwd)
 	if bareRoot == "" {
-		tmuxctl.DisplayMessage("Not in a bare repo worktree")
+		notify.Error("Not in a bare repo worktree")
 		return "", false
 	}
 
 	candidates := repo.BareRepoWorktrees(bareRoot, true)
 	if len(candidates) == 0 {
-		tmuxctl.DisplayMessage("No removable worktrees")
+		notify.Info("No removable worktrees")
 		return "", false
 	}
 
@@ -63,7 +65,7 @@ func pickRemoveTarget() (string, bool) {
 func removeWorktree(path string, quiet bool) {
 	bareRoot := repo.FindBareRoot(path)
 	if bareRoot == "" {
-		bareRoot = repo.GitCommonDir(path)
+		bareRoot = gitctl.CommonDir(path)
 	}
 
 	sessionName := session.Name(path)
@@ -73,13 +75,9 @@ func removeWorktree(path string, quiet bool) {
 		// Fallback to a synchronous git worktree remove. We're already in the
 		// session being removed, so don't kill it first — git would lose track
 		// of the cwd. After git succeeds we still need to handle the session.
-		cmd := exec.Command("git", "worktree", "remove", path, "--force")
-		if bareRoot != "" {
-			cmd.Dir = bareRoot
-		}
-		if err := cmd.Run(); err != nil {
+		if err := gitctl.WorktreeRemove(bareRoot, path, true); err != nil {
 			if !quiet {
-				tmuxctl.DisplayMessage(fmt.Sprintf("Failed to remove worktree '%s'", displayName(path, bareRoot)))
+				notify.Error(fmt.Sprintf("Failed to remove worktree '%s'", displayName(path, bareRoot)))
 			}
 			return
 		}
@@ -95,7 +93,7 @@ func removeWorktree(path string, quiet bool) {
 	}
 
 	if !quiet {
-		tmuxctl.DisplayMessage(fmt.Sprintf("Removed worktree '%s'", displayName(path, bareRoot)))
+		notify.Info(fmt.Sprintf("Removed worktree '%s'", displayName(path, bareRoot)))
 	}
 }
 

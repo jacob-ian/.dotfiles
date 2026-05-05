@@ -12,7 +12,7 @@ func main() {
 	args := os.Args[1:]
 
 	if len(args) == 0 {
-		runDefaultPicker()
+		session.RunPicker()
 		return
 	}
 
@@ -26,14 +26,6 @@ func main() {
 		usage()
 		os.Exit(1)
 	}
-}
-
-func runDefaultPicker() {
-	dir := session.Pick()
-	if dir == "" {
-		return
-	}
-	session.Open(dir, session.OpenOptions{})
 }
 
 func runWorktree(args []string) {

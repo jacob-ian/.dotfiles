@@ -1,36 +1,35 @@
 package worktree
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"jmux/internal/fzfutil"
+	"jmux/internal/gitctl"
+	"jmux/internal/notify"
 	"jmux/internal/repo"
 	"jmux/internal/session"
-	"jmux/internal/tmuxctl"
 )
 
 // RunAdd handles `jmux worktree add`.
 func RunAdd(args []string) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		tmuxctl.DisplayMessage("Failed to read cwd")
+		notify.Error("Failed to read cwd")
 		return
 	}
-	bareRoot := repo.GitCommonDir(cwd)
+	bareRoot := gitctl.CommonDir(cwd)
 	if bareRoot == "" {
-		tmuxctl.DisplayMessage("Not in a bare repo worktree")
+		notify.Error("Not in a bare repo worktree")
 		return
 	}
 
-	branches, err := remoteBranches(bareRoot)
+	branches, err := gitctl.RemoteBranches(bareRoot)
 	if err != nil {
-		tmuxctl.DisplayMessage("Failed to list branches")
+		notify.Error("Failed to list branches")
 		return
 	}
 
@@ -45,50 +44,26 @@ func RunAdd(args []string) {
 	worktreePath := filepath.Join(bareRoot, branchName)
 
 	// Try existing branch first, then create new branch.
-	if !runGit(bareRoot, "worktree", "add", worktreePath, branchName) &&
-		!runGit(bareRoot, "worktree", "add", worktreePath, "-b", branchName) {
-		tmuxctl.DisplayMessage(fmt.Sprintf("Failed to create worktree '%s'", branchName))
-		return
+	if err := gitctl.WorktreeAdd(bareRoot, worktreePath, branchName, false); err != nil {
+		if err := gitctl.WorktreeAdd(bareRoot, worktreePath, branchName, true); err != nil {
+			notify.Error(fmt.Sprintf("Failed to create worktree '%s'", branchName))
+			return
+		}
 	}
 
 	copyEnvFiles(bareRoot, worktreePath)
 
-	session.Open(worktreePath, session.OpenOptions{WithClaude: true})
-
-	if installCmd := detectInstallCmd(worktreePath); installCmd != "" {
-		sessionName := session.Name(worktreePath)
-		shellCmd := fmt.Sprintf("%s || { echo; echo '[install failed — press enter to close]'; read; }", installCmd)
-		tmuxctl.NewWindow(sessionName, "install", worktreePath, shellCmd, true)
+	if err := session.Open(worktreePath, session.OpenOptions{
+		WithClaude: true,
+		InstallCmd: detectInstallCmd(worktreePath),
+	}); err != nil {
+		notify.Error(err.Error())
 	}
-}
-
-func remoteBranches(bareRoot string) ([]string, error) {
-	cmd := exec.Command("git", "-C", bareRoot, "branch", "-r")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	var branches []string
-	scanner := bufio.NewScanner(strings.NewReader(string(out)))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.Contains(line, "HEAD") {
-			continue
-		}
-		line = strings.TrimPrefix(line, "origin/")
-		branches = append(branches, line)
-	}
-	return branches, nil
-}
-
-func runGit(dir string, args ...string) bool {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	return cmd.Run() == nil
 }
 
 // copyEnvFiles copies any .env* file from the default-branch worktree into newPath.
 func copyEnvFiles(bareRoot, newPath string) {
-	defaultBranch := defaultBranchName(bareRoot)
+	defaultBranch := gitctl.DefaultBranch(bareRoot)
 	if defaultBranch == "" {
 		return
 	}
@@ -111,15 +86,6 @@ func copyEnvFiles(bareRoot, newPath string) {
 		dst := filepath.Join(newPath, e.Name())
 		copyFile(src, dst)
 	}
-}
-
-func defaultBranchName(bareRoot string) string {
-	cmd := exec.Command("git", "-C", bareRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/")
 }
 
 func copyFile(src, dst string) {

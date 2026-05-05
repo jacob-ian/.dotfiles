@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -25,22 +26,34 @@ func Name(dir string) string {
 
 type OpenOptions struct {
 	WithClaude bool
+	// InstallCmd, if non-empty, runs in a detached "install" window. The shell
+	// wrapper pauses on failure so the user can read the error.
+	InstallCmd string
 }
 
 // Open ensures a tmux session exists for dir and switches/attaches to it.
-func Open(dir string, opts OpenOptions) {
+func Open(dir string, opts OpenOptions) error {
 	name := Name(dir)
 	if !tmuxctl.HasSession(name) {
-		tmuxctl.NewSession(name, dir, "nvim", "nvim")
+		if err := tmuxctl.NewSession(name, dir, "nvim", "nvim"); err != nil {
+			return fmt.Errorf("create session %q: %w", name, err)
+		}
 		if opts.WithClaude {
-			tmuxctl.NewWindow(name, "claude", dir, "claude", false)
+			if err := tmuxctl.NewWindow(name, "claude", dir, "claude", false); err != nil {
+				return fmt.Errorf("create claude window: %w", err)
+			}
 			tmuxctl.SelectWindow(name + ":1")
+		}
+		if opts.InstallCmd != "" {
+			shellCmd := fmt.Sprintf("%s || { echo; echo '[install failed — press enter to close]'; read; }", opts.InstallCmd)
+			if err := tmuxctl.NewWindow(name, "install", dir, shellCmd, true); err != nil {
+				return fmt.Errorf("create install window: %w", err)
+			}
 		}
 	}
 
 	if tmuxctl.InsideTmux() {
-		tmuxctl.SwitchClient(name)
-		return
+		return tmuxctl.SwitchClient(name)
 	}
-	tmuxctl.Attach(name)
+	return tmuxctl.Attach(name)
 }
