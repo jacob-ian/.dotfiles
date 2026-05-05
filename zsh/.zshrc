@@ -8,6 +8,7 @@ source $ZSH/oh-my-zsh.sh
 export PATH="/usr/local/go/bin:$PATH"
 export PATH="$HOME/go/bin:$PATH"
 export PATH="$PATH:$HOME/.config/scripts/"
+export PATH="$PATH:$HOME/.config/scripts/jmux/bin"
 export PATH="$HOME/.local/bin:$PATH"
 eval "$(fnm env --use-on-cd --shell zsh)"
 
@@ -15,7 +16,7 @@ export GPG_TTY=$(tty)
 
 alias vim=nvim
 
-bindkey -s ^f "$HOME/.config/scripts/tmux-sessionizer-go/tmux-sessionizer\n"
+bindkey -s ^f "jmux\n"
 
 [ -s "$HOME/.secrets.sh" ] && source $HOME/.secrets.sh
 
