@@ -25,7 +25,7 @@ const errorDisplayMs = 4000
 // Error reports an error, rendered red+bold inside tmux.
 func Error(msg string) {
 	if tmuxctl.InsideTmux() {
-		tmuxctl.DisplayMessageFor("#[fg=red,bold]"+msg+"#[default]", errorDisplayMs)
+		tmuxctl.DisplayMessageFor("#[fg=red,bold]✖#[fg=black,bold] "+msg, errorDisplayMs)
 		return
 	}
 	fmt.Fprintln(os.Stderr, msg)
