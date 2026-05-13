@@ -33,7 +33,7 @@
       "Bash(go doc *)",
       "Bash(go test *)"
     ],
-    "defaultMode": "default"
+    "defaultMode": "auto"
   },
   "hooks": {
     "Notification": [
