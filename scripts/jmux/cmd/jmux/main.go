@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"jmux/internal/claudectl"
 	"jmux/internal/session"
 	"jmux/internal/worktree"
 )
@@ -19,6 +20,11 @@ func main() {
 	switch args[0] {
 	case "worktree":
 		runWorktree(args[1:])
+	case "claude":
+		if err := claudectl.Run(args[1:]); err != nil {
+			fmt.Fprintf(os.Stderr, "jmux claude: %v\n", err)
+			os.Exit(1)
+		}
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -58,5 +64,7 @@ func usage() {
   jmux worktree remove --path P --quiet
                                 Remove a specific worktree (used by ctrl-x bind)
   jmux worktree preview --path P
-                                Print a summary of P (used by fzf --preview)`)
+                                Print a summary of P (used by fzf --preview)
+  jmux claude [args...]         Launch claude paired with the nvim instance
+                                whose workspace contains the current directory`)
 }

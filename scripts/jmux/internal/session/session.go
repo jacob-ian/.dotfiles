@@ -39,7 +39,7 @@ func Open(dir string, opts OpenOptions) error {
 			return fmt.Errorf("create session %q: %w", name, err)
 		}
 		if opts.WithClaude {
-			if err := tmuxctl.NewWindow(name, "claude", dir, "claude", false); err != nil {
+			if err := tmuxctl.NewWindow(name, "claude", dir, "jmux claude", false); err != nil {
 				return fmt.Errorf("create claude window: %w", err)
 			}
 			tmuxctl.SelectWindow(name + ":1")
