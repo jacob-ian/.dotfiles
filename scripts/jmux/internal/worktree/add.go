@@ -1,7 +1,6 @@
 package worktree
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,7 +13,6 @@ import (
 	"jmux/internal/session"
 )
 
-// RunAdd handles `jmux worktree add`.
 func RunAdd(args []string) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -33,22 +31,20 @@ func RunAdd(args []string) {
 		return
 	}
 
-	branchName, err := fzfutil.Run(branches, fzfutil.Options{
-		Prompt:     "branch> ",
-		PrintQuery: true,
-	})
+	branchName, err := fzfutil.PickOrQuery(branches, fzfutil.Options{Prompt: "branch> "})
 	if err != nil || branchName == "" {
 		return
 	}
 
 	worktreePath := filepath.Join(bareRoot, branchName)
-
-	// Try existing branch first, then create new branch.
-	if err := gitctl.WorktreeAdd(bareRoot, worktreePath, branchName, false); err != nil {
-		if err := gitctl.WorktreeAdd(bareRoot, worktreePath, branchName, true); err != nil {
-			notify.Error(fmt.Sprintf("Failed to create worktree '%s'", branchName))
-			return
+	createBranch := !gitctl.RefExists(bareRoot, branchName)
+	if err := gitctl.WorktreeAdd(bareRoot, worktreePath, branchName, createBranch); err != nil {
+		flag := ""
+		if createBranch {
+			flag = " -b " + branchName
 		}
+		notify.Errorf("git worktree add%s: %s", flag, gitctl.CleanErr(err))
+		return
 	}
 
 	copyEnvFiles(bareRoot, worktreePath)

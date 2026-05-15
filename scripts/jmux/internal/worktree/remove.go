@@ -55,7 +55,7 @@ func pickRemoveTarget() (string, bool) {
 		return "", false
 	}
 
-	sel, err := fzfutil.Run(candidates, fzfutil.Options{Prompt: "remove worktree> "})
+	sel, err := fzfutil.Pick(candidates, fzfutil.Options{Prompt: "remove worktree> "})
 	if err != nil || sel == "" {
 		return "", false
 	}
@@ -77,7 +77,7 @@ func removeWorktree(path string, quiet bool) {
 		// of the cwd. After git succeeds we still need to handle the session.
 		if err := gitctl.WorktreeRemove(bareRoot, path, true); err != nil {
 			if !quiet {
-				notify.Error(fmt.Sprintf("Failed to remove worktree '%s'", displayName(path, bareRoot)))
+				notify.Errorf("Failed to remove worktree '%s'", displayName(path, bareRoot))
 			}
 			return
 		}
@@ -87,13 +87,13 @@ func removeWorktree(path string, quiet bool) {
 	// session we're inside, killing it directly would SIGHUP this process before
 	// the picker can reload. Detach a worker that survives our death.
 	if inCurrent {
-		spawnDetachedKillSession(sessionName)
+		spawnDetached("tmux", "kill-session", "-t="+sessionName)
 	} else {
 		tmuxctl.KillSession(sessionName)
 	}
 
 	if !quiet {
-		notify.Info(fmt.Sprintf("Removed worktree '%s'", displayName(path, bareRoot)))
+		notify.Infof("Removed worktree '%s'", displayName(path, bareRoot))
 	}
 }
 
@@ -122,24 +122,14 @@ func fastRemove(path, bareRoot string) bool {
 		os.Rename(trash, path)
 		return false
 	}
-	spawnDetachedRm(trash)
+	spawnDetached("rm", "-rf", trash)
 	return true
 }
 
-func spawnDetachedRm(target string) {
-	cmd := exec.Command("rm", "-rf", target)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	_ = cmd.Start()
-}
-
-// spawnDetachedKillSession fires `tmux kill-session` from a session-leader
-// subprocess so the kill survives our own SIGHUP when we're inside the
-// session being killed.
-func spawnDetachedKillSession(name string) {
-	cmd := exec.Command("tmux", "kill-session", "-t="+name)
+// spawnDetached starts a session-leader subprocess with detached stdio; the
+// child survives this process's SIGHUP.
+func spawnDetached(name string, args ...string) {
+	cmd := exec.Command(name, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdin = nil
 	cmd.Stdout = nil

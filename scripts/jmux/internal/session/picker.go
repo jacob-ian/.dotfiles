@@ -31,7 +31,7 @@ func Pick() string {
 	if len(dirs) == 0 {
 		return ""
 	}
-	sel, err := fzfutil.Run(dirs, fzfutil.Options{Prompt: "session> "})
+	sel, err := fzfutil.Pick(dirs, fzfutil.Options{Prompt: "session> "})
 	if err != nil {
 		return ""
 	}

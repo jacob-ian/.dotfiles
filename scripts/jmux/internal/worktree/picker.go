@@ -12,14 +12,13 @@ import (
 	"jmux/internal/session"
 )
 
-// AllFeatureWorktrees collects non-default worktrees across every scan root.
 func AllFeatureWorktrees() []string {
 	roots := repo.ExpandPaths(repo.ScanRoots)
 	return repo.ScanReposParallel(roots, repo.FeatureWorktrees)
 }
 
-// RunPicker handles `jmux worktree`. With --print, just lists worktree paths
-// to stdout (used by fzf reload binding).
+// RunPicker with --print just lists worktree paths to stdout; this form is
+// what the ctrl-x remove binding reloads against.
 func RunPicker(args []string) {
 	fs := flag.NewFlagSet("worktree", flag.ExitOnError)
 	printOnly := fs.Bool("print", false, "Print worktree paths and exit")
@@ -48,7 +47,7 @@ func RunPicker(args []string) {
 	)
 	togglePreview := "ctrl-/:toggle-preview"
 
-	sel, err := fzfutil.Run(dirs, fzfutil.Options{
+	sel, err := fzfutil.Pick(dirs, fzfutil.Options{
 		Prompt:        "worktree> ",
 		Header:        "ctrl-x: remove worktree · ctrl-/: toggle preview",
 		Bindings:      []string{removeBind, togglePreview},

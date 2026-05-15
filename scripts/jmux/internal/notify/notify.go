@@ -9,7 +9,6 @@ import (
 	"jmux/internal/tmuxctl"
 )
 
-// Info reports an informational message.
 func Info(msg string) {
 	if tmuxctl.InsideTmux() {
 		tmuxctl.DisplayMessage(msg)
@@ -18,15 +17,23 @@ func Info(msg string) {
 	fmt.Fprintln(os.Stderr, msg)
 }
 
+func Infof(format string, args ...any) {
+	Info(fmt.Sprintf(format, args...))
+}
+
 // errorDisplayMs holds errors on the tmux status line longer than the default
 // display-time so they don't flash by.
 const errorDisplayMs = 4000
 
-// Error reports an error, rendered red+bold inside tmux.
+// Error renders msg red+bold when displayed inside tmux.
 func Error(msg string) {
 	if tmuxctl.InsideTmux() {
 		tmuxctl.DisplayMessageFor("#[fg=red,bold]✖#[fg=black,bold] "+msg, errorDisplayMs)
 		return
 	}
 	fmt.Fprintln(os.Stderr, msg)
+}
+
+func Errorf(format string, args ...any) {
+	Error(fmt.Sprintf(format, args...))
 }

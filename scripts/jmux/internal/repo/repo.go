@@ -40,19 +40,22 @@ func FindBareRoot(dir string) string {
 	}
 }
 
-// AdminDirFor returns the path of the worktree admin entry under
-// `<bare>/worktrees/` whose gitdir resolves to worktreePath. Returns ""
-// if no matching admin entry is found.
-func AdminDirFor(bare, worktreePath string) string {
+// adminEntry pairs a worktree admin directory under `<bare>/worktrees/<name>`
+// with the resolved working tree directory it points at (read from `gitdir`).
+type adminEntry struct {
+	adminDir string
+	gitdir   string
+}
+
+// readAdmins enumerates worktree admin entries under `<bare>/worktrees/`,
+// skipping any that lack a readable `gitdir` pointer file.
+func readAdmins(bare string) []adminEntry {
 	worktreesDir := filepath.Join(bare, "worktrees")
 	entries, err := os.ReadDir(worktreesDir)
 	if err != nil {
-		return ""
+		return nil
 	}
-	want, err := filepath.Abs(worktreePath)
-	if err != nil {
-		want = worktreePath
-	}
+	var out []adminEntry
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -62,36 +65,44 @@ func AdminDirFor(bare, worktreePath string) string {
 		if err != nil {
 			continue
 		}
-		got := filepath.Dir(strings.TrimSpace(string(data)))
+		out = append(out, adminEntry{
+			adminDir: adminDir,
+			gitdir:   filepath.Dir(strings.TrimSpace(string(data))),
+		})
+	}
+	return out
+}
+
+// AdminDirFor returns the path of the worktree admin entry under
+// `<bare>/worktrees/` whose gitdir resolves to worktreePath. Returns ""
+// if no matching admin entry is found.
+func AdminDirFor(bare, worktreePath string) string {
+	want, err := filepath.Abs(worktreePath)
+	if err != nil {
+		want = worktreePath
+	}
+	for _, a := range readAdmins(bare) {
+		got := a.gitdir
 		if abs, err := filepath.Abs(got); err == nil {
 			got = abs
 		}
 		if got == want {
-			return adminDir
+			return a.adminDir
 		}
 	}
 	return ""
 }
 
 func BareRepoWorktrees(bare string, skipDefault bool) []string {
-	worktreesDir := filepath.Join(bare, "worktrees")
-	entries, err := os.ReadDir(worktreesDir)
-	if err != nil {
-		return nil
-	}
 	var out []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	for _, a := range readAdmins(bare) {
+		if skipDefault {
+			name := filepath.Base(a.adminDir)
+			if name == "main" || name == "master" {
+				continue
+			}
 		}
-		if skipDefault && (e.Name() == "main" || e.Name() == "master") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(worktreesDir, e.Name(), "gitdir"))
-		if err != nil {
-			continue
-		}
-		out = append(out, filepath.Dir(strings.TrimSpace(string(data))))
+		out = append(out, a.gitdir)
 	}
 	return out
 }

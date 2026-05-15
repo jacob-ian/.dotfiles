@@ -21,7 +21,6 @@ func HasSession(name string) bool {
 	return exec.Command("tmux", "has-session", "-t="+name).Run() == nil
 }
 
-// HasWindow reports whether session `name` has a window called `window`.
 func HasWindow(name, window string) bool {
 	out, err := exec.Command("tmux", "list-windows", "-t="+name, "-F", "#{window_name}").Output()
 	if err != nil {
