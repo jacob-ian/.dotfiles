@@ -10,16 +10,20 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"jmux/internal/tmuxctl"
 )
 
 type lockFile struct {
 	WorkspaceFolders []string `json:"workspaceFolders"`
 }
 
-// Run sets CLAUDE_CODE_SSE_PORT (if a matching lock file is present) then
-// tries `claude --continue args...`. If that exits non-zero (typically
-// because no resumable session exists for cwd), replaces this process with
-// a plain `claude args...`. Mirrors the shell idiom `claude --continue || claude`.
+// Run sets CLAUDE_CODE_SSE_PORT (if a matching lock file is present), then
+// tries `claude --continue args...` when this is the first claude window in
+// the current tmux session. Subsequent claude windows skip --continue so the
+// user gets a fresh session rather than a resume of the existing one. On
+// --continue failure or when skipped, replaces this process with plain
+// `claude args...`.
 func Run(args []string) error {
 	if port := findPort(); port != "" {
 		os.Setenv("CLAUDE_CODE_SSE_PORT", port)
@@ -30,13 +34,31 @@ func Run(args []string) error {
 		return err
 	}
 
-	cmd := exec.Command(claudePath, append([]string{"--continue"}, args...)...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := cmd.Run(); err == nil {
-		return nil
+	if shouldContinue() {
+		cmd := exec.Command(claudePath, append([]string{"--continue"}, args...)...)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
 	}
 
 	return syscall.Exec(claudePath, append([]string{claudePath}, args...), os.Environ())
+}
+
+// shouldContinue reports whether to attempt `claude --continue`. It returns
+// false when another claude window already exists in the current tmux session
+// (i.e. this is at least the second claude launch); outside tmux it returns
+// true so a manual `jmux claude` invocation resumes as before.
+func shouldContinue() bool {
+	session := tmuxctl.CurrentSession()
+	if session == "" {
+		return true
+	}
+	others := tmuxctl.CountWindows(session, "claude")
+	if tmuxctl.CurrentWindow() == "claude" {
+		others--
+	}
+	return others <= 0
 }
 
 func findPort() string {

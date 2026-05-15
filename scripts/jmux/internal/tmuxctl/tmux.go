@@ -21,12 +21,28 @@ func HasSession(name string) bool {
 	return exec.Command("tmux", "has-session", "-t="+name).Run() == nil
 }
 
-func HasWindow(name, window string) bool {
-	out, err := exec.Command("tmux", "list-windows", "-t="+name, "-F", "#{window_name}").Output()
+// WindowNames returns the names of all windows in session. Empty on error.
+func WindowNames(session string) []string {
+	out, err := exec.Command("tmux", "list-windows", "-t="+session, "-F", "#{window_name}").Output()
 	if err != nil {
-		return false
+		return nil
 	}
-	return slices.Contains(strings.Split(strings.TrimSpace(string(out)), "\n"), window)
+	return strings.Split(strings.TrimSpace(string(out)), "\n")
+}
+
+func HasWindow(session, window string) bool {
+	return slices.Contains(WindowNames(session), window)
+}
+
+// CountWindows returns the number of windows in session named exactly window.
+func CountWindows(session, window string) int {
+	n := 0
+	for _, w := range WindowNames(session) {
+		if w == window {
+			n++
+		}
+	}
+	return n
 }
 
 // CapturePane returns the visible buffer of target (e.g. "session:window"),
@@ -105,10 +121,20 @@ func InsideTmux() bool {
 // CurrentSession returns the name of the tmux session containing the running
 // process, or "" when not inside tmux.
 func CurrentSession() string {
+	return current("#S")
+}
+
+// CurrentWindow returns the name of the tmux window containing the running
+// process, or "" when not inside tmux.
+func CurrentWindow() string {
+	return current("#W")
+}
+
+func current(fmt string) string {
 	if !InsideTmux() {
 		return ""
 	}
-	out, err := exec.Command("tmux", "display-message", "-p", "#S").Output()
+	out, err := exec.Command("tmux", "display-message", "-p", fmt).Output()
 	if err != nil {
 		return ""
 	}
