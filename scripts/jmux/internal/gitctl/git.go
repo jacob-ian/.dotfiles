@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -75,6 +76,61 @@ func WorktreeAdd(bareRoot, path, branch string, createBranch bool) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = bareRoot
 	return cmd.Run()
+}
+
+// CurrentBranch returns the short branch name HEAD points at, or "" if
+// detached.
+func CurrentBranch(dir string) string {
+	cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// AheadBehind returns commits ahead and behind ref, evaluated from dir.
+// Returns (0, 0, false) if the comparison fails (e.g. ref not present).
+func AheadBehind(dir, ref string) (int, int, bool) {
+	cmd := exec.Command("git", "rev-list", "--left-right", "--count", ref+"...HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0, false
+	}
+	parts := strings.Fields(strings.TrimSpace(string(out)))
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	behind, err1 := strconv.Atoi(parts[0])
+	ahead, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return 0, 0, false
+	}
+	return ahead, behind, true
+}
+
+// ShortStatus returns `git status --short` output from dir.
+func ShortStatus(dir string) string {
+	cmd := exec.Command("git", "status", "--short")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(string(out), "\n")
+}
+
+// LogOneline runs `git log --oneline -n N <revRange>` from dir.
+func LogOneline(dir, revRange string, n int) string {
+	cmd := exec.Command("git", "log", "--oneline", "-n", strconv.Itoa(n), revRange)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(string(out), "\n")
 }
 
 // WorktreeRemove removes a worktree from git's view. Use force to drop

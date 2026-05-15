@@ -3,6 +3,7 @@ package tmuxctl
 import (
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -18,6 +19,30 @@ func DisplayMessageFor(msg string, ms int) {
 
 func HasSession(name string) bool {
 	return exec.Command("tmux", "has-session", "-t="+name).Run() == nil
+}
+
+// HasWindow reports whether session `name` has a window called `window`.
+func HasWindow(name, window string) bool {
+	out, err := exec.Command("tmux", "list-windows", "-t="+name, "-F", "#{window_name}").Output()
+	if err != nil {
+		return false
+	}
+	return slices.Contains(strings.Split(strings.TrimSpace(string(out)), "\n"), window)
+}
+
+// CapturePane returns the visible buffer of target (e.g. "session:window"),
+// including up to `scrollback` extra lines of history. ANSI escapes are
+// stripped.
+func CapturePane(target string, scrollback int) string {
+	args := []string{"capture-pane", "-p", "-t", target}
+	if scrollback > 0 {
+		args = append(args, "-S", "-"+strconv.Itoa(scrollback))
+	}
+	out, err := exec.Command("tmux", args...).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(string(out), "\n")
 }
 
 func KillSession(name string) {

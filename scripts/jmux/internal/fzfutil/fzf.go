@@ -8,10 +8,12 @@ import (
 )
 
 type Options struct {
-	Prompt     string
-	Header     string
-	Bindings   []string
-	PrintQuery bool
+	Prompt        string
+	Header        string
+	Bindings      []string
+	PrintQuery    bool
+	Preview       string
+	PreviewWindow string
 }
 
 // Run pipes items into fzf and returns the trimmed selection.
@@ -59,6 +61,12 @@ func buildArgs(opts Options) []string {
 	}
 	if opts.PrintQuery {
 		args = append(args, "--print-query")
+	}
+	if opts.Preview != "" {
+		args = append(args, "--preview="+opts.Preview)
+	}
+	if opts.PreviewWindow != "" {
+		args = append(args, "--preview-window="+opts.PreviewWindow)
 	}
 	return args
 }

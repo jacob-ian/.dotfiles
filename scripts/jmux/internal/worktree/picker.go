@@ -42,15 +42,18 @@ func RunPicker(args []string) {
 		self = "jmux"
 	}
 
-	bind := fmt.Sprintf(
+	removeBind := fmt.Sprintf(
 		"ctrl-x:execute-silent(%s worktree remove --path {} --quiet)+reload(%s worktree --print)",
 		self, self,
 	)
+	togglePreview := "ctrl-/:toggle-preview"
 
 	sel, err := fzfutil.Run(dirs, fzfutil.Options{
-		Prompt:   "worktree> ",
-		Header:   "ctrl-x: remove worktree",
-		Bindings: []string{bind},
+		Prompt:        "worktree> ",
+		Header:        "ctrl-x: remove worktree · ctrl-/: toggle preview",
+		Bindings:      []string{removeBind, togglePreview},
+		Preview:       fmt.Sprintf("%s worktree preview --path {}", self),
+		PreviewWindow: "follow",
 	})
 	if err != nil || sel == "" {
 		return

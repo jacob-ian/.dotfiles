@@ -38,6 +38,8 @@ func runWorktree(args []string) {
 		worktree.RunAdd(args[1:])
 	case "remove":
 		worktree.RunRemove(args[1:])
+	case "preview":
+		worktree.RunPreview(args[1:])
 	case "--print":
 		worktree.RunPicker(args)
 	default:
@@ -54,5 +56,7 @@ func usage() {
   jmux worktree add             Create a worktree from a remote branch
   jmux worktree remove          Remove a worktree (interactive)
   jmux worktree remove --path P --quiet
-                                Remove a specific worktree (used by ctrl-x bind)`)
+                                Remove a specific worktree (used by ctrl-x bind)
+  jmux worktree preview --path P
+                                Print a summary of P (used by fzf --preview)`)
 }
