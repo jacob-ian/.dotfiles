@@ -47,6 +47,8 @@ func runWorkspace(args []string) {
 		workspace.RunAdd()
 	case "remove":
 		workspace.RunRemove(args[1:])
+	case "preview":
+		workspace.RunPreview(args[1:])
 	case "--print":
 		workspace.RunPicker(args)
 	default:
@@ -66,8 +68,6 @@ func runWorktree(args []string) {
 		worktree.RunAdd(args[1:])
 	case "remove":
 		worktree.RunRemove(args[1:])
-	case "preview":
-		worktree.RunPreview(args[1:])
 	case "--print":
 		worktree.RunPicker(args)
 	default:
@@ -86,13 +86,13 @@ func usage() {
   jmux workspace remove --path P [--quiet]
                                 Remove a worktree-backed workspace, or close the
                                 session for a plain one (never deletes the dir)
+  jmux workspace preview --path P
+                                Print a summary of P (used by fzf --preview)
   jmux worktree                 Open the worktrees picker (ctrl-x removes)
   jmux worktree add             Create a worktree from a remote branch
   jmux worktree remove          Remove a worktree (interactive)
   jmux worktree remove --path P --quiet
                                 Remove a specific worktree (used by ctrl-x bind)
-  jmux worktree preview --path P
-                                Print a summary of P (used by fzf --preview)
   jmux claude [args...]         Launch claude paired with the nvim instance
                                 whose workspace contains the current directory`)
 }

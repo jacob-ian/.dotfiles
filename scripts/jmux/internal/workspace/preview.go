@@ -1,26 +1,28 @@
-package worktree
+package workspace
 
 import (
 	"flag"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"jmux/internal/gitctl"
 	"jmux/internal/repo"
 	"jmux/internal/session"
 	"jmux/internal/tmuxctl"
+	"jmux/internal/worktree"
 )
 
-// RunPreview prints a one-screen summary of the worktree at --path. Invoked by
+// RunPreview prints a one-screen summary of the workspace at --path. Invoked by
 // fzf on every cursor move, so it must be fast and never error to stderr.
 //
 // Git calls are fanned out in two waves of goroutines to overlap their
 // subprocess + IO costs. On a typical repo the wall-clock is bounded by the
 // slowest single call (`git status`) rather than their sum.
 func RunPreview(args []string) {
-	fs := flag.NewFlagSet("worktree preview", flag.ContinueOnError)
-	path := fs.String("path", "", "Worktree path to summarise")
+	fs := flag.NewFlagSet("workspace preview", flag.ContinueOnError)
+	path := fs.String("path", "", "Workspace path to summarise")
 	if err := fs.Parse(args); err != nil || *path == "" {
 		return
 	}
@@ -31,9 +33,10 @@ func RunPreview(args []string) {
 		branch        string
 		status        string
 		defaultBranch string
+		removable     bool
 	)
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
 	go func() { defer wg.Done(); branch = gitctl.CurrentBranch(*path) }()
 	go func() { defer wg.Done(); status = gitctl.ShortStatus(*path) }()
 	go func() {
@@ -42,6 +45,7 @@ func RunPreview(args []string) {
 			defaultBranch = gitctl.DefaultBranch(bareRoot)
 		}
 	}()
+	go func() { defer wg.Done(); removable = worktree.IsManagedWorktree(*path) }()
 	wg.Wait()
 
 	if branch == "" {
@@ -77,24 +81,27 @@ func RunPreview(args []string) {
 		go func() { defer wg2.Done(); logOutput = gitctl.LogOneline(*path, ref+"..HEAD", 10) }()
 		wg2.Wait()
 
-		switch {
-		case !ok:
+		if !ok {
 			verdict = "no upstream comparison"
-			logOutput = ""
-		case ahead == 0 && !dirty:
-			verdict = "MERGED — safe to remove"
-			logOutput = ""
-		case ahead == 0 && dirty:
-			verdict = "DIRTY (no unique commits)"
-			logOutput = ""
-		default:
-			verdict = fmt.Sprintf("↑%d ↓%d vs %s", ahead, behind, ref)
+		} else {
+			var parts []string
+			if ahead > 0 || behind > 0 {
+				parts = append(parts, fmt.Sprintf("↑%d ↓%d vs %s", ahead, behind, ref))
+			}
 			if dirty {
-				verdict += " · DIRTY"
+				parts = append(parts, "uncommitted changes")
+			}
+			switch {
+			case len(parts) > 0:
+				verdict = strings.Join(parts, " · ")
+			case removable:
+				verdict = "no unique commits — safe to remove"
+			default:
+				verdict = "up to date with " + ref
 			}
 		}
 	} else if dirty {
-		verdict = "DIRTY"
+		verdict = "uncommitted changes"
 	}
 
 	if verdict != "" {
@@ -102,24 +109,35 @@ func RunPreview(args []string) {
 	}
 	fmt.Println()
 
+	// For an open session, show a live pane instead of git detail: claude if
+	// it's running, otherwise the nvim editor view. nvim is an alt-screen TUI,
+	// so capture only the visible pane (no scrollback).
 	sessionName := session.Name(*path)
-	if tmuxctl.HasSession(sessionName) && tmuxctl.HasWindow(sessionName, "claude") {
-		capture := tmuxctl.CapturePane(sessionName+":claude", 40)
-		if capture != "" {
-			fmt.Println("claude:")
-			fmt.Println(capture)
-			return
+	if tmuxctl.HasSession(sessionName) {
+		if tmuxctl.HasWindow(sessionName, "claude") {
+			if capture := tmuxctl.CapturePane(sessionName+":claude", 40); capture != "" {
+				fmt.Println("claude:")
+				fmt.Println(capture)
+				return
+			}
+		}
+		if tmuxctl.HasWindow(sessionName, "nvim") {
+			if capture := tmuxctl.CapturePane(sessionName+":nvim", 0); capture != "" {
+				fmt.Println("nvim:")
+				fmt.Println(capture)
+				return
+			}
 		}
 	}
 
 	if dirty {
-		fmt.Println("Working tree:")
+		fmt.Println("uncommitted changes:")
 		fmt.Println(status)
 		fmt.Println()
 	}
 
 	if logOutput != "" {
-		fmt.Printf("Unique commits (origin/%s..HEAD):\n", defaultBranch)
+		fmt.Println("commits from HEAD:")
 		fmt.Println(logOutput)
 	}
 }

@@ -109,7 +109,7 @@ func RunPicker(args []string) {
 		Prompt:        "workspace> ",
 		Header:        "ctrl-t: add worktree · ctrl-x: remove workspace · ctrl-/: toggle preview",
 		Bindings:      []string{addBind, removeBind, togglePreview},
-		Preview:       fmt.Sprintf("%s worktree preview --path {}", self),
+		Preview:       fmt.Sprintf("%s workspace preview --path {}", self),
 		PreviewWindow: "follow",
 	})
 	if err != nil || sel == "" {
