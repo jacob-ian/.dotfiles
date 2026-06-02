@@ -24,7 +24,13 @@ func RunAdd(args []string) {
 		notify.Error("Not in a bare repo worktree")
 		return
 	}
+	AddWorktree(bareRoot)
+}
 
+// AddWorktree runs the branch picker for bareRoot, creates the worktree, copies
+// env files from the default branch, and opens a session with claude + install
+// windows. bareRoot must be a bare repo root.
+func AddWorktree(bareRoot string) {
 	branches, err := gitctl.RemoteBranches(bareRoot)
 	if err != nil {
 		notify.Error("Failed to list branches")

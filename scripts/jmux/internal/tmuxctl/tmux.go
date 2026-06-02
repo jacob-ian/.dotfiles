@@ -21,6 +21,45 @@ func HasSession(name string) bool {
 	return exec.Command("tmux", "has-session", "-t="+name).Run() == nil
 }
 
+// ListSessions returns the names of all tmux sessions. Empty when the server
+// isn't running or on error.
+func ListSessions() []string {
+	out, err := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
+	if err != nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "\n")
+}
+
+// SetSessionOption sets a session-scoped option (e.g. a user option like
+// "@jmux_dir") on the named session.
+func SetSessionOption(name, key, value string) {
+	exec.Command("tmux", "set-option", "-t", name, key, value).Run()
+}
+
+// SessionOption returns the value of a session option, or "" if unset.
+func SessionOption(name, key string) string {
+	out, err := exec.Command("tmux", "show-options", "-v", "-t", name, key).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// SessionPath returns the current path of the session's active pane, used as a
+// fallback for sessions created before @jmux_dir stamping existed.
+func SessionPath(name string) string {
+	out, err := exec.Command("tmux", "display-message", "-p", "-t", name, "#{pane_current_path}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // WindowNames returns the names of all windows in session. Empty on error.
 func WindowNames(session string) []string {
 	out, err := exec.Command("tmux", "list-windows", "-t="+session, "-F", "#{window_name}").Output()

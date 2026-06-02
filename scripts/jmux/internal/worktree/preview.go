@@ -45,7 +45,11 @@ func RunPreview(args []string) {
 	wg.Wait()
 
 	if branch == "" {
-		branch = "(detached)"
+		if bareRoot == "" {
+			branch = filepath.Base(*path)
+		} else {
+			branch = "(detached)"
+		}
 	}
 	repoName := ""
 	if bareRoot != "" {

@@ -107,6 +107,17 @@ func BareRepoWorktrees(bare string, skipDefault bool) []string {
 	return out
 }
 
+// BareRepos returns the bare-repo roots found directly under the scan roots.
+func BareRepos() []string {
+	roots := ExpandPaths(ScanRoots)
+	return ScanReposParallel(roots, func(dir string) []string {
+		if IsBareRepo(dir) {
+			return []string{dir}
+		}
+		return nil
+	})
+}
+
 func ProjectDirs(dir string) []string {
 	if !IsBareRepo(dir) {
 		return []string{dir}

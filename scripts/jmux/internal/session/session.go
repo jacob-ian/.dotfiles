@@ -2,8 +2,10 @@ package session
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"jmux/internal/repo"
 	"jmux/internal/tmuxctl"
@@ -38,6 +40,9 @@ func Open(dir string, opts OpenOptions) error {
 		if err := tmuxctl.NewSession(name, dir, "nvim", "nvim"); err != nil {
 			return fmt.Errorf("create session %q: %w", name, err)
 		}
+		// Stamp the originating dir so the workspace overview can map sessions
+		// back to directories without reverse-engineering the session name.
+		tmuxctl.SetSessionOption(name, "@jmux_dir", dir)
 		if opts.WithClaude {
 			if err := tmuxctl.NewWindow(name, "claude", dir, "jmux claude", false); err != nil {
 				return fmt.Errorf("create claude window: %w", err)
@@ -56,4 +61,18 @@ func Open(dir string, opts OpenOptions) error {
 		return tmuxctl.SwitchClient(name)
 	}
 	return tmuxctl.Attach(name)
+}
+
+// Kill terminates the named tmux session. When it's the session we're currently
+// inside, killing it directly would SIGHUP this process before any follow-up
+// (e.g. an fzf reload) can run, so the kill is detached to a process that
+// survives our death.
+func Kill(name string) {
+	if tmuxctl.CurrentSession() == name {
+		cmd := exec.Command("tmux", "kill-session", "-t="+name)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		_ = cmd.Start()
+		return
+	}
+	tmuxctl.KillSession(name)
 }

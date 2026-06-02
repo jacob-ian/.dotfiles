@@ -13,7 +13,6 @@ import (
 	"jmux/internal/notify"
 	"jmux/internal/repo"
 	"jmux/internal/session"
-	"jmux/internal/tmuxctl"
 )
 
 // RunRemove handles `jmux worktree remove`.
@@ -35,7 +34,26 @@ func RunRemove(args []string) {
 		target = t
 	}
 
-	removeWorktree(target, *quiet)
+	Remove(target, *quiet)
+}
+
+// IsManagedWorktree reports whether path is a jmux-removable worktree: it lives
+// under a bare repo's worktrees admin and is not the default/main branch
+// checkout. Plain directories and main checkouts return false so callers know
+// not to delete them.
+func IsManagedWorktree(path string) bool {
+	bareRoot := repo.FindBareRoot(path)
+	if bareRoot == "" {
+		bareRoot = gitctl.CommonDir(path)
+	}
+	if bareRoot == "" || repo.AdminDirFor(bareRoot, path) == "" {
+		return false
+	}
+	base := filepath.Base(path)
+	if base == "main" || base == "master" || base == gitctl.DefaultBranch(bareRoot) {
+		return false
+	}
+	return true
 }
 
 func pickRemoveTarget() (string, bool) {
@@ -62,14 +80,13 @@ func pickRemoveTarget() (string, bool) {
 	return repo.TrimSlash(sel), true
 }
 
-func removeWorktree(path string, quiet bool) {
+// Remove takes a worktree out of git's view and kills its tmux session. Use it
+// only for paths that are actually worktrees (see IsManagedWorktree).
+func Remove(path string, quiet bool) {
 	bareRoot := repo.FindBareRoot(path)
 	if bareRoot == "" {
 		bareRoot = gitctl.CommonDir(path)
 	}
-
-	sessionName := session.Name(path)
-	inCurrent := tmuxctl.CurrentSession() == sessionName
 
 	if !fastRemove(path, bareRoot) {
 		// Fallback to a synchronous git worktree remove. We're already in the
@@ -83,14 +100,8 @@ func removeWorktree(path string, quiet bool) {
 		}
 	}
 
-	// Worktree is now gone from git's view. Kill the session — but if it's the
-	// session we're inside, killing it directly would SIGHUP this process before
-	// the picker can reload. Detach a worker that survives our death.
-	if inCurrent {
-		spawnDetached("tmux", "kill-session", "-t="+sessionName)
-	} else {
-		tmuxctl.KillSession(sessionName)
-	}
+	// Worktree is now gone from git's view; tear down its session.
+	session.Kill(session.Name(path))
 
 	if !quiet {
 		notify.Infof("Removed worktree '%s'", displayName(path, bareRoot))
