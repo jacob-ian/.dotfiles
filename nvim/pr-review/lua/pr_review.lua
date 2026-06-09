@@ -85,6 +85,40 @@ local function target()
   return { path = path, side = side, start_line = sline, line = eline }
 end
 
+-- prompt_multiline opens a floating scratch buffer for a multi-line body and
+-- behaves like editing a file: :w runs on_save(text) (re-runnable to update),
+-- :q closes, :q! discards, and :q on unsaved edits warns as usual. Used because
+-- vim.ui.input — and snacks' own input — are single-line.
+local function prompt_multiline(title, on_save)
+  require("snacks").win {
+    width = 0.6,
+    height = 0.35,
+    border = "rounded",
+    title = " " .. title .. " ",
+    footer = " :w stage · :q close ",
+    -- acwrite (not nofile) so :w fires BufWriteCmd instead of erroring.
+    bo = { filetype = "markdown", buftype = "acwrite", bufhidden = "wipe" },
+    wo = { wrap = true },
+    -- Drop snacks' default q=close so a stray q can't silently discard the
+    -- comment; closing goes through :q, which respects unsaved changes.
+    keys = { q = false },
+    on_buf = function(self)
+      vim.api.nvim_buf_set_name(self.buf, "pr://comment/" .. self.buf)
+      vim.api.nvim_create_autocmd("BufWriteCmd", {
+        buffer = self.buf,
+        callback = function()
+          local body = vim.trim(table.concat(vim.api.nvim_buf_get_lines(self.buf, 0, -1, false), "\n"))
+          if body ~= "" then
+            on_save(body)
+          end
+          vim.bo[self.buf].modified = false
+        end,
+      })
+    end,
+  }
+  vim.cmd "startinsert"
+end
+
 -- add_comment stages an inline comment on the selected line(s). Bind in normal
 -- and visual mode; a visual selection becomes a multi-line comment.
 function M.add_comment()
@@ -93,18 +127,22 @@ function M.add_comment()
     vim.notify(reason, vim.log.levels.WARN)
     return
   end
-  vim.ui.input({ prompt = "comment> " }, function(body)
-    if not body or body == "" then
-      return
+  local span = t.start_line == t.line and tostring(t.line) or string.format("%d-%d", t.start_line, t.line)
+  -- staged is the comment table once first written; re-saving updates it in
+  -- place rather than queuing a duplicate.
+  local staged
+  prompt_multiline(("comment %s:%s"):format(t.path, span), function(body)
+    if staged then
+      staged.body = body
+    else
+      staged = { path = t.path, side = t.side, line = t.line, body = body }
+      if t.start_line ~= t.line then
+        staged.start_line = t.start_line
+        staged.start_side = t.side
+      end
+      table.insert(M.pending, staged)
     end
-    local c = { path = t.path, side = t.side, line = t.line, body = body }
-    if t.start_line ~= t.line then
-      c.start_line = t.start_line
-      c.start_side = t.side
-    end
-    table.insert(M.pending, c)
-    local span = t.start_line == t.line and tostring(t.line) or string.format("%d-%d", t.start_line, t.line)
-    vim.notify(string.format("staged %s:%s (%d pending)", t.path, span, #M.pending))
+    vim.notify(("staged %s:%s (%d pending)"):format(t.path, span, #M.pending))
   end)
 end
 
