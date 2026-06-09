@@ -82,3 +82,65 @@ func View(dir string, num int) string {
 	out, _ := cmd.CombinedOutput()
 	return string(out)
 }
+
+// ViewRepo is View for a PR in another repo, qualified by owner/repo rather
+// than a working directory — used by the cross-repo (`jmux pr`) preview.
+func ViewRepo(nameWithOwner string, num int) string {
+	cmd := exec.Command("gh", "pr", "view", strconv.Itoa(num), "--repo", nameWithOwner, "--comments")
+	out, _ := cmd.CombinedOutput()
+	return string(out)
+}
+
+// SearchResult is a cross-repo PR from `gh search prs`, which (unlike pr list)
+// spans every repo you can see but does not expose the head branch.
+type SearchResult struct {
+	Number     int    `json:"number"`
+	Title      string `json:"title"`
+	IsDraft    bool   `json:"isDraft"`
+	Repository struct {
+		Name          string `json:"name"`
+		NameWithOwner string `json:"nameWithOwner"`
+	} `json:"repository"`
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+}
+
+const searchFields = "number,title,author,isDraft,repository"
+
+// SearchAssignedPRs returns open PRs across all repos that either request your
+// review or are assigned to you. GitHub search ANDs its qualifiers, so the two
+// are run as separate queries and merged, deduped by repo+number.
+func SearchAssignedPRs() ([]SearchResult, error) {
+	seen := map[string]bool{}
+	var out []SearchResult
+	for _, qualifier := range []string{"--review-requested=@me", "--assignee=@me"} {
+		o, err := run("", "search", "prs", "--state=open", "--limit", "100", qualifier, "--json", searchFields)
+		if err != nil {
+			return nil, err
+		}
+		var rs []SearchResult
+		if err := json.Unmarshal(o, &rs); err != nil {
+			return nil, err
+		}
+		for _, r := range rs {
+			key := r.Repository.NameWithOwner + "#" + strconv.Itoa(r.Number)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+// HeadRef resolves a PR's head branch by owner/repo and number — the field
+// `gh search prs` omits, fetched only for the PR actually selected.
+func HeadRef(nameWithOwner string, num int) (string, error) {
+	out, err := run("", "pr", "view", strconv.Itoa(num), "--repo", nameWithOwner, "--json", "headRefName", "-q", ".headRefName")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}

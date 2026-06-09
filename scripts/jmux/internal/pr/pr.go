@@ -19,14 +19,16 @@ import (
 	"jmux/internal/worktree"
 )
 
-// RunPicker handles `jmux pr`: list the repo's open PRs and review the choice.
-func RunPicker() {
+// RunRepo handles `jmux pr <dir>`: list one repo's open PRs (regardless of
+// assignment) and review the choice. dir picks the repo — "" or "." is the
+// current directory; the global review queue lives in RunAssigned instead.
+func RunRepo(dir string) {
 	if !ghctl.Available() {
 		notify.Error("gh CLI not found — install the GitHub CLI to review PRs")
 		return
 	}
 
-	bareRoot, ok := resolveBareRoot()
+	bareRoot, ok := resolveBareRoot(dir)
 	if !ok {
 		return
 	}
@@ -82,7 +84,7 @@ func RunNumber(num int) {
 		notify.Error("gh CLI not found — install the GitHub CLI to review PRs")
 		return
 	}
-	bareRoot, ok := resolveBareRoot()
+	bareRoot, ok := resolveBareRoot("")
 	if !ok {
 		return
 	}
@@ -105,7 +107,6 @@ func Review(bareRoot string, p ghctl.PR) {
 	if err := session.Open(path, session.OpenOptions{
 		WithClaude: true,
 		InstallCmd: worktree.DetectInstallCmd(path),
-		EditorCmd:  fmt.Sprintf(`nvim -c "Octo pr edit %d"`, p.Number),
 	}); err != nil {
 		notify.Error(err.Error())
 	}
@@ -131,14 +132,18 @@ func checkoutWorktree(bareRoot string, p ghctl.PR) (string, error) {
 	return path, nil
 }
 
-// resolveBareRoot returns the bare repo containing cwd, or one the user picks.
-func resolveBareRoot() (string, bool) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		notify.Error("Failed to read cwd")
-		return "", false
+// resolveBareRoot returns the bare repo containing start (cwd when start is ""),
+// or one the user picks.
+func resolveBareRoot(start string) (string, bool) {
+	if start == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			notify.Error("Failed to read cwd")
+			return "", false
+		}
+		start = cwd
 	}
-	if bareRoot := gitctl.CommonDir(cwd); bareRoot != "" {
+	if bareRoot := gitctl.CommonDir(start); bareRoot != "" {
 		return bareRoot, true
 	}
 

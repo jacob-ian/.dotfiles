@@ -49,23 +49,4 @@ return {
       { "<leader>gD", "<cmd>DiffviewClose<cr>", desc = "Diffview: close" },
     },
   },
-  {
-    "pwntester/octo.nvim",
-    cmd = "Octo",
-    dependencies = {
-      "nvim-lua/plenary.nvim",
-      "folke/snacks.nvim",
-    },
-    opts = {
-      picker = "snacks",
-      use_local_fs = true,
-    },
-    keys = {
-      { "<leader>op", "<cmd>Octo pr list<cr>", desc = "Octo: PR list" },
-      { "<leader>oi", "<cmd>Octo issue list<cr>", desc = "Octo: issue list" },
-      { "<leader>oR", "<cmd>Octo review start<cr>", desc = "Octo: start review" },
-      { "<leader>oS", "<cmd>Octo review submit<cr>", desc = "Octo: submit review" },
-      { "<leader>ob", "<cmd>Octo pr browser<cr>", desc = "Octo: open PR in browser" },
-    },
-  },
 }

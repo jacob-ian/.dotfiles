@@ -131,6 +131,22 @@ func RefExists(dir, ref string) bool {
 	return false
 }
 
+// RepoSlug returns the "owner/repo" of dir's origin remote, or "". It accepts
+// the scp (git@host:owner/repo), https, and ssh:// URL forms.
+func RepoSlug(dir string) string {
+	out, err := gitOut(dir, "config", "--get", "remote.origin.url")
+	if err != nil {
+		return ""
+	}
+	url := strings.TrimSuffix(strings.TrimSpace(out), ".git")
+	url = strings.ReplaceAll(url, ":", "/")
+	parts := strings.Split(url, "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[len(parts)-2] + "/" + parts[len(parts)-1]
+}
+
 // CurrentBranch returns the short branch name HEAD points at, or "" if
 // detached.
 func CurrentBranch(dir string) string {

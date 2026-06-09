@@ -82,7 +82,7 @@ func runWorktree(args []string) {
 
 func runPR(args []string) {
 	if len(args) == 0 {
-		pr.RunPicker()
+		pr.RunAssigned()
 		return
 	}
 	switch args[0] {
@@ -93,9 +93,7 @@ func runPR(args []string) {
 			pr.RunNumber(num)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "jmux pr: unknown subcommand %q\n", args[0])
-		usage()
-		os.Exit(1)
+		pr.RunRepo(args[0])
 	}
 }
 
@@ -115,10 +113,13 @@ func usage() {
   jmux worktree remove          Remove a worktree (interactive)
   jmux worktree remove --path P --quiet
                                 Remove a specific worktree (used by ctrl-x bind)
-  jmux pr                       List open PRs for the current repo (body + threads
+  jmux pr                       Review queue: PRs across all your repos that await
+                                your review or are assigned to you (body + threads
                                 in the preview), then check one out into a worktree
                                 and open it in nvim via octo
-  jmux pr <num>                 Review PR <num> directly, skipping the picker
+  jmux pr <dir>                 Open PRs for the repo at <dir>, regardless of
+                                assignment (jmux pr . for the current repo)
+  jmux pr <num>                 Review PR <num> in the current repo directly
   jmux claude [args...]         Launch claude paired with the nvim instance
                                 whose workspace contains the current directory`)
 }

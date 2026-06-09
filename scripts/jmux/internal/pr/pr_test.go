@@ -39,6 +39,28 @@ func TestFormatLineRoundTrips(t *testing.T) {
 	}
 }
 
+func TestParseRepoNumber(t *testing.T) {
+	cases := []struct {
+		in       string
+		wantSlug string
+		wantNum  int
+		ok       bool
+	}{
+		{"eucalyptusvc/mobile#5639  dynamic visuals  ·  azizmehedi", "eucalyptusvc/mobile", 5639, true},
+		{"getnetfluence/dashboard-service#225  [draft] Thing  ·  jacob-ian", "getnetfluence/dashboard-service", 225, true},
+		{"owner/repo#1", "owner/repo", 1, true},
+		{"#12 no slug", "", 0, false},
+		{"no number here", "", 0, false},
+		{"", "", 0, false},
+	}
+	for _, c := range cases {
+		slug, num, ok := parseRepoNumber(c.in)
+		if slug != c.wantSlug || num != c.wantNum || ok != c.ok {
+			t.Errorf("parseRepoNumber(%q) = (%q, %d, %v), want (%q, %d, %v)", c.in, slug, num, ok, c.wantSlug, c.wantNum, c.ok)
+		}
+	}
+}
+
 func TestShellQuote(t *testing.T) {
 	cases := map[string]string{
 		"/usr/bin/jmux":        `'/usr/bin/jmux'`,
