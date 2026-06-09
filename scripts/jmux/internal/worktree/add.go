@@ -53,18 +53,18 @@ func AddWorktree(bareRoot string) {
 		return
 	}
 
-	copyEnvFiles(bareRoot, worktreePath)
+	CopyEnvFiles(bareRoot, worktreePath)
 
 	if err := session.Open(worktreePath, session.OpenOptions{
 		WithClaude: true,
-		InstallCmd: detectInstallCmd(worktreePath),
+		InstallCmd: DetectInstallCmd(worktreePath),
 	}); err != nil {
 		notify.Error(err.Error())
 	}
 }
 
-// copyEnvFiles copies any .env* file from the default-branch worktree into newPath.
-func copyEnvFiles(bareRoot, newPath string) {
+// CopyEnvFiles copies any .env* file from the default-branch worktree into newPath.
+func CopyEnvFiles(bareRoot, newPath string) {
 	defaultBranch := gitctl.DefaultBranch(bareRoot)
 	if defaultBranch == "" {
 		return
@@ -108,7 +108,7 @@ func copyFile(src, dst string) {
 	io.Copy(out, in)
 }
 
-func detectInstallCmd(dir string) string {
+func DetectInstallCmd(dir string) string {
 	if _, err := os.Stat(filepath.Join(dir, "package.json")); err != nil {
 		return ""
 	}

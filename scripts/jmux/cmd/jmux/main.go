@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"jmux/internal/claudectl"
+	"jmux/internal/pr"
 	"jmux/internal/session"
 	"jmux/internal/workspace"
 	"jmux/internal/worktree"
@@ -23,6 +24,8 @@ func main() {
 		runWorkspace(args[1:])
 	case "worktree":
 		runWorktree(args[1:])
+	case "pr":
+		runPR(args[1:])
 	case "claude":
 		if err := claudectl.Run(args[1:]); err != nil {
 			fmt.Fprintf(os.Stderr, "jmux claude: %v\n", err)
@@ -77,6 +80,25 @@ func runWorktree(args []string) {
 	}
 }
 
+func runPR(args []string) {
+	if len(args) == 0 {
+		pr.RunPicker()
+		return
+	}
+	switch args[0] {
+	case "preview":
+		pr.RunPreview(args[1:])
+	default:
+		if num, ok := pr.ParseNumber(args[0]); ok {
+			pr.RunNumber(num)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "jmux pr: unknown subcommand %q\n", args[0])
+		usage()
+		os.Exit(1)
+	}
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, `Usage:
   jmux                          Open the all-dirs picker
@@ -93,6 +115,10 @@ func usage() {
   jmux worktree remove          Remove a worktree (interactive)
   jmux worktree remove --path P --quiet
                                 Remove a specific worktree (used by ctrl-x bind)
+  jmux pr                       List open PRs for the current repo (body + threads
+                                in the preview), then check one out into a worktree
+                                and open it in nvim via octo
+  jmux pr <num>                 Review PR <num> directly, skipping the picker
   jmux claude [args...]         Launch claude paired with the nvim instance
                                 whose workspace contains the current directory`)
 }

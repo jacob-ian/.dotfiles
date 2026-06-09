@@ -95,6 +95,12 @@ func WorktreeAdd(bareRoot, path, branch string, createBranch bool) error {
 	return gitRun(bareRoot, args...)
 }
 
+// FetchBranch fetches branch from origin, updating origin/<branch> so a
+// following worktree-add creates a local branch that tracks it.
+func FetchBranch(bareRoot, branch string) error {
+	return gitRun(bareRoot, "fetch", "origin", branch)
+}
+
 // CleanErr collapses a git error to a single line, dropping git's "fatal: "
 // prefix. Useful for status-bar style notifications where the full multi-line
 // stderr would overflow.
