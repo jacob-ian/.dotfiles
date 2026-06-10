@@ -36,9 +36,9 @@ return {
     {
       "<leader>pv",
       function()
-        require("pr_review").conversation()
+        require("pr_review").view()
       end,
-      desc = "PR: view conversation",
+      desc = "PR: view in popup",
     },
     {
       "<leader>po",

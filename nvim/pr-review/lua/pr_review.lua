@@ -218,10 +218,39 @@ function M.discard()
   vim.notify "discarded pending comments"
 end
 
--- conversation opens `gh pr view --comments` (description + threads) read-only.
-function M.conversation()
-  local out = vim.fn.system { "gh", "pr", "view", "--comments" }
-  scratch("pr-conversation", vim.split(out, "\n"))
+-- view opens the rendered `gh pr view --comments` (summary + full comment
+-- thread) in a scrollable floating terminal; q closes it. A terminal buffer
+-- gives gh a real tty, so it renders markdown + colours, which nvim displays.
+function M.view()
+  local width = math.floor(vim.o.columns * 0.85)
+  local height = math.floor(vim.o.lines * 0.85)
+  local buf = vim.api.nvim_create_buf(false, true)
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = math.floor((vim.o.lines - height) / 2),
+    col = math.floor((vim.o.columns - width) / 2),
+    border = "rounded",
+    title = " pr view ",
+    title_pos = "center",
+    style = "minimal",
+  })
+  -- keep content flush with the top edge (no scrolloff gap)
+  vim.wo[win].scrolloff = 0
+  vim.keymap.set("n", "q", "<cmd>bdelete!<cr>", { buffer = buf, nowait = true, desc = "close" })
+  vim.fn.jobstart({ "gh", "pr", "view", "--comments" }, {
+    term = true,
+    -- gh streams output and leaves the cursor at the end; snap back to the top
+    -- so the view opens on the PR summary.
+    on_exit = function()
+      vim.schedule(function()
+        if vim.api.nvim_win_is_valid(win) then
+          vim.api.nvim_win_set_cursor(win, { 1, 0 })
+        end
+      end)
+    end,
+  })
 end
 
 -- browser opens the current branch's PR on github.com.

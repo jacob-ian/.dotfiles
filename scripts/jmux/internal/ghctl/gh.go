@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -206,13 +207,16 @@ func repoSlug(repositoryURL string) string {
 	return repositoryURL
 }
 
-// ViewRepo renders `gh pr view --comments` for the preview, bounded by
-// previewTimeout so a slow fetch is killed rather than piling up. stderr is
-// folded in so a failure still shows something.
+// ViewRepo renders `gh pr view --comments` for the preview
 func ViewRepo(slug string, num int) string {
 	ctx, cancel := context.WithTimeout(context.Background(), previewTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", "pr", "view", strconv.Itoa(num), "--repo", slug, "--comments")
+	width := os.Getenv("FZF_PREVIEW_COLUMNS")
+	if width == "" {
+		width = "80"
+	}
+	cmd.Env = append(os.Environ(), "GH_FORCE_TTY="+width)
 	out, _ := cmd.CombinedOutput()
 	return string(out)
 }
