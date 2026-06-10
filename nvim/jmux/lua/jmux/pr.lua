@@ -9,8 +9,16 @@ local M = {}
 -- instance maps to one PR worktree, so module-level state is sufficient.
 M.pending = {}
 
--- ctx caches the {slug, number, sha} of the current branch's PR.
-local ctx
+-- info caches the PR's { slug, number, base } from a single `gh pr view`. It is
+-- resolved lazily — the preview reads code from the local HEAD and needs none of
+-- it, so the (slow) gh round trip stays off the path that opens the preview.
+-- Cached for the whole session: one nvim instance maps to one PR worktree (so the
+-- branch never changes under us), which is what keeps the cached base/number valid.
+local info
+
+-- CONTEXT is how many lines of code to show either side of a comment's span in
+-- the submit preview.
+local CONTEXT = 2
 
 local function sh(cmd)
   local out = vim.fn.system(cmd)
@@ -20,21 +28,101 @@ local function sh(cmd)
   return vim.trim(out), nil
 end
 
-local function resolve()
-  if ctx then
-    return ctx
+-- pr_info resolves the PR's slug, number, and base SHA in one gh round trip
+-- (three separate `gh` calls were the bulk of submit's latency). The slug comes
+-- from the PR url path, which is host-agnostic so it also works on GHE.
+local function pr_info()
+  if info then
+    return info
   end
-  local slug, e1 = sh { "gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner" }
+  local out, err = sh { "gh", "pr", "view", "--json", "number,baseRefOid,url" }
+  if not out then
+    return nil, "gh pr view: " .. (err or "")
+  end
+  local ok, data = pcall(vim.json.decode, out)
+  if not ok or type(data) ~= "table" or not data.number then
+    return nil, "gh pr view: unexpected output"
+  end
+  local slug = data.url and data.url:match "/([^/]+/[^/]+)/pull/"
   if not slug then
-    return nil, "gh repo view: " .. (e1 or "")
+    -- url parse failed (unusual) — fall back to an explicit repo lookup.
+    local e
+    slug, e = sh { "gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner" }
+    if not slug then
+      -- don't cache a half-resolved identity; a later submit would POST to
+      -- repos/nil/... — bail so the caller can surface the error instead.
+      return nil, "gh repo view: " .. (e or "")
+    end
   end
-  local num, e2 = sh { "gh", "pr", "view", "--json", "number", "-q", ".number" }
-  if not num then
-    return nil, "gh pr view: " .. (e2 or "")
+  info = { slug = slug, number = data.number, base = data.baseRefOid }
+  return info
+end
+
+-- span_str renders a comment's line span as "12" or "12-15". Accepts both the
+-- stored comment shape (start_line nil for a single line) and the target shape
+-- (start_line always set, == line for a single line).
+local function span_str(cm)
+  local s = cm.start_line
+  return (s and s ~= cm.line) and string.format("%d-%d", s, cm.line) or tostring(cm.line)
+end
+
+-- Pending comments persist across sessions in the worktree's own git dir
+-- (.git/worktrees/<name>/ for a linked worktree). That scopes the file to the
+-- one PR this worktree tracks, hides it from `git status`, and lets `git
+-- worktree remove` clean it up with everything else.
+local function state_file()
+  local dir = sh { "git", "rev-parse", "--absolute-git-dir" }
+  return dir and (dir .. "/jmux-review.json") or nil
+end
+
+-- save writes M.pending through on every mutation (crash-safe; the payload is
+-- tiny). An empty review removes the file rather than leaving an empty stub.
+local function save()
+  local f = state_file()
+  if not f then
+    return
   end
-  local sha = sh { "git", "rev-parse", "HEAD" }
-  ctx = { slug = slug, number = tonumber(num), sha = sha }
-  return ctx
+  if #M.pending == 0 then
+    vim.fn.delete(f)
+    return
+  end
+  vim.fn.writefile({ vim.json.encode { sha = sh { "git", "rev-parse", "HEAD" }, comments = M.pending } }, f)
+end
+
+-- load restores a persisted review the first time the module is touched in a
+-- session. The stored HEAD sha is compared against the current one: comments are
+-- anchored to line numbers on a specific commit, so a rebase/amend since the
+-- last session may have shifted them, which is worth a warning.
+local loaded = false
+local function load()
+  if loaded then
+    return
+  end
+  loaded = true
+  local f = state_file()
+  if not f or vim.fn.filereadable(f) == 0 then
+    return
+  end
+  local ok, data = pcall(vim.json.decode, table.concat(vim.fn.readfile(f), "\n"))
+  if not ok or type(data) ~= "table" or type(data.comments) ~= "table" or #data.comments == 0 then
+    return
+  end
+  M.pending = data.comments
+  -- Only speak up when it matters: comments are anchored to line numbers on a
+  -- specific commit, so a rebase/amend since they were staged may have shifted
+  -- them. A clean restore is silent — the count shows on the next stage/submit.
+  local head = sh { "git", "rev-parse", "HEAD" }
+  if data.sha and head and data.sha ~= head then
+    vim.notify(
+      string.format(
+        "restored %d pending comment(s) staged on %s; HEAD is now %s — line numbers may have shifted",
+        #M.pending,
+        data.sha:sub(1, 7),
+        head:sub(1, 7)
+      ),
+      vim.log.levels.WARN
+    )
+  end
 end
 
 -- target resolves the {path, side, start_line, line} for the current diffview
@@ -122,12 +210,13 @@ end
 -- add_comment stages an inline comment on the selected line(s). Bind in normal
 -- and visual mode; a visual selection becomes a multi-line comment.
 function M.add_comment()
+  load()
   local t, reason = target()
   if not t then
     vim.notify(reason, vim.log.levels.WARN)
     return
   end
-  local span = t.start_line == t.line and tostring(t.line) or string.format("%d-%d", t.start_line, t.line)
+  local span = span_str(t)
   -- staged is the comment table once first written; re-saving updates it in
   -- place rather than queuing a duplicate.
   local staged
@@ -142,79 +231,496 @@ function M.add_comment()
       end
       table.insert(M.pending, staged)
     end
+    save()
     vim.notify(("staged %s:%s (%d pending)"):format(t.path, span, #M.pending))
   end)
 end
 
--- submit posts the pending comments as one review with a chosen verdict.
-function M.submit()
-  local c, err = resolve()
-  if not c then
-    vim.notify(err, vim.log.levels.ERROR)
-    return
-  end
-  vim.ui.select({ "COMMENT", "APPROVE", "REQUEST_CHANGES" }, { prompt = "submit review as:" }, function(event)
-    if not event then
-      return
-    end
-    vim.ui.input({ prompt = "summary (optional)> " }, function(body)
-      local payload = vim.json.encode {
-        commit_id = c.sha,
-        event = event,
-        body = (body and body ~= "") and body or nil,
-        comments = (#M.pending > 0) and M.pending or nil,
-      }
-      local out = vim.fn.system({
-        "gh",
-        "api",
-        "--method",
-        "POST",
-        string.format("repos/%s/pulls/%d/reviews", c.slug, c.number),
-        "--input",
-        "-",
-      }, payload)
-      if vim.v.shell_error ~= 0 then
-        vim.notify("submit failed:\n" .. vim.trim(out), vim.log.levels.ERROR)
+-- post_review POSTs the pending comments as one review with the chosen verdict
+-- and optional summary body, then calls on_done(true) on success or on_done(false)
+-- after notifying the failure. Async (vim.system) so the network round trip
+-- doesn't freeze the editor; the payload is serialized up front, so a later edit
+-- to M.pending can't change what's already in flight.
+local function post_review(c, event, body, on_done)
+  local payload = vim.json.encode {
+    commit_id = c.sha,
+    event = event,
+    body = (body and body ~= "") and body or nil,
+    comments = (#M.pending > 0) and M.pending or nil,
+  }
+  vim.system({
+    "gh",
+    "api",
+    "--method",
+    "POST",
+    string.format("repos/%s/pulls/%d/reviews", c.slug, c.number),
+    "--input",
+    "-",
+  }, { stdin = payload }, function(res)
+    vim.schedule(function()
+      if res.code ~= 0 then
+        local msg = res.stderr ~= "" and res.stderr or res.stdout
+        vim.notify("submit failed:\n" .. vim.trim(msg or ""), vim.log.levels.ERROR)
+        on_done(false)
         return
       end
-      local n = #M.pending
-      M.pending = {}
-      vim.notify(string.format("submitted %s with %d comment(s)", event, n))
+      on_done(true)
     end)
   end)
 end
 
-local function scratch(name, lines)
-  vim.cmd "botright vnew"
-  local buf = vim.api.nvim_get_current_buf()
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].buftype = "nofile"
-  vim.bo[buf].bufhidden = "wipe"
-  vim.bo[buf].filetype = "markdown"
-  vim.bo[buf].modifiable = false
-  pcall(vim.api.nvim_buf_set_name, buf, name)
+-- lang_of maps a file path to a treesitter language (or nil), so each code block
+-- can be highlighted with the right parser regardless of the others.
+local function lang_of(path)
+  local ft = vim.filetype.match { filename = path }
+  if not ft then
+    return nil
+  end
+  return vim.treesitter.language.get_lang(ft) or ft
 end
 
--- list shows the staged comments in a scratch buffer.
-function M.list()
-  if #M.pending == 0 then
-    vim.notify "no pending comments"
+-- ts_highlight parses `text` as `lang` and lays its syntax highlights onto the
+-- buffer starting at row `base`. Used only on the commented lines: parsing the
+-- selected span in isolation keeps the mapping trivial (the span is contiguous
+-- in the buffer, so node rows map straight to base + row). Best-effort — a
+-- missing parser or query just leaves the lines unhighlighted.
+local function ts_highlight(buf, ns, lang, text, base)
+  local ok, parser = pcall(vim.treesitter.get_string_parser, text, lang)
+  if not ok or not parser then
     return
   end
-  local lines = {}
-  for i, c in ipairs(M.pending) do
-    local span = c.start_line and string.format("%d-%d", c.start_line, c.line) or tostring(c.line)
-    table.insert(lines, string.format("%d. %s:%s [%s]", i, c.path, span, c.side))
-    for _, l in ipairs(vim.split(c.body, "\n")) do
-      table.insert(lines, "    " .. l)
+  local tree = parser:parse()[1]
+  local query = vim.treesitter.query.get(lang, "highlights")
+  if not tree or not query then
+    return
+  end
+  for id, node in query:iter_captures(tree:root(), text, 0, -1) do
+    local name = query.captures[id]
+    -- captures starting with "_" are query internals, not highlight groups.
+    if not name:find "^_" then
+      local sr, sc, er, ec = node:range()
+      pcall(vim.api.nvim_buf_set_extmark, buf, ns, base + sr, sc, {
+        end_row = base + er,
+        end_col = ec,
+        hl_group = "@" .. name,
+        priority = 100,
+      })
     end
   end
-  scratch("pending-review", lines)
 end
 
--- discard drops all staged comments.
+-- build_preview reads each pending comment's surrounding code and returns a list
+-- of blocks: { left = {header, rows={num,text,selected} | unavailable}, lang,
+-- right = {header, body} }. rows carry ±CONTEXT lines around the comment span,
+-- read from the head SHA for RIGHT comments and the base SHA for LEFT.
+local function build_preview(c)
+  -- cache file content per rev:path so multiple comments on one file read once.
+  local cache = {}
+  local function rev_lines(rev, path)
+    if not rev then
+      return nil, "no base ref"
+    end
+    local key = rev .. ":" .. path
+    local hit = cache[key]
+    if hit then
+      return hit.lines, hit.err
+    end
+    -- systemlist (not sh) so leading indentation on the first/last line survives.
+    local lines = vim.fn.systemlist { "git", "show", key }
+    if vim.v.shell_error ~= 0 then
+      cache[key] = { err = vim.trim(table.concat(lines, " ")) }
+      return nil, cache[key].err
+    end
+    cache[key] = { lines = lines }
+    return lines
+  end
+
+  if #M.pending == 0 then
+    return {
+      {
+        left = { header = "▌ no inline comments staged", rows = {} },
+        -- mirror the header on the right; there's nothing to pair below it.
+        right = { header = "▌ no inline comments staged", body = {} },
+      },
+    }
+  end
+
+  local blocks = {}
+  for _, cm in ipairs(M.pending) do
+    local rev = cm.side == "LEFT" and c.base or c.sha
+    local lines, err = rev_lines(rev, cm.path)
+    local first, last = cm.start_line or cm.line, cm.line
+    local block = {
+      lang = lang_of(cm.path),
+      left = {
+        header = string.format("▌ %s:%s  [%s]", cm.path, span_str(cm), cm.side),
+        path = cm.path,
+        side = cm.side,
+      },
+      right = { header = "▌ comment", body = vim.split(cm.body, "\n") },
+    }
+    if lines then
+      local lo, hi = math.max(1, first - CONTEXT), math.min(#lines, last + CONTEXT)
+      local rows = {}
+      for i = lo, hi do
+        rows[#rows + 1] = { num = i, text = lines[i], selected = i >= first and i <= last }
+      end
+      block.left.rows = rows
+    else
+      block.left.unavailable = err or "?"
+    end
+    blocks[#blocks + 1] = block
+  end
+  return blocks
+end
+
+-- render flattens the blocks into the two column buffers and decorates the left
+-- one with extmarks: an inline line-number/▸ gutter, full syntax highlighting on
+-- the commented lines, and a muted overlay on the surrounding context. Keeping
+-- the buffer text as pure code (gutter is virtual) is what lets the treesitter
+-- column offsets line up. Sections are padded so both columns stay aligned under
+-- scrollbind.
+-- render returns locs (left-buffer row → code {path, side, line}, for <CR>) and
+-- owner (row → index of the owning comment in M.pending, shared by both columns
+-- since they're padded to the same per-block row range, for d). Re-runnable: it
+-- clears its own namespace first so it can redraw after a comment is removed.
+local function render(blocks, lbuf, rbuf)
+  local ns = vim.api.nvim_create_namespace "jmux_pr_preview"
+  vim.api.nvim_buf_clear_namespace(lbuf, ns, 0, -1)
+  local left, right, meta, owner = {}, {}, {}, {}
+
+  for bi, b in ipairs(blocks) do
+    local lsec, lmeta = { b.left.header }, { { header = true } }
+    local lbase = #left -- buffer row (0-indexed) the header will land on
+    if b.left.unavailable then
+      lsec[2] = "  ‹code unavailable: " .. b.left.unavailable .. "›"
+      lmeta[2] = { muted = true }
+    else
+      for _, r in ipairs(b.left.rows) do
+        lsec[#lsec + 1] = r.text
+        lmeta[#lmeta + 1] = { code = true, num = r.num, selected = r.selected, path = b.left.path, side = b.left.side }
+      end
+    end
+
+    local rsec = { b.right.header }
+    for _, line in ipairs(b.right.body) do
+      rsec[#rsec + 1] = "  " .. line
+    end
+
+    -- pad the shorter column, then a blank separator row to each.
+    local h = math.max(#lsec, #rsec)
+    while #lsec < h do
+      lsec[#lsec + 1], lmeta[#lmeta + 1] = "", false
+    end
+    while #rsec < h do
+      rsec[#rsec + 1] = ""
+    end
+    lsec[#lsec + 1], lmeta[#lmeta + 1] = "", false
+    rsec[#rsec + 1] = ""
+
+    for i = 1, #lsec do
+      left[#left + 1], meta[#left + 1] = lsec[i], lmeta[i]
+    end
+    vim.list_extend(right, rsec)
+    b.lbase = lbase
+    -- every row of this block (header, code, padding, separator) belongs to
+    -- comment bi, so d works from anywhere in the hunk in either column.
+    for row = lbase, #left - 1 do
+      owner[row] = bi
+    end
+  end
+
+  for _, buf in ipairs { lbuf, rbuf } do
+    vim.bo[buf].modifiable = true
+  end
+  vim.api.nvim_buf_set_lines(lbuf, 0, -1, false, left)
+  vim.api.nvim_buf_set_lines(rbuf, 0, -1, false, right)
+  for _, buf in ipairs { lbuf, rbuf } do
+    vim.bo[buf].modifiable = false
+  end
+
+  -- per-line gutter + muting (selected lines stay normal for syntax to show).
+  local locs = {}
+  for row = 0, #left - 1 do
+    local m = meta[row + 1]
+    if m and m.header then
+      vim.api.nvim_buf_set_extmark(lbuf, ns, row, 0, { line_hl_group = "Title" })
+    elseif m and m.code then
+      locs[row] = { path = m.path, side = m.side, line = m.num }
+      vim.api.nvim_buf_set_extmark(lbuf, ns, row, 0, {
+        virt_text = { { string.format("%s %4d │ ", m.selected and "▸" or " ", m.num), "LineNr" } },
+        virt_text_pos = "inline",
+      })
+      if not m.selected then
+        vim.api.nvim_buf_set_extmark(lbuf, ns, row, 0, { line_hl_group = "Comment" })
+      end
+    elseif m and m.muted then
+      vim.api.nvim_buf_set_extmark(lbuf, ns, row, 0, { line_hl_group = "Comment" })
+    end
+  end
+
+  -- syntax-highlight each block's commented span (contiguous, so one parse).
+  for _, b in ipairs(blocks) do
+    if b.lang and b.left.rows then
+      local lo, texts
+      for j, r in ipairs(b.left.rows) do
+        if r.selected then
+          lo = lo or j
+          texts = texts or {}
+          texts[#texts + 1] = r.text
+        end
+      end
+      if lo then
+        -- header sits at b.lbase, so row j of rows is at b.lbase + j.
+        ts_highlight(lbuf, ns, b.lang, table.concat(texts, "\n"), b.lbase + lo)
+      end
+    end
+  end
+
+  return locs, owner
+end
+
+-- key_hint renders an emphasized key glyph followed by a muted label for a
+-- status bar; stock highlight groups so it tracks whatever colorscheme is active.
+local function key_hint(key, label)
+  return ("%%#Special#%s %%#Comment#%s"):format(key, label)
+end
+
+-- bar builds a statusline-syntax string (for tabline or winbar): a Title-styled
+-- label on the left and the hints flush right.
+local function bar(label, hints)
+  return ("%%#Title# %s %%*%%=%s "):format(label, table.concat(hints, "  "))
+end
+
+-- SPINNER frames for the in-flight submit loader.
+local SPINNER = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+
+-- submit opens a two-column preview of the pending review — code on the left,
+-- comments on the right — then a/c/r choose a verdict (with an optional summary)
+-- and POST it; q cancels. Shown in a throwaway tab so the diffview stays put.
+function M.submit()
+  load()
+  -- The preview is built entirely from local git: HEAD for RIGHT-side code, and
+  -- base (one gh call) only when a LEFT-side comment actually needs it.
+  local sha = sh { "git", "rev-parse", "HEAD" }
+  local base
+  for _, cm in ipairs(M.pending) do
+    if cm.side == "LEFT" then
+      local pr = pr_info()
+      base = pr and pr.base
+      break
+    end
+  end
+
+  local blocks = build_preview { sha = sha, base = base }
+  -- root makes <CR> jumps work regardless of cwd; nil falls back to the
+  -- repo-relative path, which still resolves when cwd is the worktree root.
+  local root = sh { "git", "rev-parse", "--show-toplevel" }
+
+  vim.cmd "tabnew"
+  local lwin = vim.api.nvim_get_current_win()
+  local lbuf = vim.api.nvim_get_current_buf()
+
+  vim.cmd "rightbelow vsplit"
+  local rwin = vim.api.nvim_get_current_win()
+  local rbuf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_win_set_buf(rwin, rbuf)
+
+  for _, buf in ipairs { lbuf, rbuf } do
+    vim.bo[buf].buftype = "nofile"
+    vim.bo[buf].bufhidden = "wipe"
+  end
+  local locs, owner = render(blocks, lbuf, rbuf)
+
+  for _, win in ipairs { lwin, rwin } do
+    vim.wo[win].number = false
+    vim.wo[win].scrollbind = true
+  end
+  vim.wo[lwin].wrap = false
+  vim.wo[rwin].wrap = true
+  vim.wo[rwin].linebreak = true
+
+  -- Row 1 (tabline, full width): title + the review-level commands that work
+  -- from either pane. Scoped to this preview and restored when it's torn down,
+  -- so the rest of the session's tabline is untouched.
+  local saved_tabline, saved_showtabline = vim.o.tabline, vim.o.showtabline
+  local review_tabline = bar("jmux review", {
+    key_hint("a", "approve"),
+    key_hint("c", "comment"),
+    key_hint("r", "request"),
+    key_hint("D", "discard"),
+    key_hint("q", "cancel"),
+  })
+  vim.o.showtabline = 2
+  vim.o.tabline = review_tabline
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    buffer = lbuf,
+    once = true,
+    callback = function()
+      vim.o.tabline, vim.o.showtabline = saved_tabline, saved_showtabline
+    end,
+  })
+
+  -- Row 2 (winbar, per pane): the actions specific to each side.
+  vim.wo[lwin].winbar = bar("code", { key_hint("⏎", "open"), key_hint("d", "remove") })
+  vim.wo[rwin].winbar = bar("comments", { key_hint("d", "remove") })
+  vim.api.nvim_set_current_win(lwin)
+  vim.cmd "syncbind"
+
+  local closed = false
+  -- stop_spin is set while a submit is in flight (it stops the tabline loader);
+  -- its presence also marks the preview busy, so a second submit is refused.
+  local stop_spin
+  local function close()
+    if not closed then
+      closed = true
+      if stop_spin then
+        stop_spin()
+      end
+      pcall(vim.cmd, "tabclose")
+    end
+  end
+
+  -- goto_code closes the preview and jumps to the file/line under the cursor.
+  -- RIGHT lines map to the head, which is the working tree; LEFT (old) lines
+  -- have no working-tree counterpart, so they're declined.
+  local function goto_code()
+    local loc = locs[vim.api.nvim_win_get_cursor(lwin)[1] - 1]
+    if not loc then
+      return
+    end
+    if loc.side ~= "RIGHT" then
+      vim.notify("base-side line — not in the working tree", vim.log.levels.WARN)
+      return
+    end
+    close()
+    vim.cmd("edit " .. vim.fn.fnameescape(root and (root .. "/" .. loc.path) or loc.path))
+    pcall(vim.api.nvim_win_set_cursor, 0, { loc.line, 0 })
+    vim.cmd "normal! zz"
+  end
+
+  -- delete_under_cursor drops the comment whose hunk the cursor is in (either
+  -- column), persists, and redraws the remaining hunks in place. Closing once
+  -- the last one goes.
+  local function delete_under_cursor()
+    if #M.pending == 0 then
+      return
+    end
+    local win = vim.api.nvim_get_current_win()
+    local row = vim.api.nvim_win_get_cursor(win)[1]
+    local idx = owner[row - 1]
+    if not idx then
+      return
+    end
+    table.remove(M.pending, idx)
+    table.remove(blocks, idx)
+    save()
+    if #blocks == 0 then
+      close()
+      vim.notify "removed last comment; review is empty"
+      return
+    end
+    locs, owner = render(blocks, lbuf, rbuf)
+    local buf = win == rwin and rbuf or lbuf
+    pcall(vim.api.nvim_win_set_cursor, win, { math.min(row, vim.api.nvim_buf_line_count(buf)), 0 })
+    vim.cmd "syncbind"
+    vim.notify(string.format("removed comment (%d left)", #M.pending))
+  end
+
+  local function choose(event)
+    if stop_spin then
+      vim.notify("a submit is already in progress…", vim.log.levels.WARN)
+      return
+    end
+    vim.ui.input({ prompt = ("%s — summary (optional)> "):format(event) }, function(body)
+      -- nil body means the input was cancelled; leave the preview open.
+      if body == nil then
+        return
+      end
+      -- Resolve the PR identity only now, at the moment of submit — the gh round
+      -- trip is hidden behind the user having just typed the summary.
+      local pr, err = pr_info()
+      if not pr then
+        vim.notify(err, vim.log.levels.ERROR)
+        return
+      end
+      local n = #M.pending
+      vim.notify(("submitting %s…"):format(event))
+
+      -- Animate a loader in the tabline while the POST is in flight (the call is
+      -- async, so the editor stays responsive). stop_spin tears it down and is
+      -- also the busy flag the guard above checks.
+      local timer, frame = vim.uv.new_timer(), 0
+      stop_spin = function()
+        stop_spin = nil
+        timer:stop()
+        timer:close()
+      end
+      timer:start(
+        0,
+        80,
+        vim.schedule_wrap(function()
+          if closed or not stop_spin then
+            return
+          end
+          frame = frame % #SPINNER + 1
+          vim.o.tabline = ("%%=%%#Title# %s submitting %s… %%*%%="):format(SPINNER[frame], event)
+        end)
+      )
+
+      post_review({ slug = pr.slug, number = pr.number, sha = sha }, event, body, function(ok)
+        local was_open = not closed
+        if stop_spin then
+          stop_spin()
+        end
+        if not ok then
+          -- restore the command bar so the user can retry (unless they bailed).
+          if was_open then
+            vim.o.tabline = review_tabline
+          end
+          return
+        end
+        M.pending = {}
+        save()
+        vim.notify(string.format("submitted %s with %d comment(s)", event, n))
+        close()
+      end)
+    end)
+  end
+
+  for _, buf in ipairs { lbuf, rbuf } do
+    local opt = { buffer = buf, nowait = true }
+    vim.keymap.set("n", "a", function()
+      choose "APPROVE"
+    end, opt)
+    vim.keymap.set("n", "c", function()
+      choose "COMMENT"
+    end, opt)
+    vim.keymap.set("n", "r", function()
+      choose "REQUEST_CHANGES"
+    end, opt)
+    vim.keymap.set("n", "d", delete_under_cursor, opt)
+    -- D discards the whole review; confirm since it can't be undone.
+    vim.keymap.set("n", "D", function()
+      vim.ui.select({ "no", "yes" }, { prompt = "discard all pending comments?" }, function(choice)
+        if choice == "yes" then
+          M.discard()
+          close()
+        end
+      end)
+    end, opt)
+    vim.keymap.set("n", "q", close, opt)
+  end
+  -- only the code column knows a file/line under the cursor.
+  vim.keymap.set("n", "<CR>", goto_code, { buffer = lbuf, nowait = true })
+end
+
+-- discard drops all staged comments, in memory and on disk. loaded is forced so
+-- a later add_comment in the same session can't resurrect the cleared review.
 function M.discard()
+  loaded = true
   M.pending = {}
+  save()
   vim.notify "discarded pending comments"
 end
 
@@ -253,12 +759,17 @@ function M.view()
   })
 end
 
--- browser opens the current branch's PR on github.com.
+-- browser opens the current branch's PR on github.com. Async so launching the
+-- browser doesn't block nvim; only failures are surfaced.
 function M.browser()
-  local out = vim.fn.system { "gh", "pr", "view", "--web" }
-  if vim.v.shell_error ~= 0 then
-    vim.notify("gh pr view --web: " .. vim.trim(out), vim.log.levels.ERROR)
-  end
+  vim.system({ "gh", "pr", "view", "--web" }, {}, function(res)
+    if res.code ~= 0 then
+      local msg = res.stderr ~= "" and res.stderr or res.stdout
+      vim.schedule(function()
+        vim.notify("gh pr view --web: " .. vim.trim(msg or ""), vim.log.levels.ERROR)
+      end)
+    end
+  end)
 end
 
 return M

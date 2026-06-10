@@ -3,6 +3,9 @@
 -- neogit dependency) is already up, so <leader>pc can read its diff buffers.
 return {
   dir = vim.fn.stdpath "config" .. "/jmux",
+  -- snacks powers the multiline comment input; diffview provides the diff buffers
+  -- add_comment reads. Declared so they're loaded before the first keymap fires.
+  dependencies = { "folke/snacks.nvim", "sindrets/diffview.nvim" },
   keys = {
     {
       "<leader>pc",
@@ -18,13 +21,6 @@ return {
         require("jmux").pr.submit()
       end,
       desc = "PR: submit review",
-    },
-    {
-      "<leader>pl",
-      function()
-        require("jmux").pr.list()
-      end,
-      desc = "PR: list pending comments",
     },
     {
       "<leader>px",

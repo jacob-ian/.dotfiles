@@ -2,8 +2,9 @@
 -- into namespaces (e.g. require("jmux").pr.view()), one per area of the flow.
 local M = {}
 
--- pr is the lightweight GitHub PR review flow. Lazily required so the namespace
--- is cheap to touch and the pr module only loads on first use.
+-- pr is the lightweight GitHub PR review flow. The whole plugin is lazy-loaded by
+-- its keymaps (see lua/plugins/jmux.lua), so requiring the submodule here is fine:
+-- nothing touches jmux until the first <leader>p* press.
 M.pr = require "jmux.pr"
 
 return M
