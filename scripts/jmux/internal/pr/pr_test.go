@@ -1,10 +1,6 @@
 package pr
 
-import (
-	"testing"
-
-	"jmux/internal/ghctl"
-)
+import "testing"
 
 func TestParseNumber(t *testing.T) {
 	cases := []struct {
@@ -29,13 +25,11 @@ func TestParseNumber(t *testing.T) {
 	}
 }
 
-func TestFormatLineRoundTrips(t *testing.T) {
-	p := ghctl.PR{Number: 42, Title: "Add widget", IsDraft: true}
-	p.Author.Login = "octocat"
-	line := formatLine(p)
-	got, ok := ParseNumber(line)
-	if !ok || got != 42 {
-		t.Fatalf("ParseNumber(formatLine(...)) = (%d, %v), want (42, true); line=%q", got, ok, line)
+func TestFormatRowRoundTrips(t *testing.T) {
+	line := formatRow("eucalyptusvc/mobile", 42, true, "Add widget", "octocat")
+	slug, num, ok := parseRepoNumber(line)
+	if !ok || slug != "eucalyptusvc/mobile" || num != 42 {
+		t.Fatalf("parseRepoNumber(formatRow(...)) = (%q, %d, %v); line=%q", slug, num, ok, line)
 	}
 }
 

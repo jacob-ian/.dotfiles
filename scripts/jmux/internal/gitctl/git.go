@@ -2,17 +2,25 @@ package gitctl
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// gitOut runs `git args...` in dir and returns stdout untrimmed.
-// Stderr is discarded — use gitRun when the caller needs to surface it.
+// gitReadTimeout bounds the read-only git calls below so a wedged one (e.g.
+// blocked on an index lock) can't hang an fzf preview process.
+const gitReadTimeout = 5 * time.Second
+
+// gitOut runs read-only `git args...` in dir (bounded by gitReadTimeout) and
+// returns stdout untrimmed. Stderr is discarded; writes go through gitRun.
 func gitOut(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), gitReadTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	return string(out), err

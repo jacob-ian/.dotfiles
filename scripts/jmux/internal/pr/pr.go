@@ -19,9 +19,9 @@ import (
 	"jmux/internal/worktree"
 )
 
-// RunRepo handles `jmux pr <dir>`: list one repo's open PRs (regardless of
-// assignment) and review the choice. dir picks the repo — "" or "." is the
-// current directory; the global review queue lives in RunAssigned instead.
+// RunRepo handles `jmux pr <dir>`: list one repo's open PRs and review the
+// choice. dir picks the repo ("" or "." = current); the global queue is
+// RunAssigned.
 func RunRepo(dir string) {
 	if !ghctl.Available() {
 		notify.Error("gh CLI not found — install the GitHub CLI to review PRs")
@@ -33,10 +33,14 @@ func RunRepo(dir string) {
 		return
 	}
 
-	ghDir := ghWorkingDir(bareRoot)
-	prs, err := ghctl.ListPRs(ghDir)
+	slug := gitctl.RepoSlug(bareRoot)
+	if slug == "" {
+		notify.Error("Could not resolve the repo's origin remote")
+		return
+	}
+	prs, err := ghctl.ListPRs(slug)
 	if err != nil {
-		notify.Errorf("gh pr list: %s", gitctl.CleanErr(err))
+		notify.Errorf("list PRs: %s", gitctl.CleanErr(err))
 		return
 	}
 	if len(prs) == 0 {
@@ -47,7 +51,7 @@ func RunRepo(dir string) {
 	items := make([]string, len(prs))
 	byNum := make(map[int]ghctl.PR, len(prs))
 	for i, p := range prs {
-		items[i] = formatLine(p)
+		items[i] = formatRow(slug, p.Number, p.IsDraft, p.Title, p.Author.Login)
 		byNum[p.Number] = p
 	}
 
@@ -55,8 +59,7 @@ func RunRepo(dir string) {
 	if err != nil {
 		self = "jmux"
 	}
-	// Bake in --dir so the preview queries gh in the repo regardless of cwd.
-	previewCmd := fmt.Sprintf("%s pr preview --dir %s {}", shellQuote(self), shellQuote(ghDir))
+	previewCmd := fmt.Sprintf("%s pr preview {}", shellQuote(self))
 
 	sel, err := fzfutil.Pick(items, fzfutil.Options{
 		Prompt:        "pr> ",
@@ -69,7 +72,7 @@ func RunRepo(dir string) {
 		return
 	}
 
-	num, ok := ParseNumber(sel)
+	_, num, ok := parseRepoNumber(sel)
 	if !ok {
 		return
 	}
@@ -88,16 +91,21 @@ func RunNumber(num int) {
 	if !ok {
 		return
 	}
-	p, err := ghctl.GetPR(ghWorkingDir(bareRoot), num)
+	slug := gitctl.RepoSlug(bareRoot)
+	if slug == "" {
+		notify.Error("Could not resolve the repo's origin remote")
+		return
+	}
+	p, err := ghctl.GetPR(slug, num)
 	if err != nil {
-		notify.Errorf("gh pr view #%d: %s", num, gitctl.CleanErr(err))
+		notify.Errorf("look up PR #%d: %s", num, gitctl.CleanErr(err))
 		return
 	}
 	Review(bareRoot, p)
 }
 
-// Review checks the PR out into a worktree and opens its session: nvim on the
-// PR via octo, a paired claude window, and the install window.
+// Review checks the PR out into a worktree and opens its session: nvim, a
+// paired claude window, and the install window.
 func Review(bareRoot string, p ghctl.PR) {
 	path, err := checkoutWorktree(bareRoot, p)
 	if err != nil {
@@ -112,10 +120,9 @@ func Review(bareRoot string, p ghctl.PR) {
 	}
 }
 
-// checkoutWorktree returns the worktree for the PR's head branch, creating it
-// if absent. The branch is fetched so the worktree tracks origin/<branch>
-// (pushes go back to the PR); an existing worktree is reused as-is, and env
-// files are copied across as for any feature worktree.
+// checkoutWorktree returns the PR's head-branch worktree, fetching and creating
+// it (tracking origin/<branch>) if absent or reusing an existing one. Env files
+// are copied across as for any feature worktree.
 func checkoutWorktree(bareRoot string, p ghctl.PR) (string, error) {
 	branch := p.HeadRefName
 	path := filepath.Join(bareRoot, branch)
@@ -159,30 +166,13 @@ func resolveBareRoot(start string) (string, bool) {
 	return repo.TrimSlash(sel), true
 }
 
-// ghWorkingDir returns a directory gh can resolve the repo from. gh needs a
-// work tree, so prefer the default-branch worktree, then any worktree, then the
-// bare root.
-func ghWorkingDir(bareRoot string) string {
-	if db := gitctl.DefaultBranch(bareRoot); db != "" {
-		if p := filepath.Join(bareRoot, db); repo.IsDir(p) {
-			return p
-		}
+// formatRow renders a picker row: "owner/repo#12  [draft] Title  ·  author".
+func formatRow(slug string, num int, draft bool, title, login string) string {
+	tag := ""
+	if draft {
+		tag = "[draft] "
 	}
-	for _, w := range repo.BareRepoWorktrees(bareRoot, false) {
-		if repo.IsDir(w) {
-			return w
-		}
-	}
-	return bareRoot
-}
-
-// formatLine renders a PR as a picker row: "#12  [draft] Title  ·  author".
-func formatLine(p ghctl.PR) string {
-	draft := ""
-	if p.IsDraft {
-		draft = "[draft] "
-	}
-	return fmt.Sprintf("#%d  %s%s  ·  %s", p.Number, draft, p.Title, p.Author.Login)
+	return fmt.Sprintf("%s#%d  %s%s  ·  %s", slug, num, tag, title, login)
 }
 
 // ParseNumber extracts the leading PR number from a picker row or CLI argument.

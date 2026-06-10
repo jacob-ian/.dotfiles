@@ -36,7 +36,7 @@ func RunAssigned() {
 	items := make([]string, len(results))
 	byLine := make(map[string]ghctl.SearchResult, len(results))
 	for i, r := range results {
-		items[i] = formatAssignedLine(r)
+		items[i] = formatRow(r.Repository.NameWithOwner, r.Number, r.IsDraft, r.Title, r.Author.Login)
 		byLine[items[i]] = r
 	}
 
@@ -49,7 +49,7 @@ func RunAssigned() {
 		Prompt:        "assigned> ",
 		Header:        "enter: review · ctrl-/: toggle preview",
 		Bindings:      []string{"ctrl-/:toggle-preview"},
-		Preview:       fmt.Sprintf("%s pr preview --global {}", shellQuote(self)),
+		Preview:       fmt.Sprintf("%s pr preview {}", shellQuote(self)),
 		PreviewWindow: "right:60%:wrap",
 	})
 	if err != nil || sel == "" {
@@ -88,15 +88,6 @@ func findLocalRepo(nameWithOwner string) string {
 		}
 	}
 	return ""
-}
-
-// formatAssignedLine renders a row: "owner/repo#12  [draft] Title  ·  author".
-func formatAssignedLine(r ghctl.SearchResult) string {
-	draft := ""
-	if r.IsDraft {
-		draft = "[draft] "
-	}
-	return fmt.Sprintf("%s#%d  %s%s  ·  %s", r.Repository.NameWithOwner, r.Number, draft, r.Title, r.Author.Login)
 }
 
 // parseRepoNumber extracts "owner/repo" and the number from a row's first field

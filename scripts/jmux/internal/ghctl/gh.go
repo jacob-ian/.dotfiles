@@ -1,146 +1,218 @@
-// Package ghctl wraps the GitHub CLI (`gh`). Each call takes the directory to
-// run in, from which gh resolves the target repo.
+// Package ghctl talks to GitHub: data queries (list/search/lookup) via the
+// go-gh SDK (in-process, reusing gh's auth); the PR preview via `gh pr view`.
 package ghctl
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
+	"context"
+	"fmt"
+	"net/url"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
+
+	"github.com/cli/go-gh/v2/pkg/api"
 )
 
-// PR is the subset of gh PR fields the review flow needs.
+const (
+	previewTimeout = 5 * time.Second  // per-keystroke `gh pr view` preview
+	queryTimeout   = 15 * time.Second // SDK data calls
+)
+
+// PR is the subset of fields the review flow needs.
 type PR struct {
-	Number      int    `json:"number"`
-	Title       string `json:"title"`
-	IsDraft     bool   `json:"isDraft"`
-	HeadRefName string `json:"headRefName"`
+	Number      int
+	Title       string
+	IsDraft     bool
+	HeadRefName string
 	Author      struct {
-		Login string `json:"login"`
-	} `json:"author"`
+		Login string
+	}
 }
 
-// prFields are the JSON fields requested for both list and single-PR views.
-const prFields = "number,title,author,isDraft,headRefName"
+// SearchResult is a cross-repo PR from search, which omits the head branch.
+type SearchResult struct {
+	Number     int
+	Title      string
+	IsDraft    bool
+	Repository struct {
+		Name          string
+		NameWithOwner string
+	}
+	Author struct {
+		Login string
+	}
+}
 
-// Available reports whether the gh CLI is on PATH.
+// Available reports whether the gh CLI is on PATH (needed for the preview).
 func Available() bool {
 	_, err := exec.LookPath("gh")
 	return err == nil
 }
 
-// ListPRs returns the open pull requests for the repo at dir, newest first.
-func ListPRs(dir string) ([]PR, error) {
-	out, err := run(dir, "pr", "list", "--limit", "200", "--json", prFields)
+var (
+	clientOnce sync.Once
+	client     *api.RESTClient
+	clientErr  error
+)
+
+// rest returns a cached REST client authed via gh's resolved token.
+func rest() (*api.RESTClient, error) {
+	clientOnce.Do(func() { client, clientErr = api.DefaultRESTClient() })
+	return client, clientErr
+}
+
+// get performs a bounded GET, decoding the JSON response into out.
+func get(path string, out any) error {
+	cl, err := rest()
 	if err != nil {
+		return fmt.Errorf("github client: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+	if err := cl.DoWithContext(ctx, "GET", path, nil, out); err != nil {
+		return fmt.Errorf("GET %s: %w", path, err)
+	}
+	return nil
+}
+
+// pull is the REST shape of a pull request (the fields we read).
+type pull struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Draft  bool   `json:"draft"`
+	Head   struct {
+		Ref string `json:"ref"`
+	} `json:"head"`
+	User struct {
+		Login string `json:"login"`
+	} `json:"user"`
+}
+
+func (p pull) toPR() PR {
+	pr := PR{Number: p.Number, Title: p.Title, IsDraft: p.Draft, HeadRefName: p.Head.Ref}
+	pr.Author.Login = p.User.Login
+	return pr
+}
+
+// ListPRs returns the open PRs for the owner/repo slug, newest first.
+func ListPRs(slug string) ([]PR, error) {
+	var pulls []pull
+	if err := get(fmt.Sprintf("repos/%s/pulls?state=open&per_page=100", slug), &pulls); err != nil {
 		return nil, err
 	}
-	var prs []PR
-	if err := json.Unmarshal(out, &prs); err != nil {
-		return nil, err
+	prs := make([]PR, len(pulls))
+	for i, p := range pulls {
+		prs[i] = p.toPR()
 	}
 	return prs, nil
 }
 
-// GetPR returns a single PR by number, for the direct `jmux pr <num>` path.
-func GetPR(dir string, num int) (PR, error) {
-	out, err := run(dir, "pr", "view", strconv.Itoa(num), "--json", prFields)
-	if err != nil {
+// GetPR returns a single PR by number (the `jmux pr <num>` path).
+func GetPR(slug string, num int) (PR, error) {
+	var p pull
+	if err := get(fmt.Sprintf("repos/%s/pulls/%d", slug, num), &p); err != nil {
 		return PR{}, err
 	}
-	var p PR
-	if err := json.Unmarshal(out, &p); err != nil {
-		return PR{}, err
-	}
-	return p, nil
+	return p.toPR(), nil
 }
 
-// run executes `gh args...` in dir, returning stdout. On failure the error
-// carries gh's stderr (e.g. an auth or network message).
-func run(dir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("gh", args...)
-	cmd.Dir = dir
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+// HeadRef resolves a PR's head branch — the field search omits.
+func HeadRef(slug string, num int) (string, error) {
+	p, err := GetPR(slug, num)
 	if err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return nil, errors.New(msg)
+		return "", err
+	}
+	return p.HeadRefName, nil
+}
+
+// searchResponse is the REST shape of `GET /search/issues`.
+type searchResponse struct {
+	Items []struct {
+		Number        int    `json:"number"`
+		Title         string `json:"title"`
+		Draft         bool   `json:"draft"`
+		RepositoryURL string `json:"repository_url"`
+		User          struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	} `json:"items"`
+}
+
+var (
+	loginOnce sync.Once
+	login     string
+	loginErr  error
+)
+
+// currentLogin resolves the authenticated user's login, to expand "@me".
+func currentLogin() (string, error) {
+	loginOnce.Do(func() {
+		var u struct {
+			Login string `json:"login"`
 		}
+		if err := get("user", &u); err != nil {
+			loginErr = err
+			return
+		}
+		login = u.Login
+	})
+	return login, loginErr
+}
+
+// SearchAssignedPRs returns open PRs across all repos that request your review
+// or are assigned to you, deduped by repo+number. Search ANDs qualifiers, so
+// the two are run separately and merged.
+func SearchAssignedPRs() ([]SearchResult, error) {
+	me, err := currentLogin()
+	if err != nil {
 		return nil, err
 	}
-	return out, nil
-}
-
-// View returns `gh pr view <num> --comments`: the PR body plus comment threads.
-// stderr is folded in so a failure still renders something in the preview.
-func View(dir string, num int) string {
-	cmd := exec.Command("gh", "pr", "view", strconv.Itoa(num), "--comments")
-	cmd.Dir = dir
-	out, _ := cmd.CombinedOutput()
-	return string(out)
-}
-
-// ViewRepo is View for a PR in another repo, qualified by owner/repo rather
-// than a working directory — used by the cross-repo (`jmux pr`) preview.
-func ViewRepo(nameWithOwner string, num int) string {
-	cmd := exec.Command("gh", "pr", "view", strconv.Itoa(num), "--repo", nameWithOwner, "--comments")
-	out, _ := cmd.CombinedOutput()
-	return string(out)
-}
-
-// SearchResult is a cross-repo PR from `gh search prs`, which (unlike pr list)
-// spans every repo you can see but does not expose the head branch.
-type SearchResult struct {
-	Number     int    `json:"number"`
-	Title      string `json:"title"`
-	IsDraft    bool   `json:"isDraft"`
-	Repository struct {
-		Name          string `json:"name"`
-		NameWithOwner string `json:"nameWithOwner"`
-	} `json:"repository"`
-	Author struct {
-		Login string `json:"login"`
-	} `json:"author"`
-}
-
-const searchFields = "number,title,author,isDraft,repository"
-
-// SearchAssignedPRs returns open PRs across all repos that either request your
-// review or are assigned to you. GitHub search ANDs its qualifiers, so the two
-// are run as separate queries and merged, deduped by repo+number.
-func SearchAssignedPRs() ([]SearchResult, error) {
 	seen := map[string]bool{}
 	var out []SearchResult
-	for _, qualifier := range []string{"--review-requested=@me", "--assignee=@me"} {
-		o, err := run("", "search", "prs", "--state=open", "--limit", "100", qualifier, "--json", searchFields)
-		if err != nil {
+	for _, qualifier := range []string{"review-requested:" + me, "assignee:" + me} {
+		q := "is:pr is:open " + qualifier
+		var resp searchResponse
+		if err := get("search/issues?per_page=100&q="+url.QueryEscape(q), &resp); err != nil {
 			return nil, err
 		}
-		var rs []SearchResult
-		if err := json.Unmarshal(o, &rs); err != nil {
-			return nil, err
-		}
-		for _, r := range rs {
-			key := r.Repository.NameWithOwner + "#" + strconv.Itoa(r.Number)
+		for _, it := range resp.Items {
+			slug := repoSlug(it.RepositoryURL)
+			key := slug + "#" + strconv.Itoa(it.Number)
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
+			var r SearchResult
+			r.Number, r.Title, r.IsDraft = it.Number, it.Title, it.Draft
+			r.Author.Login = it.User.Login
+			r.Repository.NameWithOwner = slug
+			if i := strings.LastIndex(slug, "/"); i >= 0 {
+				r.Repository.Name = slug[i+1:]
+			}
 			out = append(out, r)
 		}
 	}
 	return out, nil
 }
 
-// HeadRef resolves a PR's head branch by owner/repo and number — the field
-// `gh search prs` omits, fetched only for the PR actually selected.
-func HeadRef(nameWithOwner string, num int) (string, error) {
-	out, err := run("", "pr", "view", strconv.Itoa(num), "--repo", nameWithOwner, "--json", "headRefName", "-q", ".headRefName")
-	if err != nil {
-		return "", err
+// repoSlug extracts "owner/repo" from a search item's repository_url.
+func repoSlug(repositoryURL string) string {
+	const marker = "/repos/"
+	if i := strings.Index(repositoryURL, marker); i >= 0 {
+		return repositoryURL[i+len(marker):]
 	}
-	return strings.TrimSpace(string(out)), nil
+	return repositoryURL
+}
+
+// ViewRepo renders `gh pr view --comments` for the preview, bounded by
+// previewTimeout so a slow fetch is killed rather than piling up. stderr is
+// folded in so a failure still shows something.
+func ViewRepo(slug string, num int) string {
+	ctx, cancel := context.WithTimeout(context.Background(), previewTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "pr", "view", strconv.Itoa(num), "--repo", slug, "--comments")
+	out, _ := cmd.CombinedOutput()
+	return string(out)
 }
