@@ -16,18 +16,11 @@ return {
       desc = "PR: stage review comment",
     },
     {
-      "<leader>ps",
+      "<leader>pp",
       function()
-        require("jmux").pr.submit()
+        require("jmux").pr.review()
       end,
-      desc = "PR: submit review",
-    },
-    {
-      "<leader>px",
-      function()
-        require("jmux").pr.discard()
-      end,
-      desc = "PR: discard pending comments",
+      desc = "PR: review and submit",
     },
     {
       "<leader>pv",

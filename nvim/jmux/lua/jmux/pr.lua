@@ -495,10 +495,10 @@ end
 -- SPINNER frames for the in-flight submit loader.
 local SPINNER = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
 
--- submit opens a two-column preview of the pending review — code on the left,
+-- review opens a two-column preview of the pending review — code on the left,
 -- comments on the right — then a/c/r choose a verdict (with an optional summary)
 -- and POST it; q cancels. Shown in a throwaway tab so the diffview stays put.
-function M.submit()
+function M.review()
   load()
   -- The preview is built entirely from local git: HEAD for RIGHT-side code, and
   -- base (one gh call) only when a LEFT-side comment actually needs it.
