@@ -88,6 +88,8 @@ func runPR(args []string) {
 	switch args[0] {
 	case "preview":
 		pr.RunPreview(args[1:])
+	case "items":
+		pr.RunItems(args[1:])
 	default:
 		if num, ok := pr.ParseNumber(args[0]); ok {
 			pr.RunNumber(num)
@@ -114,9 +116,9 @@ func usage() {
   jmux worktree remove --path P --quiet
                                 Remove a specific worktree (used by ctrl-x bind)
   jmux pr                       Review queue: PRs across all your repos that await
-                                your review or are assigned to you (body + threads
-                                in the preview), then check one out into a worktree
-                                and open it in nvim via octo
+                                your review, are assigned to you, or you created
+                                (body + threads in the preview; ctrl-r refreshes),
+                                then check one out into a worktree and open it
   jmux pr <dir>                 Open PRs for the repo at <dir>, regardless of
                                 assignment (jmux pr . for the current repo)
   jmux pr <num>                 Review PR <num> in the current repo directly

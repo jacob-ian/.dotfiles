@@ -162,17 +162,17 @@ func currentLogin() (string, error) {
 	return login, loginErr
 }
 
-// SearchAssignedPRs returns open PRs across all repos that request your review
-// or are assigned to you, deduped by repo+number. Search ANDs qualifiers, so
-// the two are run separately and merged.
-func SearchAssignedPRs() ([]SearchResult, error) {
+// SearchMyPRs returns open PRs across all repos that request your review, are
+// assigned to you, or you authored, deduped by repo+number. Search ANDs
+// qualifiers, so each is run separately and merged.
+func SearchMyPRs() ([]SearchResult, error) {
 	me, err := currentLogin()
 	if err != nil {
 		return nil, err
 	}
 	seen := map[string]bool{}
 	var out []SearchResult
-	for _, qualifier := range []string{"review-requested:" + me, "assignee:" + me} {
+	for _, qualifier := range []string{"review-requested:" + me, "assignee:" + me, "author:" + me} {
 		q := "is:pr is:open " + qualifier
 		var resp searchResponse
 		if err := get("search/issues?per_page=100&q="+url.QueryEscape(q), &resp); err != nil {

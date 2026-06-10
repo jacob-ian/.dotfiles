@@ -23,21 +23,14 @@ func RunAssigned() {
 		return
 	}
 
-	results, err := ghctl.SearchAssignedPRs()
+	results, err := loadResults(false)
 	if err != nil {
 		notify.Errorf("gh search prs: %s", gitctl.CleanErr(err))
 		return
 	}
 	if len(results) == 0 {
-		notify.Info("No PRs assigned to or awaiting review from you")
+		notify.Info("No open PRs you created, are assigned, or were asked to review")
 		return
-	}
-
-	items := make([]string, len(results))
-	byLine := make(map[string]ghctl.SearchResult, len(results))
-	for i, r := range results {
-		items[i] = formatRow(r.Repository.NameWithOwner, r.Number, r.IsDraft, r.Title, r.Author.Login)
-		byLine[items[i]] = r
 	}
 
 	self, err := os.Executable()
@@ -45,10 +38,13 @@ func RunAssigned() {
 		self = "jmux"
 	}
 
-	sel, err := fzfutil.Pick(items, fzfutil.Options{
-		Prompt:        "assigned> ",
-		Header:        "enter: review · ctrl-/: toggle preview",
-		Bindings:      []string{"ctrl-/:toggle-preview"},
+	sel, err := fzfutil.Pick(formatRows(results), fzfutil.Options{
+		Prompt: "prs> ",
+		Header: "enter: review · ctrl-r: refresh · ctrl-/: toggle preview",
+		Bindings: []string{
+			"ctrl-/:toggle-preview",
+			fmt.Sprintf("ctrl-r:reload(%s pr items --refresh)", shellQuote(self)),
+		},
 		Preview:       fmt.Sprintf("%s pr preview {}", shellQuote(self)),
 		PreviewWindow: "right:60%:wrap",
 	})
@@ -56,27 +52,28 @@ func RunAssigned() {
 		return
 	}
 
-	r, ok := byLine[sel]
+	slug, num, ok := parseRepoNumber(sel)
 	if !ok {
 		return
 	}
-	reviewSearchResult(r)
+	reviewSelection(slug, num)
 }
 
-// reviewSearchResult maps a cross-repo PR to its local clone, resolves the head
-// branch search omits, and hands off to the shared review flow.
-func reviewSearchResult(r ghctl.SearchResult) {
-	bareRoot := findLocalRepo(r.Repository.NameWithOwner)
+// reviewSelection maps a picked cross-repo PR (owner/repo + number) to its local
+// clone, resolves the head branch search omits, and hands off to the review
+// flow. Parsing from the row keeps it working with rows fzf reloaded itself.
+func reviewSelection(slug string, num int) {
+	bareRoot := findLocalRepo(slug)
 	if bareRoot == "" {
-		notify.Errorf("No local clone of %s", r.Repository.NameWithOwner)
+		notify.Errorf("No local clone of %s", slug)
 		return
 	}
-	headRef, err := ghctl.HeadRef(r.Repository.NameWithOwner, r.Number)
+	headRef, err := ghctl.HeadRef(slug, num)
 	if err != nil || headRef == "" {
-		notify.Errorf("resolve branch for %s#%d: %s", r.Repository.NameWithOwner, r.Number, gitctl.CleanErr(err))
+		notify.Errorf("resolve branch for %s#%d: %s", slug, num, gitctl.CleanErr(err))
 		return
 	}
-	Review(bareRoot, ghctl.PR{Number: r.Number, HeadRefName: headRef})
+	Review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef})
 }
 
 // findLocalRepo returns the bare repo whose origin remote is nameWithOwner, or
