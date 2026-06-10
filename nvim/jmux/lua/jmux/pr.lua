@@ -641,6 +641,24 @@ local function bar(label, hints)
   return ("%%#Title# %s %%*%%=%s "):format(label, table.concat(hints, "  "))
 end
 
+-- set_tab_title puts a full-width jmux bar (label + hints) in the tabline while a
+-- tab is open, and restores the previous tabline so the rest of the session's
+-- tabline is untouched. Restore is wired to BufWipeout, but that doesn't fire for
+-- terminal buffers (a tab holding one closes without wiping it), so the returned
+-- restore fn lets such callers tear down explicitly. Also returns the bar string
+-- for callers that re-show it later (e.g. after a transient overlay).
+local function set_tab_title(buf, label, hints)
+  local saved_tabline, saved_showtabline = vim.o.tabline, vim.o.showtabline
+  local title = bar(label, hints)
+  vim.o.showtabline = 2
+  vim.o.tabline = title
+  local function restore()
+    vim.o.tabline, vim.o.showtabline = saved_tabline, saved_showtabline
+  end
+  vim.api.nvim_create_autocmd("BufWipeout", { buffer = buf, once = true, callback = restore })
+  return title, restore
+end
+
 -- SPINNER frames for the in-flight submit loader.
 local SPINNER = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
 
@@ -690,24 +708,13 @@ function M.review()
   vim.wo[rwin].linebreak = true
 
   -- Row 1 (tabline, full width): title + the review-level commands that work
-  -- from either pane. Scoped to this preview and restored when it's torn down,
-  -- so the rest of the session's tabline is untouched.
-  local saved_tabline, saved_showtabline = vim.o.tabline, vim.o.showtabline
-  local review_tabline = bar("jmux review", {
+  -- from either pane.
+  local review_tabline = set_tab_title(lbuf, "jmux review", {
     key_hint("a", "approve"),
     key_hint("c", "comment"),
     key_hint("r", "request"),
     key_hint("D", "discard"),
     key_hint("q", "cancel"),
-  })
-  vim.o.showtabline = 2
-  vim.o.tabline = review_tabline
-  vim.api.nvim_create_autocmd("BufWipeout", {
-    buffer = lbuf,
-    once = true,
-    callback = function()
-      vim.o.tabline, vim.o.showtabline = saved_tabline, saved_showtabline
-    end,
   })
 
   -- Row 2 (winbar, per pane): the actions specific to each side.
@@ -874,26 +881,21 @@ function M.discard()
 end
 
 -- view opens the rendered `gh pr view --comments` (summary + full comment
--- thread) in a scrollable floating terminal; q closes it. A terminal buffer
+-- thread) in a full-tab scrollable terminal; q closes it. A terminal buffer
 -- gives gh a real tty, so it renders markdown + colours, which nvim displays.
 function M.view()
-  local width = math.floor(vim.o.columns * 0.85)
-  local height = math.floor(vim.o.lines * 0.85)
-  local buf = vim.api.nvim_create_buf(false, true)
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = math.floor((vim.o.lines - height) / 2),
-    col = math.floor((vim.o.columns - width) / 2),
-    border = "rounded",
-    title = " pr view ",
-    title_pos = "center",
-    style = "minimal",
-  })
+  vim.cmd "tabnew"
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.bo[buf].bufhidden = "wipe"
   -- keep content flush with the top edge (no scrolloff gap)
   vim.wo[win].scrolloff = 0
-  vim.keymap.set("n", "q", "<cmd>bdelete!<cr>", { buffer = buf, nowait = true, desc = "close" })
+  -- A finished terminal buffer is kept alive on tab/window close regardless of
+  -- bufhidden, so set_tab_title's BufWipeout never fires here. Restore on
+  -- WinClosed instead — it fires on every close path (q, :q, :tabclose, <C-w>c).
+  local _, restore = set_tab_title(buf, "jmux pr view", { key_hint("q", "close") })
+  vim.api.nvim_create_autocmd("WinClosed", { pattern = tostring(win), once = true, callback = restore })
+  vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = buf, nowait = true, desc = "close" })
   vim.fn.jobstart({ "gh", "pr", "view", "--comments" }, {
     term = true,
     -- gh streams output and leaves the cursor at the end; snap back to the top
