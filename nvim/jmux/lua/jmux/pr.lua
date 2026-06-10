@@ -173,11 +173,86 @@ local function target()
   return { path = path, side = side, start_line = sline, line = eline }
 end
 
+-- lang_of maps a file path to a treesitter language (or nil), so each code block
+-- can be highlighted with the right parser regardless of the others.
+local function lang_of(path)
+  local ft = vim.filetype.match { filename = path }
+  if not ft then
+    return nil
+  end
+  return vim.treesitter.language.get_lang(ft) or ft
+end
+
+-- ts_highlight parses `text` as `lang` and lays its syntax highlights onto the
+-- buffer starting at row `base`. Used on a contiguous code span (preview hunk or
+-- suggestion body) so node rows map straight to base + row. Best-effort — a
+-- missing parser or query just leaves the lines unhighlighted. priority defaults
+-- to 100 (over Normal); callers layering over other highlights pass higher.
+local function ts_highlight(buf, ns, lang, text, base, priority)
+  local ok, parser = pcall(vim.treesitter.get_string_parser, text, lang)
+  if not ok or not parser then
+    return
+  end
+  local tree = parser:parse()[1]
+  local query = vim.treesitter.query.get(lang, "highlights")
+  if not tree or not query then
+    return
+  end
+  for id, node in query:iter_captures(tree:root(), text, 0, -1) do
+    local name = query.captures[id]
+    -- captures starting with "_" are query internals, not highlight groups.
+    if not name:find "^_" then
+      local sr, sc, er, ec = node:range()
+      pcall(vim.api.nvim_buf_set_extmark, buf, ns, base + sr, sc, {
+        end_row = base + er,
+        end_col = ec,
+        hl_group = "@" .. name,
+        priority = priority or 100,
+      })
+    end
+  end
+end
+
+-- highlight_suggestion finds the ```suggestion fence in a comment buffer and
+-- syntax-highlights its body in the reviewed file's language, so a suggestion
+-- reads like code rather than plain markdown. Re-run on edit to stay live; a
+-- high priority keeps it above markdown's own raw-block highlighting.
+local SUGGEST_NS = vim.api.nvim_create_namespace "jmux_pr_suggestion"
+local function highlight_suggestion(buf, lang)
+  vim.api.nvim_buf_clear_namespace(buf, SUGGEST_NS, 0, -1)
+  if not lang then
+    return
+  end
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  local open, close
+  for i, l in ipairs(lines) do
+    if not open then
+      if l:match "^```suggestion%s*$" then
+        open = i
+      end
+    elseif l:match "^```%s*$" then
+      close = i
+      break
+    end
+  end
+  if not open or not close or close <= open + 1 then
+    return
+  end
+  local code = {}
+  for i = open + 1, close - 1 do
+    code[#code + 1] = lines[i]
+  end
+  -- open is the fence's 1-indexed line, so the first code line is row `open`.
+  ts_highlight(buf, SUGGEST_NS, lang, table.concat(code, "\n"), open, 200)
+end
+
 -- prompt_multiline opens a floating scratch buffer for a multi-line body and
 -- behaves like editing a file: :w runs on_save(text) (re-runnable to update),
 -- :q closes, :q! discards, and :q on unsaved edits warns as usual. Used because
--- vim.ui.input — and snacks' own input — are single-line.
-local function prompt_multiline(title, on_save)
+-- vim.ui.input — and snacks' own input — are single-line. An optional `initial`
+-- string prefills the buffer (e.g. a suggestion block to edit); on_open(buf), if
+-- given, runs once the buffer exists (used to attach live suggestion highlights).
+local function prompt_multiline(title, on_save, initial, on_open)
   require("snacks").win {
     width = 0.6,
     height = 0.35,
@@ -192,6 +267,12 @@ local function prompt_multiline(title, on_save)
     keys = { q = false },
     on_buf = function(self)
       vim.api.nvim_buf_set_name(self.buf, "pr://comment/" .. self.buf)
+      if initial then
+        vim.api.nvim_buf_set_lines(self.buf, 0, -1, false, vim.split(initial, "\n"))
+      end
+      if on_open then
+        on_open(self.buf)
+      end
       vim.api.nvim_create_autocmd("BufWriteCmd", {
         buffer = self.buf,
         callback = function()
@@ -204,23 +285,32 @@ local function prompt_multiline(title, on_save)
       })
     end,
   }
-  vim.cmd "startinsert"
+  -- Prefilled prompts open in normal mode so the user can navigate to the line
+  -- they want to change; an empty prompt drops straight into insert.
+  if not initial then
+    vim.cmd "startinsert"
+  end
 end
 
--- add_comment stages an inline comment on the selected line(s). Bind in normal
--- and visual mode; a visual selection becomes a multi-line comment.
-function M.add_comment()
-  load()
-  local t, reason = target()
-  if not t then
-    vim.notify(reason, vim.log.levels.WARN)
-    return
-  end
+-- stage_comment opens the editor for the target span (prefilled with `initial`
+-- when given) and stages the result in M.pending, updating in place on re-save
+-- rather than queuing a duplicate. When `lang` is set, the prompt's suggestion
+-- block is syntax-highlighted live in that language.
+local function stage_comment(t, label, initial, lang)
   local span = span_str(t)
-  -- staged is the comment table once first written; re-saving updates it in
-  -- place rather than queuing a duplicate.
   local staged
-  prompt_multiline(("comment %s:%s"):format(t.path, span), function(body)
+  local on_open = lang
+      and function(buf)
+        highlight_suggestion(buf, lang)
+        vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+          buffer = buf,
+          callback = function()
+            highlight_suggestion(buf, lang)
+          end,
+        })
+      end
+    or nil
+  prompt_multiline(("%s %s:%s"):format(label, t.path, span), function(body)
     if staged then
       staged.body = body
     else
@@ -233,7 +323,37 @@ function M.add_comment()
     end
     save()
     vim.notify(("staged %s:%s (%d pending)"):format(t.path, span, #M.pending))
-  end)
+  end, initial, on_open)
+end
+
+-- add_comment stages an inline comment on the selected line(s). Bind in normal
+-- and visual mode; a visual selection becomes a multi-line comment.
+function M.add_comment()
+  load()
+  local t, reason = target()
+  if not t then
+    vim.notify(reason, vim.log.levels.WARN)
+    return
+  end
+  stage_comment(t, "comment")
+end
+
+-- suggest stages a GitHub suggestion on the selected line(s): a comment prefilled
+-- with a ```suggestion block holding the current code, ready to edit into the
+-- proposed change. Suggestions only apply to the new side, so LEFT is declined.
+function M.suggest()
+  load()
+  local t, reason = target()
+  if not t then
+    vim.notify(reason, vim.log.levels.WARN)
+    return
+  end
+  if t.side ~= "RIGHT" then
+    vim.notify("suggestions apply to the new side only", vim.log.levels.WARN)
+    return
+  end
+  local lines = vim.api.nvim_buf_get_lines(0, t.start_line - 1, t.line, false)
+  stage_comment(t, "suggestion", "```suggestion\n" .. table.concat(lines, "\n") .. "\n```", lang_of(t.path))
 end
 
 -- post_review POSTs the pending comments as one review with the chosen verdict
@@ -267,46 +387,6 @@ local function post_review(c, event, body, on_done)
       on_done(true)
     end)
   end)
-end
-
--- lang_of maps a file path to a treesitter language (or nil), so each code block
--- can be highlighted with the right parser regardless of the others.
-local function lang_of(path)
-  local ft = vim.filetype.match { filename = path }
-  if not ft then
-    return nil
-  end
-  return vim.treesitter.language.get_lang(ft) or ft
-end
-
--- ts_highlight parses `text` as `lang` and lays its syntax highlights onto the
--- buffer starting at row `base`. Used only on the commented lines: parsing the
--- selected span in isolation keeps the mapping trivial (the span is contiguous
--- in the buffer, so node rows map straight to base + row). Best-effort — a
--- missing parser or query just leaves the lines unhighlighted.
-local function ts_highlight(buf, ns, lang, text, base)
-  local ok, parser = pcall(vim.treesitter.get_string_parser, text, lang)
-  if not ok or not parser then
-    return
-  end
-  local tree = parser:parse()[1]
-  local query = vim.treesitter.query.get(lang, "highlights")
-  if not tree or not query then
-    return
-  end
-  for id, node in query:iter_captures(tree:root(), text, 0, -1) do
-    local name = query.captures[id]
-    -- captures starting with "_" are query internals, not highlight groups.
-    if not name:find "^_" then
-      local sr, sc, er, ec = node:range()
-      pcall(vim.api.nvim_buf_set_extmark, buf, ns, base + sr, sc, {
-        end_row = base + er,
-        end_col = ec,
-        hl_group = "@" .. name,
-        priority = 100,
-      })
-    end
-  end
 end
 
 -- build_preview reads each pending comment's surrounding code and returns a list

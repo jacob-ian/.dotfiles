@@ -16,6 +16,14 @@ return {
       desc = "PR: stage review comment",
     },
     {
+      "<leader>ps",
+      function()
+        require("jmux").pr.suggest()
+      end,
+      mode = { "n", "x" },
+      desc = "PR: stage suggestion",
+    },
+    {
       "<leader>pp",
       function()
         require("jmux").pr.review()
