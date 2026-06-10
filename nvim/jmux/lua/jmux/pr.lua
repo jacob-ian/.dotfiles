@@ -125,11 +125,10 @@ local function load()
   end
 end
 
--- target resolves the {path, side, start_line, line} for the current diffview
--- selection, or nil + reason when the cursor isn't in a reviewable diff window.
--- Diffview's right (new) buffer shows the head file, so its line numbers map
--- straight to GitHub's RIGHT side; the left buffer maps to LEFT/oldpath.
-local function target()
+-- diff_view returns the active diffview's { entry, layout }, or nil + reason when
+-- diffview isn't loaded or no diff is open. Shared by everything that needs to map
+-- diffview windows to GitHub sides (target's selection, decorate_diff's signs).
+local function diff_view()
   local ok, lib = pcall(require, "diffview.lib")
   if not ok then
     return nil, "diffview not loaded"
@@ -138,9 +137,21 @@ local function target()
   if not view or not view.cur_entry or not view.cur_layout then
     return nil, "not in a diffview diff"
   end
+  return { entry = view.cur_entry, layout = view.cur_layout }
+end
 
-  local entry = view.cur_entry
-  local layout = view.cur_layout
+-- target resolves the {path, side, start_line, line} for the current diffview
+-- selection, or nil + reason when the cursor isn't in a reviewable diff window.
+-- Diffview's right (new) buffer shows the head file, so its line numbers map
+-- straight to GitHub's RIGHT side; the left buffer maps to LEFT/oldpath.
+local function target()
+  local v, err = diff_view()
+  if not v then
+    return nil, err
+  end
+
+  local entry = v.entry
+  local layout = v.layout
   local curwin = vim.api.nvim_get_current_win()
 
   local side, path
@@ -246,6 +257,63 @@ local function highlight_suggestion(buf, lang)
   ts_highlight(buf, SUGGEST_NS, lang, table.concat(code, "\n"), open, 200)
 end
 
+-- Pending comments mark themselves in the diff gutter with a sign at the line
+-- each one starts on. SIGN is the glyph (nf-fa-comment); change the codepoint to
+-- taste. Built via nr2char so the source stays plain ASCII.
+local SIGN_NS = vim.api.nvim_create_namespace "jmux_pr_signs"
+local SIGN = vim.fn.nr2char(0xf075)
+
+-- place_signs (re)draws the signs for one diff buffer: clears ours, then marks
+-- every pending comment whose path/side match this buffer. Diffview shows the
+-- whole file, so a comment's line maps straight to the buffer line.
+local function place_signs(buf, path, side)
+  if not (buf and vim.api.nvim_buf_is_valid(buf)) then
+    return
+  end
+  vim.api.nvim_buf_clear_namespace(buf, SIGN_NS, 0, -1)
+  if not path then
+    return
+  end
+  local last = vim.api.nvim_buf_line_count(buf)
+  for _, c in ipairs(M.pending) do
+    if c.path == path and c.side == side then
+      local l = c.start_line or c.line
+      if l >= 1 and l <= last then
+        pcall(vim.api.nvim_buf_set_extmark, buf, SIGN_NS, l - 1, 0, {
+          sign_text = SIGN,
+          sign_hl_group = "DiagnosticSignInfo",
+        })
+      end
+    end
+  end
+end
+
+-- pd_tab is the tabpage that `pd` opened the review diff in. Signs are scoped to
+-- it so PR comments don't bleed into unrelated diffviews (neogit, ad-hoc :Diff…).
+local pd_tab
+
+-- decorate_diff signs the current diffview file's two windows (RIGHT = new/main,
+-- LEFT = old). A no-op unless the pd-opened diff tab is current. Driven by
+-- diffview's own events so the signs follow file navigation and reappear when the
+-- view is re-entered.
+local function decorate_diff()
+  if not pd_tab or vim.api.nvim_get_current_tabpage() ~= pd_tab then
+    return
+  end
+  local v = diff_view()
+  if not v then
+    return
+  end
+  local entry, layout = v.entry, v.layout
+  local main = layout:get_main_win()
+  if main and main.id and vim.api.nvim_win_is_valid(main.id) then
+    place_signs(vim.api.nvim_win_get_buf(main.id), entry.path, "RIGHT")
+  end
+  if layout.a and layout.a.id and vim.api.nvim_win_is_valid(layout.a.id) then
+    place_signs(vim.api.nvim_win_get_buf(layout.a.id), entry.oldpath, "LEFT")
+  end
+end
+
 -- prompt_multiline opens a floating scratch buffer for a multi-line body and
 -- behaves like editing a file: :w runs on_save(text) (re-runnable to update),
 -- :q closes, :q! discards, and :q on unsaved edits warns as usual. Used because
@@ -322,6 +390,7 @@ local function stage_comment(t, label, initial, lang)
       table.insert(M.pending, staged)
     end
     save()
+    decorate_diff()
     vim.notify(("staged %s:%s (%d pending)"):format(t.path, span, #M.pending))
   end, initial, on_open)
 end
@@ -851,5 +920,36 @@ function M.browser()
     end
   end)
 end
+
+-- diff opens the PR's changes — base...HEAD, the merge-base range GitHub shows —
+-- in diffview, where pending comments appear as gutter signs. load() first so a
+-- restored review decorates on open. Resolving the base is one gh call, cached.
+function M.diff()
+  local pr, err = pr_info()
+  if not pr or not pr.base then
+    vim.notify(err or "could not resolve PR base", vim.log.levels.ERROR)
+    return
+  end
+  vim.cmd("DiffviewOpen " .. pr.base .. "...HEAD")
+  -- :DiffviewOpen lands us in the new diff tab; remember it so only this view
+  -- gets comment signs.
+  pd_tab = vim.api.nvim_get_current_tabpage()
+  -- Defer restoring the saved review (its git calls) off the open path, then
+  -- draw signs. place_signs is idempotent, so any event-driven decorate that
+  -- raced ahead with an empty review is simply corrected here.
+  vim.schedule(function()
+    load()
+    decorate_diff()
+  end)
+end
+
+-- Keep the diff gutter in sync with pending comments as the user navigates
+-- diffview files and re-enters the view. A cleared augroup keeps re-sourcing the
+-- module (dev reload) idempotent rather than stacking duplicate callbacks.
+vim.api.nvim_create_autocmd("User", {
+  group = vim.api.nvim_create_augroup("jmux_pr", { clear = true }),
+  pattern = { "DiffviewDiffBufWinEnter", "DiffviewViewEnter" },
+  callback = vim.schedule_wrap(decorate_diff),
+})
 
 return M

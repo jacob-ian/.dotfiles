@@ -24,6 +24,13 @@ return {
       desc = "PR: stage suggestion",
     },
     {
+      "<leader>pd",
+      function()
+        require("jmux").pr.diff()
+      end,
+      desc = "PR: open diff",
+    },
+    {
       "<leader>pp",
       function()
         require("jmux").pr.review()
