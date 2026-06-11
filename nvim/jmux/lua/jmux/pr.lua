@@ -898,6 +898,9 @@ function M.view()
   vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = buf, nowait = true, desc = "close" })
   vim.fn.jobstart({ "gh", "pr", "view", "--comments" }, {
     term = true,
+    -- Blank GH_PAGER stops gh paging through less (which would eat j/k); dump the
+    -- full view so nvim scrolls it. Colours stay on — stdout is still the tty.
+    env = { GH_PAGER = "" },
     -- gh streams output and leaves the cursor at the end; snap back to the top
     -- so the view opens on the PR summary.
     on_exit = function()
