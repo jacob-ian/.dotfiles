@@ -129,6 +129,9 @@ func checkoutWorktree(bareRoot string, p ghctl.PR) (string, error) {
 	if repo.IsDir(path) {
 		return path, nil
 	}
+	if existing := gitctl.WorktreeForBranch(bareRoot, branch); existing != "" && repo.IsDir(existing) {
+		return existing, nil
+	}
 	if err := gitctl.FetchBranch(bareRoot, branch); err != nil {
 		return "", err
 	}

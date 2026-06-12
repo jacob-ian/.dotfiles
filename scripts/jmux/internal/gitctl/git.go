@@ -109,6 +109,33 @@ func FetchBranch(bareRoot, branch string) error {
 	return gitRun(bareRoot, "fetch", "origin", branch)
 }
 
+// WorktreeForBranch returns the path of the worktree that has branch checked
+// out, or "" if none does. Consulting git's worktree list finds the checkout
+// wherever it lives, so a branch already in a worktree is reused rather than
+// failing a second `worktree add` (git forbids the same branch in two trees).
+func WorktreeForBranch(bareRoot, branch string) string {
+	out, err := gitOut(bareRoot, "worktree", "list", "--porcelain")
+	if err != nil {
+		return ""
+	}
+	return worktreeForBranch(out, branch)
+}
+
+// worktreeForBranch scans `git worktree list --porcelain` output for the path
+// whose entry checks out branch.
+func worktreeForBranch(porcelain, branch string) string {
+	want := "branch refs/heads/" + branch
+	var path string
+	for _, line := range strings.Split(porcelain, "\n") {
+		if p, ok := strings.CutPrefix(line, "worktree "); ok {
+			path = p
+		} else if line == want {
+			return path
+		}
+	}
+	return ""
+}
+
 // CleanErr collapses a git error to a single line, dropping git's "fatal: "
 // prefix. Useful for status-bar style notifications where the full multi-line
 // stderr would overflow.

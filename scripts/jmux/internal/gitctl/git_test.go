@@ -53,6 +53,38 @@ func TestRefExists(t *testing.T) {
 	}
 }
 
+func TestWorktreeForBranch(t *testing.T) {
+	const porcelain = `worktree /repos/app/main
+HEAD aaa111
+branch refs/heads/main
+
+worktree /repos/app/feature-x
+HEAD bbb222
+branch refs/heads/feature/x
+
+worktree /repos/app/wip
+HEAD ccc333
+detached
+`
+	tests := []struct {
+		name   string
+		branch string
+		want   string
+	}{
+		{"first entry", "main", "/repos/app/main"},
+		{"branch with slash at non-conventional path", "feature/x", "/repos/app/feature-x"},
+		{"detached entry has no branch", "ccc333", ""},
+		{"not checked out anywhere", "ghost", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := worktreeForBranch(porcelain, tt.branch); got != tt.want {
+				t.Errorf("worktreeForBranch(%q) = %q, want %q", tt.branch, got, tt.want)
+			}
+		})
+	}
+}
+
 // initTestRepo creates a tempdir git repo with:
 //   - a `main` branch (local + at refs/remotes/origin/main)
 //   - a `local-only` local branch
