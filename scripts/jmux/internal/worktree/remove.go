@@ -80,9 +80,17 @@ func pickRemoveTarget() (string, bool) {
 	return repo.TrimSlash(sel), true
 }
 
-// Remove takes a worktree out of git's view and kills its tmux session. Use it
-// only for paths that are actually worktrees (see IsManagedWorktree).
+// Remove takes a worktree out of git's view and kills its tmux session. It
+// refuses any path that isn't a removable worktree (see IsManagedWorktree),
+// so it never deletes a plain directory or the main/default checkout.
 func Remove(path string, quiet bool) {
+	if !IsManagedWorktree(path) {
+		if !quiet {
+			notify.Errorf("Refusing to remove '%s': not a removable worktree", filepath.Base(path))
+		}
+		return
+	}
+
 	bareRoot := repo.FindBareRoot(path)
 	if bareRoot == "" {
 		bareRoot = gitctl.CommonDir(path)
