@@ -1491,6 +1491,8 @@ function M.view()
   -- keep markdown concealed even on the cursor line; this is a read-only view, so
   -- revealing raw syntax on hover just makes lines jump around.
   vim.wo[win].concealcursor = "nvic"
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
 
   local function fill(lines)
     vim.bo[buf].modifiable = true
@@ -1557,6 +1559,9 @@ function M.view()
     -- re-runnable so a successful merge can refresh the view in place. stop_spin,
     -- when passed, halts a merge spinner the instant the refreshed data arrives.
     local function fetch_and_render(stop_spin)
+      -- remember the cursor line so a refresh keeps your place across the
+      -- re-render (expand state is preserved, so the line stays meaningful).
+      local prev_line = (vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_cursor(win)[1]) or 1
       vim.system({
         "gh",
         "api",
@@ -1785,7 +1790,7 @@ function M.view()
           end
           set_hints(hints)
 
-          pcall(vim.api.nvim_win_set_cursor, win, { 1, 0 })
+          pcall(vim.api.nvim_win_set_cursor, win, { math.min(prev_line, vim.api.nvim_buf_line_count(buf)), 0 })
         end)
       end)
     end
