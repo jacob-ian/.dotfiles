@@ -983,6 +983,12 @@ local function set_tab_title(buf, label, hints)
       restore()
     end
   end
+  -- set_hints rebuilds the bar (e.g. to reveal a key once data confirms it
+  -- applies) and re-applies it if this tab is current.
+  local function set_hints(new_hints)
+    title = bar(label, new_hints)
+    refresh()
+  end
   refresh()
   vim.api.nvim_create_autocmd("TabEnter", { group = group, callback = refresh })
   vim.api.nvim_create_autocmd("BufWipeout", {
@@ -994,7 +1000,7 @@ local function set_tab_title(buf, label, hints)
       pcall(vim.api.nvim_del_augroup_by_id, group)
     end,
   })
-  return title, restore
+  return title, restore, set_hints
 end
 
 -- SPINNER frames for the in-flight submit loader.
@@ -1223,9 +1229,12 @@ end
 -- checks — `gh pr view --comments` omits the inline review comments entirely.
 local VIEW_QUERY = [[
 query($owner:String!,$repo:String!,$number:Int!){
+  viewer{ login }
   repository(owner:$owner,name:$repo){
+    viewerDefaultMergeMethod
     pullRequest(number:$number){
       title number state createdAt author{login} body
+      viewerDidAuthor assignees(first:20){ nodes{ login } }
       isDraft mergeable reviewDecision mergeStateStatus
       latestOpinionatedReviews(first:50){ nodes{ state } }
       comments(first:100){ nodes{ author{login} body createdAt } }
@@ -1489,7 +1498,8 @@ function M.view()
     vim.bo[buf].modifiable = false
   end
 
-  local _, restore = set_tab_title(buf, "jmux pr view", { key_hint("⇥", "expand"), key_hint("q", "close") })
+  local _, restore, set_hints =
+    set_tab_title(buf, "jmux pr view", { key_hint("⇥", "expand"), key_hint("q", "close") })
   vim.api.nvim_create_autocmd("WinClosed", { pattern = tostring(win), once = true, callback = restore })
   vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = buf, nowait = true, desc = "close" })
 
@@ -1513,18 +1523,20 @@ function M.view()
       timer = nil
     end
   end
-  timer:start(
-    100,
-    100,
-    vim.schedule_wrap(function()
-      if not timer or not vim.api.nvim_buf_is_valid(buf) then
-        stop_loader()
-        return
-      end
-      frame = frame % #SPINNER + 1
-      draw_loader()
-    end)
-  )
+  if timer then
+    timer:start(
+      100,
+      100,
+      vim.schedule_wrap(function()
+        if not timer or not vim.api.nvim_buf_is_valid(buf) then
+          stop_loader()
+          return
+        end
+        frame = frame % #SPINNER + 1
+        draw_loader()
+      end)
+    )
+  end
 
   pr_info_async(function(pr, err)
     if not vim.api.nvim_buf_is_valid(buf) then
@@ -1538,134 +1550,224 @@ function M.view()
     end
     local owner, repo = pr.slug:match "([^/]+)/(.+)"
 
-    vim.system({
-      "gh",
-      "api",
-      "graphql",
-      "-f",
-      "query=" .. VIEW_QUERY,
-      "-f",
-      "owner=" .. (owner or ""),
-      "-f",
-      "repo=" .. (repo or ""),
-      "-F",
-      "number=" .. pr.number,
-    }, { text = true }, function(res)
-      vim.schedule(function()
-        stop_loader()
-        if not vim.api.nvim_buf_is_valid(buf) then
-          return
-        end
-        if res.code ~= 0 then
-          return fill { "", "  failed to load PR:", "", "  " .. vim.trim(res.stderr or "") }
-        end
-        local ok, data = pcall(vim.json.decode, res.stdout)
-        if not ok then
-          return fill { "  failed to parse PR response" }
-        end
+    -- the PR description starts open; everything else collapsed. Hoisted above
+    -- fetch_and_render so expand/collapse state survives a merge-triggered refresh.
+    local expanded = { pr = true }
 
-        -- Collapsible tree: header → PR description → checks → conversation. Each
-        -- item shows a ▸/▾ header; expanding a review reveals its body and inline
-        -- threads, which expand in turn. Re-rendered on toggle; check-icon marks are
-        -- repositioned since the description above them changes height.
-        local model = build_model(data)
-        local ns = vim.api.nvim_create_namespace "jmux_pr_view"
-        -- the PR description starts open; everything else collapsed.
-        local expanded, rows_by_id, id_by_row = { pr = true }, {}, {}
-
-        local function render()
-          local lines = vim.list_extend({}, model.header)
-          rows_by_id, id_by_row = {}, {}
-          local marks = {}
-          -- indent body lines under their title (blank lines stay blank so markdown
-          -- paragraph breaks survive); any body_marks shift with the indent.
-          local function add_body(src, indent, body_marks)
-            local start = #lines
-            for _, l in ipairs(src) do
-              lines[#lines + 1] = l ~= "" and (indent .. l) or ""
-            end
-            for _, m in ipairs(body_marks or {}) do
-              marks[#marks + 1] =
-                { row = start + m.rel, col = m.col + #indent, col_end = m.col_end + #indent, hl = m.hl }
-            end
+    -- re-runnable so a successful merge can refresh the view in place. stop_spin,
+    -- when passed, halts a merge spinner the instant the refreshed data arrives.
+    local function fetch_and_render(stop_spin)
+      vim.system({
+        "gh",
+        "api",
+        "graphql",
+        "-f",
+        "query=" .. VIEW_QUERY,
+        "-f",
+        "owner=" .. (owner or ""),
+        "-f",
+        "repo=" .. (repo or ""),
+        "-F",
+        "number=" .. pr.number,
+      }, { text = true }, function(res)
+        vim.schedule(function()
+          stop_loader()
+          if stop_spin then
+            stop_spin()
           end
-          local function emit(b)
-            local row = #lines
-            rows_by_id[b.id], id_by_row[row] = row, b.id
-            local prefix = expanded[b.id] and "▾ " or "▸ "
-            lines[#lines + 1] = prefix .. b.header
-            if b.header_mark then
-              local pad = #prefix
-              marks[#marks + 1] = {
-                row = row,
-                col = pad + b.header_mark.col,
-                col_end = pad + b.header_mark.col_end,
-                hl = b.header_mark.hl,
-              }
-            end
-            if expanded[b.id] then
-              add_body(b.body, "  ", b.body_marks)
-              for _, k in ipairs(b.kids) do
-                local krow = #lines
-                rows_by_id[k.id], id_by_row[krow] = krow, k.id
-                lines[#lines + 1] = "  " .. (expanded[k.id] and "▾ " or "▸ ") .. k.header
-                if expanded[k.id] then
-                  add_body(k.lines, "    ")
-                end
+          if not vim.api.nvim_buf_is_valid(buf) then
+            return
+          end
+          if res.code ~= 0 then
+            return fill { "", "  failed to load PR:", "", "  " .. vim.trim(res.stderr or "") }
+          end
+          local ok, data = pcall(vim.json.decode, res.stdout)
+          if not ok then
+            return fill { "  failed to parse PR response" }
+          end
+
+          -- Collapsible tree: header → PR description → checks → conversation. Each
+          -- item shows a ▸/▾ header; expanding a review reveals its body and inline
+          -- threads, which expand in turn. Re-rendered on toggle; check-icon marks are
+          -- repositioned since the description above them changes height.
+          local model = build_model(data)
+          local ns = vim.api.nvim_create_namespace "jmux_pr_view"
+          local rows_by_id, id_by_row = {}, {}
+
+          local function render()
+            local lines = vim.list_extend({}, model.header)
+            rows_by_id, id_by_row = {}, {}
+            local marks = {}
+            -- indent body lines under their title (blank lines stay blank so markdown
+            -- paragraph breaks survive); any body_marks shift with the indent.
+            local function add_body(src, indent, body_marks)
+              local start = #lines
+              for _, l in ipairs(src) do
+                lines[#lines + 1] = l ~= "" and (indent .. l) or ""
+              end
+              for _, m in ipairs(body_marks or {}) do
+                marks[#marks + 1] =
+                  { row = start + m.rel, col = m.col + #indent, col_end = m.col_end + #indent, hl = m.hl }
               end
             end
-            lines[#lines + 1] = ""
+            local function emit(b)
+              local row = #lines
+              rows_by_id[b.id], id_by_row[row] = row, b.id
+              local prefix = expanded[b.id] and "▾ " or "▸ "
+              lines[#lines + 1] = prefix .. b.header
+              if b.header_mark then
+                local pad = #prefix
+                marks[#marks + 1] = {
+                  row = row,
+                  col = pad + b.header_mark.col,
+                  col_end = pad + b.header_mark.col_end,
+                  hl = b.header_mark.hl,
+                }
+              end
+              if expanded[b.id] then
+                add_body(b.body, "  ", b.body_marks)
+                for _, k in ipairs(b.kids) do
+                  local krow = #lines
+                  rows_by_id[k.id], id_by_row[krow] = krow, k.id
+                  lines[#lines + 1] = "  " .. (expanded[k.id] and "▾ " or "▸ ") .. k.header
+                  if expanded[k.id] then
+                    add_body(k.lines, "    ")
+                  end
+                end
+              end
+              lines[#lines + 1] = ""
+            end
+
+            if model.pr then
+              emit(model.pr)
+            end
+            if model.checks then
+              emit(model.checks)
+            end
+            for _, b in ipairs(model.blocks) do
+              emit(b)
+            end
+
+            fill(lines)
+            vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+            -- header marks sit at fixed top rows; block marks at their rendered rows.
+            for _, m in ipairs(model.header_marks or {}) do
+              marks[#marks + 1] = m
+            end
+            for _, m in ipairs(marks) do
+              pcall(vim.api.nvim_buf_set_extmark, buf, ns, m.row, m.col, {
+                end_col = m.col_end,
+                hl_group = m.hl,
+                priority = 200,
+              })
+            end
           end
 
-          if model.pr then
-            emit(model.pr)
-          end
-          if model.checks then
-            emit(model.checks)
-          end
-          for _, b in ipairs(model.blocks) do
-            emit(b)
+          -- resolve the window from the keypress, not the captured `win`: the buffer
+          -- can outlive its original window (e.g. :split then close the first), and
+          -- a stale win id would throw E5108.
+          local function toggle()
+            local w = vim.api.nvim_get_current_win()
+            if vim.api.nvim_win_get_buf(w) ~= buf then
+              return
+            end
+            local id = id_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
+            if not id then
+              return
+            end
+            expanded[id] = not expanded[id] or nil
+            render()
+            pcall(vim.api.nvim_win_set_cursor, w, { (rows_by_id[id] or 0) + 1, 0 })
           end
 
-          fill(lines)
-          vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-          -- header marks sit at fixed top rows; block marks at their rendered rows.
-          for _, m in ipairs(model.header_marks or {}) do
-            marks[#marks + 1] = m
-          end
-          for _, m in ipairs(marks) do
-            pcall(vim.api.nvim_buf_set_extmark, buf, ns, m.row, m.col, {
-              end_col = m.col_end,
-              hl_group = m.hl,
-              priority = 200,
-            })
-          end
-        end
-
-        -- resolve the window from the keypress, not the captured `win`: the buffer
-        -- can outlive its original window (e.g. :split then close the first), and
-        -- a stale win id would throw E5108.
-        local function toggle()
-          local w = vim.api.nvim_get_current_win()
-          if vim.api.nvim_win_get_buf(w) ~= buf then
-            return
-          end
-          local id = id_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
-          if not id then
-            return
-          end
-          expanded[id] = not expanded[id] or nil
           render()
-          pcall(vim.api.nvim_win_set_cursor, w, { (rows_by_id[id] or 0) + 1, 0 })
-        end
+          for _, key in ipairs { "<Tab>", "<CR>" } do
+            vim.keymap.set("n", key, toggle, { buffer = buf, nowait = true, desc = "toggle thread" })
+          end
 
-        render()
-        for _, key in ipairs { "<Tab>", "<CR>" } do
-          vim.keymap.set("n", key, toggle, { buffer = buf, nowait = true, desc = "toggle thread" })
-        end
-        pcall(vim.api.nvim_win_set_cursor, win, { 1, 0 })
+          -- m merges — only on open PRs you authored or are assigned to, using the
+          -- repo's default merge method. Hints are rebuilt here every render, so the
+          -- merge spinner is cleanly replaced once it resolves.
+          local hints = { key_hint("⇥", "expand"), key_hint("q", "close") }
+          -- drop any merge binding from a prior render; it is re-added below only
+          -- while still eligible. After a merge the PR is no longer OPEN, so a stale
+          -- `m` must not linger and re-prompt a merge against the merged PR.
+          pcall(vim.keymap.del, "n", "m", { buffer = buf })
+          local viewer = nilable(vim.tbl_get(data, "data", "viewer", "login"))
+          local prnode = vim.tbl_get(data, "data", "repository", "pullRequest")
+          local method = nilable(vim.tbl_get(data, "data", "repository", "viewerDefaultMergeMethod"))
+          local mine = prnode and prnode.viewerDidAuthor
+          if prnode and not mine then
+            for _, a in ipairs(vim.tbl_get(prnode, "assignees", "nodes") or {}) do
+              if a.login == viewer then
+                mine = true
+                break
+              end
+            end
+          end
+          -- allowlist the method to a literal flag instead of interpolating it into
+          -- argv, so crafted API data can never inject an arbitrary `gh` flag.
+          local how = method and tostring(method):lower()
+          local flag = how and ({ merge = "--merge", squash = "--squash", rebase = "--rebase" })[how]
+          if mine and flag and tostring(nilable(prnode.state) or ""):upper() == "OPEN" then
+            vim.keymap.set("n", "m", function()
+              vim.ui.select({ "no", "yes" }, { prompt = ("merge #%d via %s?"):format(pr.number, how) }, function(choice)
+                if choice ~= "yes" then
+                  return
+                end
+                -- animate the tab title while merging; routed through set_hints so it
+                -- stays scoped to this tabpage (the tabline is a global option) and
+                -- keeps spinning through the refresh that follows a successful merge.
+                local mtimer, mframe = vim.uv.new_timer(), 0
+                local function stop_spin()
+                  if mtimer then
+                    mtimer:stop()
+                    mtimer:close()
+                    mtimer = nil
+                  end
+                end
+                if mtimer then
+                  mtimer:start(
+                    0,
+                    80,
+                    vim.schedule_wrap(function()
+                      if not mtimer then
+                        return
+                      end
+                      mframe = mframe % #SPINNER + 1
+                      set_hints { ("%%#Title#%s merging #%d…"):format(SPINNER[mframe], pr.number) }
+                    end)
+                  )
+                end
+                vim.system(
+                  { "gh", "pr", "merge", "--repo", pr.slug, flag, "--", tostring(pr.number) },
+                  { text = true },
+                  function(res)
+                    vim.schedule(function()
+                      if res.code ~= 0 then
+                        stop_spin()
+                        set_hints(hints)
+                        vim.notify("merge failed:\n" .. vim.trim(res.stderr or ""), vim.log.levels.ERROR)
+                      else
+                        vim.notify(("merged #%d (%s)"):format(pr.number, how))
+                        -- keep the spinner up until the refreshed view renders.
+                        fetch_and_render(stop_spin)
+                      end
+                    end)
+                  end
+                )
+              end)
+            end, { buffer = buf, nowait = true, desc = "merge" })
+            table.insert(hints, 1, key_hint("m", "merge"))
+          end
+          set_hints(hints)
+
+          pcall(vim.api.nvim_win_set_cursor, win, { 1, 0 })
+        end)
       end)
-    end)
+    end
+
+    fetch_and_render()
   end)
 end
 
