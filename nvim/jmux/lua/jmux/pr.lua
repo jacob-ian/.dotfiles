@@ -28,9 +28,28 @@ local function sh(cmd)
   return vim.trim(out), nil
 end
 
--- pr_info resolves the PR's slug, number, and base SHA in one gh round trip
--- (three separate `gh` calls were the bulk of submit's latency). The slug comes
--- from the PR url path, which is host-agnostic so it also works on GHE.
+-- parse_pr_info turns `gh pr view --json number,baseRefOid,url` output into the
+-- { slug, number, base } identity. The slug comes from the PR url path
+-- (host-agnostic, works on GHE); a parse failure falls back to a repo lookup
+-- rather than caching a half-resolved identity that would POST to repos/nil/...
+local function parse_pr_info(out)
+  local ok, data = pcall(vim.json.decode, out)
+  if not ok or type(data) ~= "table" or not data.number then
+    return nil, "gh pr view: unexpected output"
+  end
+  local slug = data.url and data.url:match "/([^/]+/[^/]+)/pull/"
+  if not slug then
+    local e
+    slug, e = sh { "gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner" }
+    if not slug then
+      return nil, "gh repo view: " .. (e or "")
+    end
+  end
+  return { slug = slug, number = data.number, base = data.baseRefOid }
+end
+
+-- pr_info resolves the PR identity in one gh round trip, cached for the session.
+-- Blocking — callers that must not freeze the editor use pr_info_async.
 local function pr_info()
   if info then
     return info
@@ -39,23 +58,30 @@ local function pr_info()
   if not out then
     return nil, "gh pr view: " .. (err or "")
   end
-  local ok, data = pcall(vim.json.decode, out)
-  if not ok or type(data) ~= "table" or not data.number then
-    return nil, "gh pr view: unexpected output"
+  local i, perr = parse_pr_info(out)
+  info = i
+  return i, perr
+end
+
+-- pr_info_async resolves the identity off the main loop: the cached value
+-- immediately when present, else via vim.system so the editor stays responsive
+-- (e.g. an animated loader keeps spinning) during the round trip.
+local function pr_info_async(cb)
+  if info then
+    cb(info)
+    return
   end
-  local slug = data.url and data.url:match "/([^/]+/[^/]+)/pull/"
-  if not slug then
-    -- url parse failed (unusual) — fall back to an explicit repo lookup.
-    local e
-    slug, e = sh { "gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner" }
-    if not slug then
-      -- don't cache a half-resolved identity; a later submit would POST to
-      -- repos/nil/... — bail so the caller can surface the error instead.
-      return nil, "gh repo view: " .. (e or "")
-    end
-  end
-  info = { slug = slug, number = data.number, base = data.baseRefOid }
-  return info
+  vim.system({ "gh", "pr", "view", "--json", "number,baseRefOid,url" }, { text = true }, function(res)
+    vim.schedule(function()
+      if res.code ~= 0 then
+        cb(nil, "gh pr view: " .. vim.trim(res.stderr or ""))
+        return
+      end
+      local i, perr = parse_pr_info(res.stdout)
+      info = i
+      cb(i, perr)
+    end)
+  end)
 end
 
 -- span_str renders a comment's line span as "12" or "12-15". Accepts both the
@@ -322,23 +348,36 @@ local function nilable(v)
   return v
 end
 
--- reltime renders an ISO-8601 UTC timestamp as a short "now/5m/3h/2d/4mo" age.
--- os.time treats a broken-down table as local, so the timestamp is shifted by the
--- local UTC offset before differencing.
-local function reltime(iso)
+-- The local UTC offset, computed once at load. os.time reads a broken-down table
+-- as local time, so converting a UTC timestamp needs this constant added back.
+-- Taken from "now", so a timestamp in the opposite DST period can be off by up to
+-- an hour — fine for the coarse relative ages we render.
+local utc_offset = os.difftime(os.time(os.date "*t"), os.time(os.date "!*t"))
+
+-- iso_epoch converts an ISO-8601 UTC timestamp to a Unix epoch. os.time reads a
+-- broken-down table as local time, so feeding it the UTC fields yields
+-- epoch - offset; adding the offset back recovers the true UTC epoch.
+local function iso_epoch(iso)
   local y, mo, d, h, mi, s = tostring(iso):match "(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)"
   if not y then
-    return ""
+    return nil
   end
-  local offset = os.difftime(os.time(os.date "*t"), os.time(os.date "!*t"))
-  local at = os.time {
+  return os.time {
     year = tonumber(y),
     month = tonumber(mo),
     day = tonumber(d),
     hour = tonumber(h),
     min = tonumber(mi),
     sec = tonumber(s),
-  } - offset
+  } + utc_offset
+end
+
+-- reltime renders a timestamp as a short age: "now/5m/3h/2d/4mo".
+local function reltime(iso)
+  local at = iso_epoch(iso)
+  if not at then
+    return ""
+  end
   local diff = os.time() - at
   if diff < 60 then
     return "now"
@@ -350,6 +389,23 @@ local function reltime(iso)
     return math.floor(diff / 86400) .. "d"
   end
   return math.floor(diff / 2592000) .. "mo"
+end
+
+-- duration renders the elapsed time between two timestamps as "45s/2m5s/1h3m".
+local function duration(from, to)
+  local a, b = iso_epoch(from), iso_epoch(to)
+  if not a or not b or b < a then
+    return ""
+  end
+  local d = b - a
+  if d < 60 then
+    return d .. "s"
+  elseif d < 3600 then
+    local m, s = math.floor(d / 60), d % 60
+    return s > 0 and (m .. "m" .. s .. "s") or (m .. "m")
+  end
+  local h, m = math.floor(d / 3600), math.floor((d % 3600) / 60)
+  return m > 0 and (h .. "h" .. m .. "m") or (h .. "h")
 end
 
 -- parse_threads reads the GraphQL reviewThreads response into our thread shape.
@@ -906,21 +962,38 @@ local function bar(label, hints)
   return ("%%#Title# %s %%*%%=%s "):format(label, table.concat(hints, "  "))
 end
 
--- set_tab_title puts a full-width jmux bar (label + hints) in the tabline while a
--- tab is open, and restores the previous tabline so the rest of the session's
--- tabline is untouched. Restore is wired to BufWipeout, but that doesn't fire for
--- terminal buffers (a tab holding one closes without wiping it), so the returned
--- restore fn lets such callers tear down explicitly. Also returns the bar string
--- for callers that re-show it later (e.g. after a transient overlay).
+-- set_tab_title shows a full-width jmux bar (label + hints) in the tabline, but
+-- scoped to its own tabpage: the tabline is a global option, so without this it
+-- would bleed onto other tabs (e.g. pv left open while you switch to pd). A
+-- TabEnter watcher re-applies the bar on this tab and restores the previous
+-- tabline on any other; BufWipeout tears it all down. Returns the bar string (for
+-- callers that re-show it after a transient overlay) and a restore fn.
 local function set_tab_title(buf, label, hints)
   local saved_tabline, saved_showtabline = vim.o.tabline, vim.o.showtabline
   local title = bar(label, hints)
-  vim.o.showtabline = 2
-  vim.o.tabline = title
+  local tab = vim.api.nvim_get_current_tabpage()
+  local group = vim.api.nvim_create_augroup("jmux_tabtitle_" .. tostring(buf), { clear = true })
   local function restore()
     vim.o.tabline, vim.o.showtabline = saved_tabline, saved_showtabline
   end
-  vim.api.nvim_create_autocmd("BufWipeout", { buffer = buf, once = true, callback = restore })
+  local function refresh()
+    if vim.api.nvim_tabpage_is_valid(tab) and vim.api.nvim_get_current_tabpage() == tab then
+      vim.o.tabline, vim.o.showtabline = title, 2
+    else
+      restore()
+    end
+  end
+  refresh()
+  vim.api.nvim_create_autocmd("TabEnter", { group = group, callback = refresh })
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    group = group,
+    buffer = buf,
+    once = true,
+    callback = function()
+      restore()
+      pcall(vim.api.nvim_del_augroup_by_id, group)
+    end,
+  })
   return title, restore
 end
 
@@ -1145,37 +1218,455 @@ function M.discard()
   vim.notify "discarded pending comments"
 end
 
--- view opens the rendered `gh pr view --comments` (summary + full comment
--- thread) in a full-tab scrollable terminal; q closes it. A terminal buffer
--- gives gh a real tty, so it renders markdown + colours, which nvim displays.
+-- VIEW_QUERY pulls the whole conversation for the bespoke `pv`: body, timeline
+-- comments, reviews (with bodies), inline review threads, and the latest commit's
+-- checks — `gh pr view --comments` omits the inline review comments entirely.
+local VIEW_QUERY = [[
+query($owner:String!,$repo:String!,$number:Int!){
+  repository(owner:$owner,name:$repo){
+    pullRequest(number:$number){
+      title number state createdAt author{login} body
+      isDraft mergeable reviewDecision mergeStateStatus
+      latestOpinionatedReviews(first:50){ nodes{ state } }
+      comments(first:100){ nodes{ author{login} body createdAt } }
+      reviews(first:100){ nodes{ id author{login} body state createdAt } }
+      reviewThreads(first:100){ nodes{ id isResolved path line
+        comments(first:100){ nodes{ author{login} body createdAt pullRequestReview{id} } } } }
+      commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:100){ nodes{
+        __typename
+        ... on CheckRun{ name conclusion status startedAt completedAt }
+        ... on StatusContext{ context state }
+      } } } } } }
+    }
+  }
+}]]
+
+-- check_mark maps a status-check node to (icon, highlight): green tick passed,
+-- red cross failed, yellow dot running, muted circle skipped/neutral.
+local function check_mark(node)
+  local state = nilable(node.conclusion) or nilable(node.state)
+  if not state then
+    return "●", "DiagnosticWarn"
+  end
+  state = tostring(state):upper()
+  if state == "SUCCESS" then
+    return "✓", "DiagnosticOk"
+  elseif state == "PENDING" or state == "EXPECTED" then
+    return "●", "DiagnosticWarn"
+  elseif state == "NEUTRAL" or state == "SKIPPED" or state == "CANCELLED" or state == "STALE" then
+    return "○", "Comment"
+  end
+  return "✗", "DiagnosticError"
+end
+
+-- merge_summary distils review + merge state into a one-line readiness summary
+-- (icon, highlight, text) for an open PR, or nil for merged/closed/draft-less
+-- cases where the status line already says it all.
+local function merge_summary(pr)
+  if tostring(pr.state or ""):upper() ~= "OPEN" then
+    return nil
+  end
+  -- latestOpinionatedReviews is the latest approve/request-changes per author
+  -- (ignoring later plain comments), matching how GitHub tallies approvals.
+  local approvals = 0
+  for _, r in ipairs(vim.tbl_get(pr, "latestOpinionatedReviews", "nodes") or {}) do
+    if tostring(r.state or ""):upper() == "APPROVED" then
+      approvals = approvals + 1
+    end
+  end
+  -- unresolved threads block the merge when the branch requires resolution; that
+  -- rule isn't readable without push access, so surface the count regardless.
+  local unresolved = 0
+  for _, t in ipairs(vim.tbl_get(pr, "reviewThreads", "nodes") or {}) do
+    if not t.isResolved then
+      unresolved = unresolved + 1
+    end
+  end
+  local mss = tostring(nilable(pr.mergeStateStatus) or ""):upper()
+  local decision = tostring(nilable(pr.reviewDecision) or ""):upper()
+  local mergeable = tostring(nilable(pr.mergeable) or ""):upper()
+  local icon, hl, state = "●", "DiagnosticWarn", "pending"
+  if pr.isDraft then
+    icon, hl, state = "○", "Comment", "draft"
+  elseif mergeable == "CONFLICTING" or mss == "DIRTY" then
+    icon, hl, state = "✗", "DiagnosticError", "conflicts"
+  elseif decision == "CHANGES_REQUESTED" then
+    icon, hl, state = "✗", "DiagnosticError", "changes requested"
+  elseif mss == "CLEAN" then
+    icon, hl, state = "✓", "DiagnosticOk", "ready to merge"
+  elseif mss == "BEHIND" then
+    icon, hl, state = "●", "DiagnosticWarn", "behind base"
+  elseif mss == "UNSTABLE" then
+    icon, hl, state = "●", "DiagnosticWarn", "checks failing"
+  elseif decision == "REVIEW_REQUIRED" then
+    icon, hl, state = "●", "DiagnosticWarn", "review required"
+  elseif mss == "BLOCKED" then
+    icon, hl, state = "●", "DiagnosticWarn", "blocked"
+  elseif decision == "APPROVED" then
+    icon, hl, state = "✓", "DiagnosticOk", "approved"
+  end
+  local parts = { approvals == 1 and "1 approval" or (approvals .. " approvals") }
+  if unresolved > 0 then
+    parts[#parts + 1] = unresolved .. " unresolved"
+  end
+  parts[#parts + 1] = state
+  return icon, hl, table.concat(parts, " · ")
+end
+
+-- build_model turns the VIEW_QUERY response into { header, pr, checks, blocks }:
+-- the static title/status header, then collapsible blocks — the PR description,
+-- the checks summary, and the time-ordered conversation. Each block is
+-- { id, header, body, kids, body_marks? }; a review's inline threads are its kids
+-- (each kid { id, header, lines }); body_marks colour the check icons.
+local function build_model(data)
+  local pr = vim.tbl_get(data, "data", "repository", "pullRequest")
+  if type(pr) ~= "table" then
+    return { header = { "  no PR data" }, blocks = {} }
+  end
+  local function who(n)
+    return vim.tbl_get(n, "author", "login") or "?"
+  end
+  local function split(text)
+    return vim.split(vim.trim(text or ""), "\n")
+  end
+
+  local header = {
+    ("# %s  #%s"):format(pr.title or "", tostring(pr.number or "")),
+    ("`%s` · @%s · %s"):format(tostring(pr.state or ""):lower(), who(pr), reltime(pr.createdAt or "")),
+  }
+  local header_marks = {}
+  local micon, mhl, mtext = merge_summary(pr)
+  if micon then
+    header[#header + 1] = ("%s %s"):format(micon, mtext)
+    header_marks[#header_marks + 1] = { row = #header - 1, col = 0, col_end = #micon, hl = mhl }
+  end
+  header[#header + 1] = ""
+
+  -- the PR description is its own collapsible block, shown above the checks.
+  local pr_block = {
+    id = "pr",
+    header = ("@%s · opened · %s"):format(who(pr), reltime(pr.createdAt or "")),
+    body = split(pr.body),
+    kids = {},
+  }
+
+  -- checks are a collapsible block: a one-line summary ("1 failed" / "2 running"
+  -- / "all passed") that expands to the per-check list. Icon colours are stored
+  -- relative to the body (body_marks) and positioned at render time.
+  local checks_block
+  local checks = vim.tbl_get(pr, "commits", "nodes", 1, "commit", "statusCheckRollup", "contexts", "nodes")
+  if type(checks) == "table" and #checks > 0 then
+    local clines, cmarks, fail, run = {}, {}, 0, 0
+    for _, c in ipairs(checks) do
+      local icon, hl = check_mark(c)
+      local name = c.name or c.context or "?"
+      local dur = duration(c.startedAt, c.completedAt)
+      clines[#clines + 1] = dur ~= "" and ("%s %s · %s"):format(icon, name, dur) or ("%s %s"):format(icon, name)
+      cmarks[#cmarks + 1] = { rel = #clines - 1, col = 0, col_end = #icon, hl = hl }
+      if hl == "DiagnosticError" then
+        fail = fail + 1
+      elseif hl == "DiagnosticWarn" then
+        run = run + 1
+      end
+    end
+    local summary = (fail > 0 and fail .. " failed") or (run > 0 and run .. " running") or "all passed"
+    local icon, hl = "✓", "DiagnosticOk"
+    if fail > 0 then
+      icon, hl = "✗", "DiagnosticError"
+    elseif run > 0 then
+      icon, hl = "●", "DiagnosticWarn"
+    end
+    checks_block = {
+      id = "checks",
+      header = ("%s Checks · %s"):format(icon, summary),
+      header_mark = { col = 0, col_end = #icon, hl = hl },
+      body = clines,
+      body_marks = cmarks,
+      kids = {},
+    }
+  end
+
+  -- group inline threads under the review that opened them.
+  local by_review, orphans = {}, {}
+  for _, t in ipairs(vim.tbl_get(pr, "reviewThreads", "nodes") or {}) do
+    local rid = vim.tbl_get(t, "comments", "nodes", 1, "pullRequestReview", "id")
+    if rid then
+      by_review[rid] = by_review[rid] or {}
+      table.insert(by_review[rid], t)
+    else
+      orphans[#orphans + 1] = t
+    end
+  end
+  local function thread_kid(t)
+    local loc = t.path or "?"
+    if nilable(t.line) then
+      loc = loc .. ":" .. tostring(t.line)
+    end
+    local comments = vim.tbl_get(t, "comments", "nodes") or {}
+    -- header: author/time · status; the location sits beneath it, then the body
+    -- (replies marked ↳).
+    local status = t.isResolved and "✓ resolved" or "● open"
+    local lines = { ("`%s`"):format(loc) }
+    for i, c in ipairs(comments) do
+      if i > 1 then
+        lines[#lines + 1] = ("↳ @%s · %s"):format(who(c), reltime(c.createdAt or ""))
+      end
+      vim.list_extend(lines, split(c.body))
+      lines[#lines + 1] = ""
+    end
+    local root = comments[1]
+    return {
+      id = t.id or loc,
+      header = root and ("@%s · %s · %s"):format(who(root), reltime(root.createdAt or ""), status)
+        or (loc .. " · " .. status),
+      lines = lines,
+    }
+  end
+
+  -- time-ordered conversation (ISO-8601 sorts chronologically as a string).
+  local blocks = {}
+  for _, c in ipairs(vim.tbl_get(pr, "comments", "nodes") or {}) do
+    blocks[#blocks + 1] = {
+      at = c.createdAt or "",
+      id = "c" .. tostring(c.createdAt) .. who(c),
+      header = ("@%s · %s"):format(who(c), reltime(c.createdAt or "")),
+      body = split(c.body),
+      kids = {},
+    }
+  end
+  for _, r in ipairs(vim.tbl_get(pr, "reviews", "nodes") or {}) do
+    local rt = (r.id and by_review[r.id]) or {}
+    if vim.trim(r.body or "") ~= "" or #rt > 0 then
+      local kids = {}
+      for _, t in ipairs(rt) do
+        kids[#kids + 1] = thread_kid(t)
+      end
+      blocks[#blocks + 1] = {
+        at = r.createdAt or "",
+        id = r.id or ("r" .. tostring(r.createdAt)),
+        header = ("@%s · %s · %s"):format(who(r), tostring(r.state or ""):lower(), reltime(r.createdAt or "")),
+        body = vim.trim(r.body or "") ~= "" and split(r.body) or {},
+        kids = kids,
+      }
+    end
+  end
+  table.sort(blocks, function(a, b)
+    return a.at < b.at
+  end)
+  -- threads not tied to a shown review become their own top-level blocks.
+  for _, t in ipairs(orphans) do
+    local k = thread_kid(t)
+    blocks[#blocks + 1] = { at = "", id = k.id, header = k.header, body = k.lines, kids = {} }
+  end
+
+  return { header = header, header_marks = header_marks, pr = pr_block, checks = checks_block, blocks = blocks }
+end
+
+-- view renders the full PR conversation — body, comments, reviews, inline review
+-- threads, and checks — into a markdown tab. Fetched async (a "Loading…" stub
+-- shows first) so opening is instant; q closes it.
 function M.view()
+  -- Open the tab and paint the loader first; resolving the PR and fetching the
+  -- conversation both happen async (pr_info_async + vim.system), so the view
+  -- shows instantly and the spinner keeps animating during the round trip.
   vim.cmd "tabnew"
   local win = vim.api.nvim_get_current_win()
   local buf = vim.api.nvim_get_current_buf()
+  vim.bo[buf].buftype = "nofile"
   vim.bo[buf].bufhidden = "wipe"
-  -- keep content flush with the top edge (no scrolloff gap)
-  vim.wo[win].scrolloff = 0
-  -- A finished terminal buffer is kept alive on tab/window close regardless of
-  -- bufhidden, so set_tab_title's BufWipeout never fires here. Restore on
-  -- WinClosed instead — it fires on every close path (q, :q, :tabclose, <C-w>c).
-  local _, restore = set_tab_title(buf, "jmux pr view", { key_hint("q", "close") })
+  vim.bo[buf].filetype = "markdown"
+  vim.wo[win].wrap = true
+  vim.wo[win].linebreak = true
+  vim.wo[win].breakindent = true
+  vim.wo[win].conceallevel = 2
+  -- keep markdown concealed even on the cursor line; this is a read-only view, so
+  -- revealing raw syntax on hover just makes lines jump around.
+  vim.wo[win].concealcursor = "nvic"
+
+  local function fill(lines)
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+  end
+
+  local _, restore = set_tab_title(buf, "jmux pr view", { key_hint("⇥", "expand"), key_hint("q", "close") })
   vim.api.nvim_create_autocmd("WinClosed", { pattern = tostring(win), once = true, callback = restore })
   vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = buf, nowait = true, desc = "close" })
-  vim.fn.jobstart({ "gh", "pr", "view", "--comments" }, {
-    term = true,
-    -- Blank GH_PAGER stops gh paging through less (which would eat j/k); dump the
-    -- full view so nvim scrolls it. Colours stay on — stdout is still the tty.
-    env = { GH_PAGER = "" },
-    -- gh streams output and leaves the cursor at the end; snap back to the top
-    -- so the view opens on the PR summary.
-    on_exit = function()
+
+  -- Draw the first frame synchronously and force a redraw so the loader shows the
+  -- instant the tab opens, rather than waiting ~100ms for the first timer tick;
+  -- the timer below animates it from there.
+  local frame = 1
+  local function draw_loader()
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { SPINNER[frame] .. " Loading PR…" })
+    vim.bo[buf].modifiable = false
+  end
+  draw_loader()
+  vim.cmd "redraw"
+
+  local timer = vim.uv.new_timer()
+  local function stop_loader()
+    if timer then
+      timer:stop()
+      timer:close()
+      timer = nil
+    end
+  end
+  timer:start(
+    100,
+    100,
+    vim.schedule_wrap(function()
+      if not timer or not vim.api.nvim_buf_is_valid(buf) then
+        stop_loader()
+        return
+      end
+      frame = frame % #SPINNER + 1
+      draw_loader()
+    end)
+  )
+
+  pr_info_async(function(pr, err)
+    if not vim.api.nvim_buf_is_valid(buf) then
+      stop_loader()
+      return
+    end
+    if not pr then
+      stop_loader()
+      fill { "  failed to resolve PR: " .. (err or "") }
+      return
+    end
+    local owner, repo = pr.slug:match "([^/]+)/(.+)"
+
+    vim.system({
+      "gh",
+      "api",
+      "graphql",
+      "-f",
+      "query=" .. VIEW_QUERY,
+      "-f",
+      "owner=" .. (owner or ""),
+      "-f",
+      "repo=" .. (repo or ""),
+      "-F",
+      "number=" .. pr.number,
+    }, { text = true }, function(res)
       vim.schedule(function()
-        if vim.api.nvim_win_is_valid(win) then
-          vim.api.nvim_win_set_cursor(win, { 1, 0 })
+        stop_loader()
+        if not vim.api.nvim_buf_is_valid(buf) then
+          return
         end
+        if res.code ~= 0 then
+          return fill { "", "  failed to load PR:", "", "  " .. vim.trim(res.stderr or "") }
+        end
+        local ok, data = pcall(vim.json.decode, res.stdout)
+        if not ok then
+          return fill { "  failed to parse PR response" }
+        end
+
+        -- Collapsible tree: header → PR description → checks → conversation. Each
+        -- item shows a ▸/▾ header; expanding a review reveals its body and inline
+        -- threads, which expand in turn. Re-rendered on toggle; check-icon marks are
+        -- repositioned since the description above them changes height.
+        local model = build_model(data)
+        local ns = vim.api.nvim_create_namespace "jmux_pr_view"
+        -- the PR description starts open; everything else collapsed.
+        local expanded, rows_by_id, id_by_row = { pr = true }, {}, {}
+
+        local function render()
+          local lines = vim.list_extend({}, model.header)
+          rows_by_id, id_by_row = {}, {}
+          local marks = {}
+          -- indent body lines under their title (blank lines stay blank so markdown
+          -- paragraph breaks survive); any body_marks shift with the indent.
+          local function add_body(src, indent, body_marks)
+            local start = #lines
+            for _, l in ipairs(src) do
+              lines[#lines + 1] = l ~= "" and (indent .. l) or ""
+            end
+            for _, m in ipairs(body_marks or {}) do
+              marks[#marks + 1] =
+                { row = start + m.rel, col = m.col + #indent, col_end = m.col_end + #indent, hl = m.hl }
+            end
+          end
+          local function emit(b)
+            local row = #lines
+            rows_by_id[b.id], id_by_row[row] = row, b.id
+            local prefix = expanded[b.id] and "▾ " or "▸ "
+            lines[#lines + 1] = prefix .. b.header
+            if b.header_mark then
+              local pad = #prefix
+              marks[#marks + 1] = {
+                row = row,
+                col = pad + b.header_mark.col,
+                col_end = pad + b.header_mark.col_end,
+                hl = b.header_mark.hl,
+              }
+            end
+            if expanded[b.id] then
+              add_body(b.body, "  ", b.body_marks)
+              for _, k in ipairs(b.kids) do
+                local krow = #lines
+                rows_by_id[k.id], id_by_row[krow] = krow, k.id
+                lines[#lines + 1] = "  " .. (expanded[k.id] and "▾ " or "▸ ") .. k.header
+                if expanded[k.id] then
+                  add_body(k.lines, "    ")
+                end
+              end
+            end
+            lines[#lines + 1] = ""
+          end
+
+          if model.pr then
+            emit(model.pr)
+          end
+          if model.checks then
+            emit(model.checks)
+          end
+          for _, b in ipairs(model.blocks) do
+            emit(b)
+          end
+
+          fill(lines)
+          vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+          -- header marks sit at fixed top rows; block marks at their rendered rows.
+          for _, m in ipairs(model.header_marks or {}) do
+            marks[#marks + 1] = m
+          end
+          for _, m in ipairs(marks) do
+            pcall(vim.api.nvim_buf_set_extmark, buf, ns, m.row, m.col, {
+              end_col = m.col_end,
+              hl_group = m.hl,
+              priority = 200,
+            })
+          end
+        end
+
+        -- resolve the window from the keypress, not the captured `win`: the buffer
+        -- can outlive its original window (e.g. :split then close the first), and
+        -- a stale win id would throw E5108.
+        local function toggle()
+          local w = vim.api.nvim_get_current_win()
+          if vim.api.nvim_win_get_buf(w) ~= buf then
+            return
+          end
+          local id = id_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
+          if not id then
+            return
+          end
+          expanded[id] = not expanded[id] or nil
+          render()
+          pcall(vim.api.nvim_win_set_cursor, w, { (rows_by_id[id] or 0) + 1, 0 })
+        end
+
+        render()
+        for _, key in ipairs { "<Tab>", "<CR>" } do
+          vim.keymap.set("n", key, toggle, { buffer = buf, nowait = true, desc = "toggle thread" })
+        end
+        pcall(vim.api.nvim_win_set_cursor, win, { 1, 0 })
       end)
-    end,
-  })
+    end)
+  end)
 end
 
 -- browser opens the current branch's PR on github.com. Async so launching the
