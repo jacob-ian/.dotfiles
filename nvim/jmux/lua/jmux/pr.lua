@@ -1780,7 +1780,7 @@ function M.view()
             vim.keymap.set("n", "M", function()
               do_merge(true)
             end, { buffer = buf, nowait = true, desc = "merge (admin)" })
-            table.insert(hints, 1, key_hint("M", "admin"))
+            table.insert(hints, 1, key_hint("M", "merge (admin)"))
             table.insert(hints, 1, key_hint("m", "merge"))
           end
           set_hints(hints)
