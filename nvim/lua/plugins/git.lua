@@ -33,20 +33,5 @@ return {
   },
   {
     "sindrets/diffview.nvim",
-    keys = {
-      {
-        "<leader>gd",
-        function()
-          local out = vim.fn.systemlist { "git", "rev-parse", "--abbrev-ref", "origin/HEAD" }
-          local base = out[1]
-          if vim.v.shell_error ~= 0 or not base or base == "" then
-            base = "origin/main"
-          end
-          vim.cmd("DiffviewOpen " .. base .. "...HEAD")
-        end,
-        desc = "Diffview: PR diff vs default branch",
-      },
-      { "<leader>gD", "<cmd>DiffviewClose<cr>", desc = "Diffview: close" },
-    },
   },
 }
