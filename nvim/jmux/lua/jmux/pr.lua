@@ -288,6 +288,252 @@ local function place_signs(buf, path, side)
   end
 end
 
+-- threads holds existing review threads fetched for the PR; K on a thread sign
+-- floats it. THREAD_SIGN marks an open discussion in the gutter (distinct from
+-- your own SIGN); RESOLVED_SIGN dims resolved ones to a tick.
+local THREAD_NS = vim.api.nvim_create_namespace "jmux_pr_threads"
+local THREAD_SIGN = vim.fn.nr2char(0xf086)
+local RESOLVED_SIGN = vim.fn.nr2char(0xf00c)
+local threads = {}
+local FLOAT_NS = vim.api.nvim_create_namespace "jmux_pr_thread_float"
+local thread_float
+
+-- THREADS_QUERY pulls review threads via GraphQL — REST's pulls/comments carries
+-- no resolution state. reviewThreads are already grouped and flag isResolved; a
+-- null line means the thread no longer maps to the current diff (outdated).
+local THREADS_QUERY = [[
+query($owner:String!,$repo:String!,$number:Int!){
+  repository(owner:$owner,name:$repo){
+    pullRequest(number:$number){
+      reviewThreads(first:100){
+        nodes{
+          id isResolved path line diffSide
+          comments(first:100){ nodes{ author{login} body createdAt } }
+        }
+      }
+    }
+  }
+}]]
+
+local function nilable(v)
+  if v == nil or v == vim.NIL then
+    return nil
+  end
+  return v
+end
+
+-- reltime renders an ISO-8601 UTC timestamp as a short "now/5m/3h/2d/4mo" age.
+-- os.time treats a broken-down table as local, so the timestamp is shifted by the
+-- local UTC offset before differencing.
+local function reltime(iso)
+  local y, mo, d, h, mi, s = tostring(iso):match "(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)"
+  if not y then
+    return ""
+  end
+  local offset = os.difftime(os.time(os.date "*t"), os.time(os.date "!*t"))
+  local at = os.time {
+    year = tonumber(y),
+    month = tonumber(mo),
+    day = tonumber(d),
+    hour = tonumber(h),
+    min = tonumber(mi),
+    sec = tonumber(s),
+  } - offset
+  local diff = os.time() - at
+  if diff < 60 then
+    return "now"
+  elseif diff < 3600 then
+    return math.floor(diff / 60) .. "m"
+  elseif diff < 86400 then
+    return math.floor(diff / 3600) .. "h"
+  elseif diff < 2592000 then
+    return math.floor(diff / 86400) .. "d"
+  end
+  return math.floor(diff / 2592000) .. "mo"
+end
+
+-- parse_threads reads the GraphQL reviewThreads response into our thread shape.
+-- Threads arrive pre-grouped; a null line means the thread no longer maps to the
+-- current diff (outdated, usually resolved) and is dropped — pv still has the
+-- full conversation.
+local function parse_threads(json)
+  local ok, data = pcall(vim.json.decode, json)
+  if not ok then
+    return {}
+  end
+  local nodes = vim.tbl_get(data, "data", "repository", "pullRequest", "reviewThreads", "nodes")
+  if type(nodes) ~= "table" then
+    return {}
+  end
+  local out = {}
+  for _, n in ipairs(nodes) do
+    local line = nilable(n.line)
+    if line then
+      local comments = {}
+      for _, c in ipairs(vim.tbl_get(n, "comments", "nodes") or {}) do
+        comments[#comments + 1] = {
+          login = (type(c.author) == "table" and c.author.login) or "?",
+          body = type(c.body) == "string" and c.body or "",
+          created_at = c.createdAt,
+        }
+      end
+      out[#out + 1] = {
+        id = n.id,
+        path = n.path,
+        side = n.diffSide == "LEFT" and "LEFT" or "RIGHT",
+        line = math.floor(line),
+        resolved = n.isResolved == true,
+        comments = comments,
+      }
+    end
+  end
+  return out
+end
+
+-- close_float dismisses the open thread peek, if any.
+local function close_float()
+  if thread_float and vim.api.nvim_win_is_valid(thread_float) then
+    vim.api.nvim_win_close(thread_float, true)
+  end
+  thread_float = nil
+end
+
+-- open_thread_float pops a bordered peek of the thread near the cursor: a header
+-- per comment (author · age, replies marked ↳) over its markdown body. Focused so
+-- a long thread scrolls; q/<Esc> or moving away closes it.
+local function open_thread_float(t)
+  close_float()
+  local lines, headers = {}, {}
+  for i, c in ipairs(t.comments) do
+    lines[#lines + 1] = (i == 1 and "" or "↳ ") .. c.login .. " · " .. reltime(c.created_at or "")
+    headers[#headers + 1] = #lines - 1
+    for _, bl in ipairs(vim.split(vim.trim(c.body), "\n")) do
+      lines[#lines + 1] = bl
+    end
+    if i < #t.comments then
+      lines[#lines + 1] = ""
+    end
+  end
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].filetype = "markdown"
+  vim.bo[buf].modifiable = false
+  for _, row in ipairs(headers) do
+    vim.api.nvim_buf_set_extmark(buf, FLOAT_NS, row, 0, { line_hl_group = t.resolved and "Comment" or "Title" })
+  end
+
+  -- a comfortable reading column; wrap long bodies rather than widen the float.
+  local width = math.min(64, math.floor(vim.o.columns * 0.8))
+  local rows = 0
+  for _, l in ipairs(lines) do
+    rows = rows + math.max(1, math.ceil(vim.fn.strdisplaywidth(l) / width))
+  end
+  thread_float = vim.api.nvim_open_win(buf, true, {
+    relative = "cursor",
+    row = 1,
+    col = 0,
+    width = width,
+    height = math.min(rows, math.floor(vim.o.lines * 0.4)),
+    border = "rounded",
+    style = "minimal",
+    title = t.resolved and " resolved " or " thread ",
+    title_pos = "right",
+  })
+  vim.wo[thread_float].wrap = true
+  vim.wo[thread_float].linebreak = true
+  vim.keymap.set("n", "q", close_float, { buffer = buf, nowait = true })
+  vim.keymap.set("n", "<Esc>", close_float, { buffer = buf, nowait = true })
+  vim.api.nvim_create_autocmd("WinLeave", { buffer = buf, once = true, callback = close_float })
+end
+
+-- place_threads (re)draws this buffer's thread gutter signs; K on one opens the
+-- thread in a float.
+local function place_threads(buf, path, side)
+  if not (buf and vim.api.nvim_buf_is_valid(buf)) then
+    return
+  end
+  vim.api.nvim_buf_clear_namespace(buf, THREAD_NS, 0, -1)
+  if not path then
+    return
+  end
+  local last = vim.api.nvim_buf_line_count(buf)
+  for _, t in ipairs(threads) do
+    if t.path == path and t.side == side and t.line and t.line >= 1 and t.line <= last then
+      -- traffic-light vs your own Info-blue pending signs: open threads warn
+      -- (need attention), resolved go green-tick (settled).
+      pcall(vim.api.nvim_buf_set_extmark, buf, THREAD_NS, t.line - 1, 0, {
+        sign_text = t.resolved and RESOLVED_SIGN or THREAD_SIGN,
+        sign_hl_group = t.resolved and "DiagnosticSignOk" or "DiagnosticSignWarn",
+      })
+    end
+  end
+end
+
+-- cursor_diff resolves the current diff window to (path, side, buf, line), or nil
+-- when the cursor isn't in a reviewable diff window.
+local function cursor_diff()
+  local v = diff_view()
+  if not v then
+    return nil
+  end
+  local win = vim.api.nvim_get_current_win()
+  local main = v.layout:get_main_win()
+  if main and win == main.id then
+    return v.entry.path, "RIGHT", vim.api.nvim_win_get_buf(win), vim.api.nvim_win_get_cursor(win)[1]
+  elseif v.layout.a and win == v.layout.a.id then
+    return v.entry.oldpath, "LEFT", vim.api.nvim_win_get_buf(win), vim.api.nvim_win_get_cursor(win)[1]
+  end
+  return nil
+end
+
+-- open_thread_under_cursor floats the thread anchored on the cursor line, or does
+-- nothing when there isn't one (K's only job in the diff is to peek a thread).
+local function open_thread_under_cursor()
+  local path, side, _, line = cursor_diff()
+  if not path then
+    return
+  end
+  for _, t in ipairs(threads) do
+    if t.path == path and t.side == side and t.line == line then
+      open_thread_float(t)
+      return
+    end
+  end
+end
+
+-- goto_thread moves to the next (dir 1) or previous (dir -1) thread in the current
+-- file, floating it on arrival.
+local function goto_thread(dir)
+  local path, side, _, line = cursor_diff()
+  if not path then
+    return
+  end
+  local here = {}
+  for _, t in ipairs(threads) do
+    if t.path == path and t.side == side and t.line then
+      here[#here + 1] = t
+    end
+  end
+  table.sort(here, function(a, b)
+    return a.line < b.line
+  end)
+  local target
+  for i = 1, #here do
+    local t = dir > 0 and here[i] or here[#here + 1 - i]
+    if (dir > 0 and t.line > line) or (dir < 0 and t.line < line) then
+      target = t
+      break
+    end
+  end
+  if not target then
+    return
+  end
+  vim.api.nvim_win_set_cursor(0, { target.line, 0 })
+  vim.cmd "normal! zz"
+  open_thread_float(target)
+end
+
 -- pd_tab is the tabpage that `pd` opened the review diff in. Signs are scoped to
 -- it so PR comments don't bleed into unrelated diffviews (neogit, ad-hoc :Diff…).
 local pd_tab
@@ -296,6 +542,26 @@ local pd_tab
 -- LEFT = old). A no-op unless the pd-opened diff tab is current. Driven by
 -- diffview's own events so the signs follow file navigation and reappear when the
 -- view is re-entered.
+-- decorate_one draws both your pending signs and the existing-thread signs for
+-- one diff window, and binds the thread keys on its buffer (<CR> toggle, ]t/[t
+-- navigate). Idempotent — re-run on every diffview event.
+local function decorate_one(win, path, side)
+  if not (win and vim.api.nvim_win_is_valid(win)) then
+    return
+  end
+  local buf = vim.api.nvim_win_get_buf(win)
+  place_signs(buf, path, side)
+  place_threads(buf, path, side)
+  local opt = { buffer = buf, nowait = true }
+  vim.keymap.set("n", "K", open_thread_under_cursor, opt)
+  vim.keymap.set("n", "]t", function()
+    goto_thread(1)
+  end, opt)
+  vim.keymap.set("n", "[t", function()
+    goto_thread(-1)
+  end, opt)
+end
+
 local function decorate_diff()
   if not pd_tab or vim.api.nvim_get_current_tabpage() ~= pd_tab then
     return
@@ -304,13 +570,12 @@ local function decorate_diff()
   if not v then
     return
   end
-  local entry, layout = v.entry, v.layout
-  local main = layout:get_main_win()
-  if main and main.id and vim.api.nvim_win_is_valid(main.id) then
-    place_signs(vim.api.nvim_win_get_buf(main.id), entry.path, "RIGHT")
+  local main = v.layout:get_main_win()
+  if main then
+    decorate_one(main.id, v.entry.path, "RIGHT")
   end
-  if layout.a and layout.a.id and vim.api.nvim_win_is_valid(layout.a.id) then
-    place_signs(vim.api.nvim_win_get_buf(layout.a.id), entry.oldpath, "LEFT")
+  if v.layout.a then
+    decorate_one(v.layout.a.id, v.entry.oldpath, "LEFT")
   end
 end
 
@@ -945,6 +1210,30 @@ function M.diff()
   vim.schedule(function()
     load()
     decorate_diff()
+  end)
+  -- Existing review threads are fetched fully async (a network call), so they
+  -- never gate the diff opening; their signs layer in when the request returns.
+  local owner, repo = pr.slug:match "([^/]+)/(.+)"
+  vim.system({
+    "gh",
+    "api",
+    "graphql",
+    "-f",
+    "query=" .. THREADS_QUERY,
+    "-f",
+    "owner=" .. (owner or ""),
+    "-f",
+    "repo=" .. (repo or ""),
+    "-F",
+    "number=" .. pr.number,
+  }, { text = true }, function(res)
+    if res.code ~= 0 then
+      return
+    end
+    vim.schedule(function()
+      threads = parse_threads(res.stdout)
+      decorate_diff()
+    end)
   end)
 end
 
