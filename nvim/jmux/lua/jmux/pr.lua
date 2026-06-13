@@ -1685,14 +1685,43 @@ function M.view()
             vim.keymap.set("n", key, toggle, { buffer = buf, nowait = true, desc = "toggle thread" })
           end
 
+          -- title_spinner animates the tab title (scoped via set_hints) until the
+          -- returned stop fn is called; shared by refresh and merge.
+          local function title_spinner(label)
+            local t, f = vim.uv.new_timer(), 0
+            local function stop()
+              if t then
+                t:stop()
+                t:close()
+                t = nil
+              end
+            end
+            t:start(
+              0,
+              80,
+              vim.schedule_wrap(function()
+                if not t then
+                  return
+                end
+                f = f % #SPINNER + 1
+                set_hints { ("%%#Title#%s %s"):format(SPINNER[f], label) }
+              end)
+            )
+            return stop
+          end
+
+          vim.keymap.set("n", "r", function()
+            fetch_and_render(title_spinner "refreshing…")
+          end, { buffer = buf, nowait = true, desc = "refresh" })
+
           -- m merges — only on open PRs you authored or are assigned to, using the
           -- repo's default merge method. Hints are rebuilt here every render, so the
           -- merge spinner is cleanly replaced once it resolves.
-          local hints = { key_hint("⇥", "expand"), key_hint("q", "close") }
-          -- drop any merge binding from a prior render; it is re-added below only
-          -- while still eligible. After a merge the PR is no longer OPEN, so a stale
-          -- `m` must not linger and re-prompt a merge against the merged PR.
+          local hints = { key_hint("r", "refresh"), key_hint("⇥", "expand"), key_hint("q", "close") }
+          -- drop any merge bindings from a prior render; re-added below only while
+          -- still eligible, so a stale m/M can't merge an already-merged PR.
           pcall(vim.keymap.del, "n", "m", { buffer = buf })
+          pcall(vim.keymap.del, "n", "M", { buffer = buf })
           local viewer = nilable(vim.tbl_get(data, "data", "viewer", "login"))
           local prnode = vim.tbl_get(data, "data", "repository", "pullRequest")
           local method = nilable(vim.tbl_get(data, "data", "repository", "viewerDefaultMergeMethod"))
@@ -1710,54 +1739,48 @@ function M.view()
           local how = method and tostring(method):lower()
           local flag = how and ({ merge = "--merge", squash = "--squash", rebase = "--rebase" })[how]
           if mine and flag and tostring(nilable(prnode.state) or ""):upper() == "OPEN" then
-            vim.keymap.set("n", "m", function()
-              vim.ui.select({ "no", "yes" }, { prompt = ("merge #%d via %s?"):format(pr.number, how) }, function(choice)
-                if choice ~= "yes" then
-                  return
-                end
-                -- animate the tab title while merging; routed through set_hints so it
-                -- stays scoped to this tabpage (the tabline is a global option) and
-                -- keeps spinning through the refresh that follows a successful merge.
-                local mtimer, mframe = vim.uv.new_timer(), 0
-                local function stop_spin()
-                  if mtimer then
-                    mtimer:stop()
-                    mtimer:close()
-                    mtimer = nil
+            -- admin bypasses branch protection (failing checks, unresolved threads).
+            local function do_merge(admin)
+              local label = admin and (how .. ", admin") or how
+              vim.ui.select(
+                { "no", "yes" },
+                { prompt = ("merge #%d via %s?"):format(pr.number, label) },
+                function(choice)
+                  if choice ~= "yes" then
+                    return
                   end
-                end
-                if mtimer then
-                  mtimer:start(
-                    0,
-                    80,
-                    vim.schedule_wrap(function()
-                      if not mtimer then
-                        return
-                      end
-                      mframe = mframe % #SPINNER + 1
-                      set_hints { ("%%#Title#%s merging #%d…"):format(SPINNER[mframe], pr.number) }
-                    end)
-                  )
-                end
-                vim.system(
-                  { "gh", "pr", "merge", "--repo", pr.slug, flag, "--", tostring(pr.number) },
-                  { text = true },
-                  function(res)
+                  -- animate the tab title while merging; it keeps spinning through the
+                  -- refresh that follows a successful merge.
+                  local stop_spin = title_spinner(("merging #%d…"):format(pr.number))
+                  local cmd = { "gh", "pr", "merge", "--repo", pr.slug, flag }
+                  if admin then
+                    cmd[#cmd + 1] = "--admin"
+                  end
+                  cmd[#cmd + 1] = "--"
+                  cmd[#cmd + 1] = tostring(pr.number)
+                  vim.system(cmd, { text = true }, function(res)
                     vim.schedule(function()
                       if res.code ~= 0 then
                         stop_spin()
                         set_hints(hints)
                         vim.notify("merge failed:\n" .. vim.trim(res.stderr or ""), vim.log.levels.ERROR)
                       else
-                        vim.notify(("merged #%d (%s)"):format(pr.number, how))
+                        vim.notify(("merged #%d (%s)"):format(pr.number, label))
                         -- keep the spinner up until the refreshed view renders.
                         fetch_and_render(stop_spin)
                       end
                     end)
-                  end
-                )
-              end)
+                  end)
+                end
+              )
+            end
+            vim.keymap.set("n", "m", function()
+              do_merge(false)
             end, { buffer = buf, nowait = true, desc = "merge" })
+            vim.keymap.set("n", "M", function()
+              do_merge(true)
+            end, { buffer = buf, nowait = true, desc = "merge (admin)" })
+            table.insert(hints, 1, key_hint("M", "admin"))
             table.insert(hints, 1, key_hint("m", "merge"))
           end
           set_hints(hints)
