@@ -5,11 +5,9 @@ package ghctl
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -128,83 +126,98 @@ func HeadRef(slug string, num int) (string, error) {
 	return p.HeadRefName, nil
 }
 
-// searchResponse is the REST shape of `GET /search/issues`.
-type searchResponse struct {
-	Items []struct {
-		Number        int    `json:"number"`
-		Title         string `json:"title"`
-		Draft         bool   `json:"draft"`
-		RepositoryURL string `json:"repository_url"`
-		User          struct {
+// searchMyPRsQuery aliases the three review-queue searches into one round-trip;
+// `@me` resolves server-side, so no separate login lookup is needed.
+const searchMyPRsQuery = `
+query($reviewRequested: String!, $assigned: String!, $authored: String!) {
+  reviewRequested: search(query: $reviewRequested, type: ISSUE, first: 100) { nodes { ...prFields } }
+  assigned:        search(query: $assigned,        type: ISSUE, first: 100) { nodes { ...prFields } }
+  authored:        search(query: $authored,        type: ISSUE, first: 100) { nodes { ...prFields } }
+}
+fragment prFields on PullRequest {
+  number
+  title
+  isDraft
+  author { login }
+  repository { name nameWithOwner }
+}`
+
+// searchMyPrsQueryResponse holds one aliased search block per review-queue qualifier.
+type searchMyPrsQueryResponse struct {
+	ReviewRequested prSearchBlock `json:"reviewRequested"`
+	Assigned        prSearchBlock `json:"assigned"`
+	Authored        prSearchBlock `json:"authored"`
+}
+
+type prSearchBlock struct {
+	Nodes []struct {
+		Number  int    `json:"number"`
+		Title   string `json:"title"`
+		IsDraft bool   `json:"isDraft"`
+		Author  struct {
 			Login string `json:"login"`
-		} `json:"user"`
-	} `json:"items"`
+		} `json:"author"`
+		Repository struct {
+			Name          string `json:"name"`
+			NameWithOwner string `json:"nameWithOwner"`
+		} `json:"repository"`
+	} `json:"nodes"`
 }
 
 var (
-	loginOnce sync.Once
-	login     string
-	loginErr  error
+	gqlOnce sync.Once
+	gql     *api.GraphQLClient
+	gqlErr  error
 )
 
-// currentLogin resolves the authenticated user's login, to expand "@me".
-func currentLogin() (string, error) {
-	loginOnce.Do(func() {
-		var u struct {
-			Login string `json:"login"`
-		}
-		if err := get("user", &u); err != nil {
-			loginErr = err
-			return
-		}
-		login = u.Login
-	})
-	return login, loginErr
+// graphqlClient returns a cached GraphQL client authed via gh's resolved token.
+func graphqlClient() (*api.GraphQLClient, error) {
+	gqlOnce.Do(func() { gql, gqlErr = api.DefaultGraphQLClient() })
+	return gql, gqlErr
 }
 
 // SearchMyPRs returns open PRs across all repos that request your review, are
-// assigned to you, or you authored, deduped by repo+number. Search ANDs
-// qualifiers, so each is run separately and merged.
+// assigned to you, or you authored, deduped by repo+number in that priority
+// order.
 func SearchMyPRs() ([]SearchResult, error) {
-	me, err := currentLogin()
+	cl, err := graphqlClient()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("github client: %w", err)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+
+	variables := map[string]any{
+		"reviewRequested": "is:pr is:open review-requested:@me",
+		"assigned":        "is:pr is:open assignee:@me",
+		"authored":        "is:pr is:open author:@me",
+	}
+	var resp searchMyPrsQueryResponse
+	if err := cl.DoWithContext(ctx, searchMyPRsQuery, variables, &resp); err != nil {
+		return nil, fmt.Errorf("search PRs: %w", err)
+	}
+
 	seen := map[string]bool{}
 	var out []SearchResult
-	for _, qualifier := range []string{"review-requested:" + me, "assignee:" + me, "author:" + me} {
-		q := "is:pr is:open " + qualifier
-		var resp searchResponse
-		if err := get("search/issues?per_page=100&q="+url.QueryEscape(q), &resp); err != nil {
-			return nil, err
-		}
-		for _, it := range resp.Items {
-			slug := repoSlug(it.RepositoryURL)
-			key := slug + "#" + strconv.Itoa(it.Number)
+	for _, block := range []prSearchBlock{resp.ReviewRequested, resp.Assigned, resp.Authored} {
+		for _, n := range block.Nodes {
+			if n.Number == 0 {
+				continue // non-PR union member or null node
+			}
+			key := n.Repository.NameWithOwner + "#" + strconv.Itoa(n.Number)
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
 			var r SearchResult
-			r.Number, r.Title, r.IsDraft = it.Number, it.Title, it.Draft
-			r.Author.Login = it.User.Login
-			r.Repository.NameWithOwner = slug
-			if i := strings.LastIndex(slug, "/"); i >= 0 {
-				r.Repository.Name = slug[i+1:]
-			}
+			r.Number, r.Title, r.IsDraft = n.Number, n.Title, n.IsDraft
+			r.Author.Login = n.Author.Login
+			r.Repository.Name = n.Repository.Name
+			r.Repository.NameWithOwner = n.Repository.NameWithOwner
 			out = append(out, r)
 		}
 	}
 	return out, nil
-}
-
-// repoSlug extracts "owner/repo" from a search item's repository_url.
-func repoSlug(repositoryURL string) string {
-	const marker = "/repos/"
-	if i := strings.Index(repositoryURL, marker); i >= 0 {
-		return repositoryURL[i+len(marker):]
-	}
-	return repositoryURL
 }
 
 // ViewRepo renders `gh pr view --comments` for the preview

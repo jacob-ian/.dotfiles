@@ -23,23 +23,21 @@ func RunAssigned() {
 		return
 	}
 
-	results, err := loadResults(false)
-	if err != nil {
-		notify.Errorf("gh search prs: %s", gitctl.CleanErr(err))
-		return
-	}
-
 	self, err := os.Executable()
 	if err != nil {
 		self = "jmux"
 	}
 
-	sel, err := fzfutil.Pick(formatRows(results), fzfutil.Options{
-		Prompt: "prs> ",
+	// start:reload loads the list async behind fzf's spinner so the open doesn't
+	// block on gh; the load event swaps the "loading…" prompt back.
+	sel, err := fzfutil.Pick(nil, fzfutil.Options{
+		Prompt: "loading… ",
 		Header: "enter: review · ctrl-r: refresh · ctrl-/: toggle preview",
 		Bindings: []string{
 			"ctrl-/:toggle-preview",
-			fmt.Sprintf("ctrl-r:reload(%s pr items --refresh)", shellQuote(self)),
+			fmt.Sprintf("start:reload(%s pr items)", shellQuote(self)),
+			"load:change-prompt(prs> )",
+			fmt.Sprintf("ctrl-r:change-prompt(refreshing… )+reload(%s pr items --refresh)", shellQuote(self)),
 		},
 		Preview:       fmt.Sprintf("%s pr preview {}", shellQuote(self)),
 		PreviewWindow: "right:60%:wrap",

@@ -38,33 +38,24 @@ func RunRepo(dir string) {
 		notify.Error("Could not resolve the repo's origin remote")
 		return
 	}
-	prs, err := ghctl.ListPRs(slug)
-	if err != nil {
-		notify.Errorf("list PRs: %s", gitctl.CleanErr(err))
-		return
-	}
-	items := make([]string, len(prs))
-	byNum := make(map[int]ghctl.PR, len(prs))
-	for i, p := range prs {
-		items[i] = formatRow(slug, p.Number, p.IsDraft, p.Title, p.Author.Login)
-		byNum[p.Number] = p
-	}
-
 	self, err := os.Executable()
 	if err != nil {
 		self = "jmux"
 	}
-	previewCmd := fmt.Sprintf("%s pr preview {}", shellQuote(self))
-	reloadCmd := fmt.Sprintf("%s pr items --repo %s", shellQuote(self), shellQuote(slug))
+	itemsCmd := fmt.Sprintf("%s pr items --repo %s", shellQuote(self), shellQuote(slug))
 
-	sel, err := fzfutil.Pick(items, fzfutil.Options{
-		Prompt: "pr> ",
+	// start:reload lists the repo's PRs async behind fzf's spinner so the open
+	// doesn't block on gh; the load event swaps the "loading…" prompt back.
+	sel, err := fzfutil.Pick(nil, fzfutil.Options{
+		Prompt: "loading… ",
 		Header: "enter: review · ctrl-r: refresh · ctrl-/: toggle preview",
 		Bindings: []string{
 			"ctrl-/:toggle-preview",
-			fmt.Sprintf("ctrl-r:reload(%s)", reloadCmd),
+			fmt.Sprintf("start:reload(%s)", itemsCmd),
+			"load:change-prompt(pr> )",
+			fmt.Sprintf("ctrl-r:change-prompt(refreshing… )+reload(%s)", itemsCmd),
 		},
-		Preview:       previewCmd,
+		Preview:       fmt.Sprintf("%s pr preview {}", shellQuote(self)),
 		PreviewWindow: "right:60%:wrap",
 	})
 	if err != nil || sel == "" {
@@ -75,18 +66,13 @@ func RunRepo(dir string) {
 	if !ok {
 		return
 	}
-	p, ok := byNum[num]
-	if !ok {
-		// Row came from a ctrl-r reload, so it isn't in the map built above;
-		// resolve its head branch fresh before reviewing.
-		headRef, err := ghctl.HeadRef(slug, num)
-		if err != nil || headRef == "" {
-			notify.Errorf("resolve branch for %s#%d: %s", slug, num, gitctl.CleanErr(err))
-			return
-		}
-		p = ghctl.PR{Number: num, HeadRefName: headRef}
+	// The list comes from the reload subprocess, so resolve the head branch fresh.
+	headRef, err := ghctl.HeadRef(slug, num)
+	if err != nil || headRef == "" {
+		notify.Errorf("resolve branch for %s#%d: %s", slug, num, gitctl.CleanErr(err))
+		return
 	}
-	Review(bareRoot, p)
+	Review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef})
 }
 
 // RunNumber handles `jmux pr <num>`: review the PR directly, skipping the picker.
