@@ -57,6 +57,8 @@ func RunRepo(dir string) {
 		},
 		Preview:       fmt.Sprintf("%s pr preview {}", shellQuote(self)),
 		PreviewWindow: "right:60%:wrap",
+		Delimiter:     "\t",
+		WithNth:       "1",
 	})
 	if err != nil || sel == "" {
 		return
@@ -66,11 +68,13 @@ func RunRepo(dir string) {
 	if !ok {
 		return
 	}
-	// The list comes from the reload subprocess, so resolve the head branch fresh.
-	headRef, err := ghctl.HeadRef(slug, num)
-	if err != nil || headRef == "" {
-		notify.Errorf("resolve branch for %s#%d: %s", slug, num, gitctl.CleanErr(err))
-		return
+	headRef := rowHeadRef(sel)
+	if headRef == "" {
+		var err error
+		if headRef, err = ghctl.HeadRef(slug, num); err != nil || headRef == "" {
+			notify.Errorf("resolve branch for %s#%d: %s", slug, num, gitctl.CleanErr(err))
+			return
+		}
 	}
 	Review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef})
 }
@@ -170,6 +174,21 @@ func formatRow(slug string, num int, draft bool, title, login string) string {
 		tag = "[draft] "
 	}
 	return fmt.Sprintf("%s#%d  %s%s  ·  %s", slug, num, tag, title, login)
+}
+
+// formatItemsRow appends the head branch as a hidden tab field so selection can
+// read it (via rowHeadRef) instead of doing a separate HeadRef lookup.
+func formatItemsRow(slug string, num int, draft bool, title, login, headRef string) string {
+	return formatRow(slug, num, draft, title, login) + "\t" + headRef
+}
+
+// rowHeadRef returns the hidden head-branch field from a picker row, or "" when
+// absent.
+func rowHeadRef(line string) string {
+	if i := strings.IndexByte(line, '\t'); i >= 0 {
+		return strings.TrimSpace(line[i+1:])
+	}
+	return ""
 }
 
 // ParseNumber extracts the leading PR number from a picker row or CLI argument.

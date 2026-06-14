@@ -13,6 +13,10 @@ type Options struct {
 	Bindings      []string
 	Preview       string
 	PreviewWindow string
+	// Delimiter + WithNth hide trailing fields: only WithNth columns show, but
+	// the full row is still returned on selection.
+	Delimiter string
+	WithNth   string
 }
 
 // Pick runs fzf on items and returns the selected line. Returns "" with a
@@ -65,6 +69,12 @@ func buildArgs(opts Options, printQuery bool) []string {
 	}
 	for _, b := range opts.Bindings {
 		args = append(args, "--bind="+b)
+	}
+	if opts.Delimiter != "" {
+		args = append(args, "--delimiter="+opts.Delimiter)
+	}
+	if opts.WithNth != "" {
+		args = append(args, "--with-nth="+opts.WithNth)
 	}
 	if printQuery {
 		args = append(args, "--print-query")

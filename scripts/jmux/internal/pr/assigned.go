@@ -41,6 +41,8 @@ func RunAssigned() {
 		},
 		Preview:       fmt.Sprintf("%s pr preview {}", shellQuote(self)),
 		PreviewWindow: "right:60%:wrap",
+		Delimiter:     "\t",
+		WithNth:       "1",
 	})
 	if err != nil || sel == "" {
 		return
@@ -50,22 +52,23 @@ func RunAssigned() {
 	if !ok {
 		return
 	}
-	reviewSelection(slug, num)
+	reviewSelection(slug, num, rowHeadRef(sel))
 }
 
-// reviewSelection maps a picked cross-repo PR (owner/repo + number) to its local
-// clone, resolves the head branch search omits, and hands off to the review
-// flow. Parsing from the row keeps it working with rows fzf reloaded itself.
-func reviewSelection(slug string, num int) {
+// reviewSelection maps a picked cross-repo PR to its local clone and reviews it.
+// headRef comes from the row's hidden field, falling back to a lookup when absent.
+func reviewSelection(slug string, num int, headRef string) {
 	bareRoot := findLocalRepo(slug)
 	if bareRoot == "" {
 		notify.Errorf("No local clone of %s", slug)
 		return
 	}
-	headRef, err := ghctl.HeadRef(slug, num)
-	if err != nil || headRef == "" {
-		notify.Errorf("resolve branch for %s#%d: %s", slug, num, gitctl.CleanErr(err))
-		return
+	if headRef == "" {
+		var err error
+		if headRef, err = ghctl.HeadRef(slug, num); err != nil || headRef == "" {
+			notify.Errorf("resolve branch for %s#%d: %s", slug, num, gitctl.CleanErr(err))
+			return
+		}
 	}
 	Review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef})
 }

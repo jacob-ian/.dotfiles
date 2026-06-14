@@ -30,12 +30,13 @@ type PR struct {
 	}
 }
 
-// SearchResult is a cross-repo PR from search, which omits the head branch.
+// SearchResult is a cross-repo PR from search.
 type SearchResult struct {
-	Number     int
-	Title      string
-	IsDraft    bool
-	Repository struct {
+	Number      int
+	Title       string
+	IsDraft     bool
+	HeadRefName string
+	Repository  struct {
 		Name          string
 		NameWithOwner string
 	}
@@ -138,6 +139,7 @@ fragment prFields on PullRequest {
   number
   title
   isDraft
+  headRefName
   author { login }
   repository { name nameWithOwner }
 }`
@@ -151,10 +153,11 @@ type searchMyPrsQueryResponse struct {
 
 type prSearchBlock struct {
 	Nodes []struct {
-		Number  int    `json:"number"`
-		Title   string `json:"title"`
-		IsDraft bool   `json:"isDraft"`
-		Author  struct {
+		Number      int    `json:"number"`
+		Title       string `json:"title"`
+		IsDraft     bool   `json:"isDraft"`
+		HeadRefName string `json:"headRefName"`
+		Author      struct {
 			Login string `json:"login"`
 		} `json:"author"`
 		Repository struct {
@@ -210,7 +213,7 @@ func SearchMyPRs() ([]SearchResult, error) {
 			}
 			seen[key] = true
 			var r SearchResult
-			r.Number, r.Title, r.IsDraft = n.Number, n.Title, n.IsDraft
+			r.Number, r.Title, r.IsDraft, r.HeadRefName = n.Number, n.Title, n.IsDraft, n.HeadRefName
 			r.Author.Login = n.Author.Login
 			r.Repository.Name = n.Repository.Name
 			r.Repository.NameWithOwner = n.Repository.NameWithOwner
