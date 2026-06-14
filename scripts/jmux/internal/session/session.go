@@ -31,13 +31,19 @@ type OpenOptions struct {
 	// InstallCmd, if non-empty, runs in a detached "install" window. The shell
 	// wrapper pauses on failure so the user can read the error.
 	InstallCmd string
+	// EditorCmd overrides the editor-window command; empty means plain "nvim".
+	EditorCmd string
 }
 
 // Open ensures a tmux session exists for dir and switches/attaches to it.
 func Open(dir string, opts OpenOptions) error {
 	name := Name(dir)
 	if !tmuxctl.HasSession(name) {
-		if err := tmuxctl.NewSession(name, dir, "nvim", "nvim"); err != nil {
+		editorCmd := opts.EditorCmd
+		if editorCmd == "" {
+			editorCmd = "nvim"
+		}
+		if err := tmuxctl.NewSession(name, dir, "nvim", editorCmd); err != nil {
 			return fmt.Errorf("create session %q: %w", name, err)
 		}
 		// Stamp the originating dir so the workspace overview can map sessions

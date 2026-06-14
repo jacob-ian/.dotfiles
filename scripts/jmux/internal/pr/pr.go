@@ -102,8 +102,12 @@ func RunNumber(num int) {
 	Review(bareRoot, p)
 }
 
-// Review checks the PR out into a worktree and opens its session: nvim, a
-// paired claude window, and the install window.
+// prEditorCmd opens nvim with the PR diff (`pd`) shown: a once-only VimEnter
+// hook fires after startup, so the lazy plugin is loaded by the time it runs.
+const prEditorCmd = `nvim -c "autocmd VimEnter * ++once lua require('jmux').pr.diff()"`
+
+// Review checks the PR out into a worktree and opens its session: nvim (with the
+// diff open), a paired claude window, and the install window.
 func Review(bareRoot string, p ghctl.PR) {
 	path, err := checkoutWorktree(bareRoot, p)
 	if err != nil {
@@ -113,6 +117,7 @@ func Review(bareRoot string, p ghctl.PR) {
 	if err := session.Open(path, session.OpenOptions{
 		WithClaude: true,
 		InstallCmd: worktree.DetectInstallCmd(path),
+		EditorCmd:  prEditorCmd,
 	}); err != nil {
 		notify.Error(err.Error())
 	}
