@@ -1718,14 +1718,14 @@ function M.view()
             return stop
           end
 
-          vim.keymap.set("n", "r", function()
+          vim.keymap.set("n", "<C-r>", function()
             fetch_and_render(title_spinner "refreshing…")
           end, { buffer = buf, nowait = true, desc = "refresh" })
 
           -- m merges — only on open PRs you authored or are assigned to, using the
           -- repo's default merge method. Hints are rebuilt here every render, so the
           -- merge spinner is cleanly replaced once it resolves.
-          local hints = { key_hint("r", "refresh"), key_hint("⇥", "expand"), key_hint("q", "close") }
+          local hints = { key_hint("<C-r>", "refresh"), key_hint("⇥", "expand"), key_hint("q", "close") }
           -- drop any merge bindings from a prior render; re-added below only while
           -- still eligible, so a stale m/M can't merge an already-merged PR.
           pcall(vim.keymap.del, "n", "m", { buffer = buf })

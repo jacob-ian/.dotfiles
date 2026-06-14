@@ -28,10 +28,6 @@ func RunAssigned() {
 		notify.Errorf("gh search prs: %s", gitctl.CleanErr(err))
 		return
 	}
-	if len(results) == 0 {
-		notify.Info("No open PRs you created, are assigned, or were asked to review")
-		return
-	}
 
 	self, err := os.Executable()
 	if err != nil {

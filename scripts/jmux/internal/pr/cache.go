@@ -109,6 +109,10 @@ func formatRows(results []ghctl.SearchResult) []string {
 // for fzf's reload binding. On a refresh error it falls back to the cached rows
 // so the picker keeps its current list rather than clearing.
 func RunItems(args []string) {
+	if len(args) >= 2 && args[0] == "--repo" {
+		runRepoItems(args[1])
+		return
+	}
 	refresh := len(args) > 0 && args[0] == "--refresh"
 	results, err := loadResults(refresh)
 	if err != nil {
@@ -119,5 +123,18 @@ func RunItems(args []string) {
 	}
 	for _, row := range formatRows(results) {
 		fmt.Println(row)
+	}
+}
+
+// runRepoItems handles `jmux pr items --repo <slug>`: print one repo's open-PR
+// rows to stdout for the per-repo picker's reload binding.
+func runRepoItems(slug string) {
+	prs, err := ghctl.ListPRs(slug)
+	if err != nil {
+		notify.Errorf("list PRs: %s", gitctl.CleanErr(err))
+		return
+	}
+	for _, p := range prs {
+		fmt.Println(formatRow(slug, p.Number, p.IsDraft, p.Title, p.Author.Login))
 	}
 }
