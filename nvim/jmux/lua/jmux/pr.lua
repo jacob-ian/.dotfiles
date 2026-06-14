@@ -592,7 +592,10 @@ end
 
 -- pd_tab is the tabpage that `pd` opened the review diff in. Signs are scoped to
 -- it so PR comments don't bleed into unrelated diffviews (neogit, ad-hoc :Diff…).
+-- pv_tab is the `pv` view tab. Both are tracked so re-invoking focuses the open
+-- tab instead of stacking a duplicate.
 local pd_tab
+local pv_tab
 
 -- decorate_diff signs the current diffview file's two windows (RIGHT = new/main,
 -- LEFT = old). A no-op unless the pd-opened diff tab is current. Driven by
@@ -1478,10 +1481,15 @@ end
 -- threads, and checks — into a markdown tab. Fetched async (a "Loading…" stub
 -- shows first) so opening is instant; q closes it.
 function M.view()
+  if pv_tab and vim.api.nvim_tabpage_is_valid(pv_tab) then
+    vim.api.nvim_set_current_tabpage(pv_tab)
+    return
+  end
   -- Open the tab and paint the loader first; resolving the PR and fetching the
   -- conversation both happen async (pr_info_async + vim.system), so the view
   -- shows instantly and the spinner keeps animating during the round trip.
   vim.cmd "tabnew"
+  pv_tab = vim.api.nvim_get_current_tabpage()
   local win = vim.api.nvim_get_current_win()
   local buf = vim.api.nvim_get_current_buf()
   vim.bo[buf].buftype = "nofile"
@@ -1505,7 +1513,14 @@ function M.view()
 
   local _, restore, set_hints =
     set_tab_title(buf, "jmux pr view", { key_hint("⇥", "expand"), key_hint("q", "close") })
-  vim.api.nvim_create_autocmd("WinClosed", { pattern = tostring(win), once = true, callback = restore })
+  vim.api.nvim_create_autocmd("WinClosed", {
+    pattern = tostring(win),
+    once = true,
+    callback = function()
+      restore()
+      pv_tab = nil
+    end,
+  })
   vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = buf, nowait = true, desc = "close" })
 
   -- Draw the first frame synchronously and force a redraw so the loader shows the
@@ -1819,6 +1834,10 @@ end
 -- in diffview, where pending comments appear as gutter signs. load() first so a
 -- restored review decorates on open. Resolving the base is one gh call, cached.
 function M.diff()
+  if pd_tab and vim.api.nvim_tabpage_is_valid(pd_tab) then
+    vim.api.nvim_set_current_tabpage(pd_tab)
+    return
+  end
   local pr, err = pr_info()
   if not pr or not pr.base then
     vim.notify(err or "could not resolve PR base", vim.log.levels.ERROR)
