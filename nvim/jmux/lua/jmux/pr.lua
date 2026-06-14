@@ -1445,7 +1445,10 @@ local function build_model(data)
   end
   for _, r in ipairs(vim.tbl_get(pr, "reviews", "nodes") or {}) do
     local rt = (r.id and by_review[r.id]) or {}
-    if vim.trim(r.body or "") ~= "" or #rt > 0 then
+    local verdict = tostring(r.state or ""):upper()
+    -- show a review when it carries a body, inline threads, or a verdict — the
+    -- last so a bare "Approve" / "Request changes" still shows who weighed in.
+    if vim.trim(r.body or "") ~= "" or #rt > 0 or verdict == "APPROVED" or verdict == "CHANGES_REQUESTED" then
       local kids = {}
       for _, t in ipairs(rt) do
         kids[#kids + 1] = thread_kid(t)
