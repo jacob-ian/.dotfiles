@@ -92,12 +92,25 @@ local function span_str(cm)
   return (s and s ~= cm.line) and string.format("%d-%d", s, cm.line) or tostring(cm.line)
 end
 
+-- git_dir resolves the worktree's absolute git dir once per session. One nvim
+-- instance maps to one PR worktree, so the path never changes under us — the same
+-- invariant that lets `info` cache the PR identity. Memoizing it (false sentinel
+-- caches a miss too) keeps the per-PR state files off a blocking `git rev-parse`
+-- spawn on every read/write/clear, including the view's instant-paint open path.
+local git_dir
+local function resolve_git_dir()
+  if git_dir == nil then
+    git_dir = sh { "git", "rev-parse", "--absolute-git-dir" } or false
+  end
+  return git_dir or nil
+end
+
 -- Pending comments persist across sessions in the worktree's own git dir
 -- (.git/worktrees/<name>/ for a linked worktree). That scopes the file to the
 -- one PR this worktree tracks, hides it from `git status`, and lets `git
 -- worktree remove` clean it up with everything else.
 local function state_file()
-  local dir = sh { "git", "rev-parse", "--absolute-git-dir" }
+  local dir = resolve_git_dir()
   return dir and (dir .. "/jmux-review.json") or nil
 end
 
@@ -148,6 +161,52 @@ local function load()
       ),
       vim.log.levels.WARN
     )
+  end
+end
+
+-- The PR conversation (pv) is cached to the worktree's git dir so reopening the
+-- view paints instantly from disk instead of waiting on the GraphQL round trip;
+-- <C-r> in the view refetches and rewrites it. Scoped to this worktree's PR like
+-- the pending review, and cleaned up by `git worktree remove`.
+local function view_cache_file()
+  local dir = resolve_git_dir()
+  return dir and (dir .. "/jmux-pr-view.json") or nil
+end
+
+-- write_view_cache stores the raw VIEW_QUERY response verbatim, so reading it
+-- back decodes exactly what a live fetch would and the render path is identical.
+local function write_view_cache(json)
+  local f = view_cache_file()
+  if f then
+    vim.fn.writefile({ json }, f)
+  end
+end
+
+-- read_view_cache returns the decoded cached response and its age in seconds, or
+-- nil when there's no readable, decodable cache. Decoding here (rather than
+-- handing finish the raw JSON to re-parse) avoids a second full decode of the
+-- conversation payload on the main thread — finish renders the table directly. An
+-- undecodable cache returns nil so the open falls through to a live fetch. Age
+-- comes from the file mtime and is shown in the view's bar so a stale cache is
+-- obvious (and a reminder that <C-r> refreshes it).
+local function read_view_cache()
+  local f = view_cache_file()
+  if not f or vim.fn.filereadable(f) == 0 then
+    return nil
+  end
+  local ok, data = pcall(vim.json.decode, table.concat(vim.fn.readfile(f), "\n"))
+  if not ok then
+    return nil
+  end
+  return data, os.time() - vim.fn.getftime(f)
+end
+
+-- clear_view_cache drops the cached conversation so the next pv refetches — used
+-- after submitting a review, which the stale cache wouldn't yet reflect.
+local function clear_view_cache()
+  local f = view_cache_file()
+  if f then
+    vim.fn.delete(f)
   end
 end
 
@@ -372,13 +431,8 @@ local function iso_epoch(iso)
   } + utc_offset
 end
 
--- reltime renders a timestamp as a short age: "now/5m/3h/2d/4mo".
-local function reltime(iso)
-  local at = iso_epoch(iso)
-  if not at then
-    return ""
-  end
-  local diff = os.time() - at
+-- short_age renders a positive seconds delta as "now/5m/3h/2d/4mo".
+local function short_age(diff)
   if diff < 60 then
     return "now"
   elseif diff < 3600 then
@@ -389,6 +443,15 @@ local function reltime(iso)
     return math.floor(diff / 86400) .. "d"
   end
   return math.floor(diff / 2592000) .. "mo"
+end
+
+-- reltime renders a timestamp as a short age: "now/5m/3h/2d/4mo".
+local function reltime(iso)
+  local at = iso_epoch(iso)
+  if not at then
+    return ""
+  end
+  return short_age(os.time() - at)
 end
 
 -- duration renders the elapsed time between two timestamps as "45s/2m5s/1h3m".
@@ -1185,6 +1248,9 @@ function M.review()
         end
         M.pending = {}
         save()
+        -- the submitted review changes the conversation, so drop the pv cache;
+        -- the next `pv` refetches rather than painting a copy without this review.
+        clear_view_cache()
         vim.notify(string.format("submitted %s with %d comment(s)", event, n))
         close()
       end)
@@ -1576,23 +1642,18 @@ function M.view()
 
     -- re-runnable so a successful merge can refresh the view in place. stop_spin,
     -- when passed, halts a merge spinner the instant the refreshed data arrives.
-    local function fetch_and_render(stop_spin)
+    local function fetch_and_render(stop_spin, cached)
       -- remember the cursor line so a refresh keeps your place across the
       -- re-render (expand state is preserved, so the line stays meaningful).
       local prev_line = (vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_cursor(win)[1]) or 1
-      vim.system({
-        "gh",
-        "api",
-        "graphql",
-        "-f",
-        "query=" .. VIEW_QUERY,
-        "-f",
-        "owner=" .. (owner or ""),
-        "-f",
-        "repo=" .. (repo or ""),
-        "-F",
-        "number=" .. pr.number,
-      }, { text = true }, function(res)
+
+      -- finish renders one response into the view and wires its keymaps. A cached
+      -- open passes the already-decoded table as `predecoded` (and a synthesized
+      -- { code = 0 } res), so the render path is identical to a live fetch without
+      -- re-parsing the payload; `age` (the cache's age in seconds, nil for a live
+      -- fetch) is shown in the bar so a stale copy is obvious and signposts the
+      -- <C-r> refresh.
+      local function finish(res, age, predecoded)
         vim.schedule(function()
           stop_loader()
           if stop_spin then
@@ -1604,9 +1665,18 @@ function M.view()
           if res.code ~= 0 then
             return fill { "", "  failed to load PR:", "", "  " .. vim.trim(res.stderr or "") }
           end
-          local ok, data = pcall(vim.json.decode, res.stdout)
-          if not ok then
-            return fill { "  failed to parse PR response" }
+          local data = predecoded
+          if not data then
+            local ok
+            ok, data = pcall(vim.json.decode, res.stdout)
+            if not ok then
+              return fill { "  failed to parse PR response" }
+            end
+          end
+          -- a live fetch (age nil) refreshes the on-disk cache; a cached open
+          -- (age set) renders without rewriting what it just read.
+          if not age then
+            write_view_cache(res.stdout)
           end
 
           -- Collapsible tree: header → PR description → checks → conversation. Each
@@ -1741,6 +1811,11 @@ function M.view()
           -- repo's default merge method. Hints are rebuilt here every render, so the
           -- merge spinner is cleanly replaced once it resolves.
           local hints = { key_hint("<C-r>", "refresh"), key_hint("⇥", "expand"), key_hint("q", "close") }
+          -- a cached paint flags its age so it's clear the data may be stale and
+          -- <C-r> will refetch; a live fetch (age nil) shows no such marker.
+          if age then
+            hints[#hints + 1] = ("%%#Comment#cached %s ago"):format(short_age(age))
+          end
           -- drop any merge bindings from a prior render; re-added below only while
           -- still eligible, so a stale m/M can't merge an already-merged PR.
           pcall(vim.keymap.del, "n", "m", { buffer = buf })
@@ -1810,10 +1885,38 @@ function M.view()
 
           pcall(vim.api.nvim_win_set_cursor, win, { math.min(prev_line, vim.api.nvim_buf_line_count(buf)), 0 })
         end)
-      end)
+      end
+
+      if cached then
+        finish({ code = 0 }, cached.age, cached.data)
+      else
+        vim.system({
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          "query=" .. VIEW_QUERY,
+          "-f",
+          "owner=" .. (owner or ""),
+          "-f",
+          "repo=" .. (repo or ""),
+          "-F",
+          "number=" .. pr.number,
+        }, { text = true }, function(res)
+          finish(res)
+        end)
+      end
     end
 
-    fetch_and_render()
+    -- Paint from the on-disk cache when present so the view opens with no network
+    -- round trip; <C-r> refetches and rewrites it. Fall through to a live fetch
+    -- only when there's no cache yet.
+    local cached_data, cached_age = read_view_cache()
+    if cached_data then
+      fetch_and_render(nil, { data = cached_data, age = cached_age })
+    else
+      fetch_and_render()
+    end
   end)
 end
 
