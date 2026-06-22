@@ -2,8 +2,15 @@ package session
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
+	"syscall"
 	"testing"
+	"time"
+
+	"jmux/internal/nvimctl"
+	"jmux/internal/tmuxctl"
 )
 
 // fakeBareRepo creates a directory that satisfies repo.IsBareRepo (HEAD file
@@ -55,4 +62,61 @@ func TestName(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestKillReapsNvimCore checks end-to-end that Kill takes down the detached
+// nvim --embed core, not just the tmux session. Skips unless tmux and nvim are
+// both present.
+func TestKillReapsNvimCore(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	if _, err := exec.LookPath("nvim"); err != nil {
+		t.Skip("nvim not installed")
+	}
+
+	const name = "jmux_reap_e2e"
+	exec.Command("tmux", "kill-session", "-t="+name).Run()
+	if err := tmuxctl.NewSession(name, "/tmp", "nvim", "nvim"); err != nil {
+		t.Fatalf("new-session: %v", err)
+	}
+	t.Cleanup(func() { exec.Command("tmux", "kill-session", "-t="+name).Run() })
+
+	var reap []int
+	for range 40 {
+		time.Sleep(250 * time.Millisecond)
+		if reap = nvimctl.Processes(tmuxctl.PanePIDs(name)); len(reap) > 0 {
+			break
+		}
+	}
+	if len(reap) == 0 {
+		t.Fatal("never found an nvim --embed core for the session")
+	}
+
+	Kill(name)
+
+	for range 20 {
+		time.Sleep(100 * time.Millisecond)
+		if !slices.ContainsFunc(reap, alive) {
+			break
+		}
+	}
+	if left := aliveOf(reap); len(left) > 0 {
+		t.Fatalf("processes still alive after Kill: %v", left)
+	}
+	if tmuxctl.HasSession(name) {
+		t.Fatal("session still exists after Kill")
+	}
+}
+
+func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
+
+func aliveOf(pids []int) []int {
+	var out []int
+	for _, p := range pids {
+		if alive(p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"syscall"
 
+	"jmux/internal/nvimctl"
 	"jmux/internal/repo"
 	"jmux/internal/tmuxctl"
 )
@@ -43,7 +44,7 @@ func Open(dir string, opts OpenOptions) error {
 		if editorCmd == "" {
 			editorCmd = "nvim"
 		}
-		if err := tmuxctl.NewSession(name, dir, "nvim", editorCmd); err != nil {
+		if err := tmuxctl.NewSession(name, dir, nvimctl.WindowName, editorCmd); err != nil {
 			return fmt.Errorf("create session %q: %w", name, err)
 		}
 		// Stamp the originating dir so the workspace overview can map sessions
@@ -74,6 +75,9 @@ func Open(dir string, opts OpenOptions) error {
 // (e.g. an fzf reload) can run, so the kill is detached to a process that
 // survives our death.
 func Kill(name string) {
+	// Reap the editors before kill-session: that kill is detached when it's our
+	// own session, so doing it after risks being SIGHUP'd first and leaking them.
+	nvimctl.Reap(nvimctl.Processes(tmuxctl.PanePIDs(name)))
 	if tmuxctl.CurrentSession() == name {
 		cmd := exec.Command("tmux", "kill-session", "-t="+name)
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"jmux/internal/gitctl"
+	"jmux/internal/nvimctl"
 	"jmux/internal/repo"
 	"jmux/internal/session"
 	"jmux/internal/tmuxctl"
@@ -121,8 +122,8 @@ func RunPreview(args []string) {
 				return
 			}
 		}
-		if tmuxctl.HasWindow(sessionName, "nvim") {
-			if capture := tmuxctl.CapturePane(sessionName+":nvim", 0); capture != "" {
+		if tmuxctl.HasWindow(sessionName, nvimctl.WindowName) {
+			if capture := tmuxctl.CapturePane(sessionName+":"+nvimctl.WindowName, 0); capture != "" {
 				fmt.Println("nvim:")
 				fmt.Println(capture)
 				return

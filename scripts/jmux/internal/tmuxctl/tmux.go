@@ -103,6 +103,22 @@ func KillSession(name string) {
 	exec.Command("tmux", "kill-session", "-t="+name).Run()
 }
 
+// PanePIDs returns the PIDs of the processes running in session's panes (across
+// all its windows).
+func PanePIDs(session string) []int {
+	out, err := exec.Command("tmux", "list-panes", "-s", "-t", session, "-F", "#{pane_pid}").Output()
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for l := range strings.FieldsSeq(string(out)) {
+		if pid, err := strconv.Atoi(l); err == nil {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
 func NewSession(name, cwd, windowName, cmd string) error {
 	args := []string{"new-session", "-ds", name}
 	if windowName != "" {
