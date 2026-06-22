@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"jmux/internal/notify"
 	"jmux/internal/repo"
 	"jmux/internal/session"
+	"jmux/internal/spinner"
 )
 
 func RunAdd(args []string) {
@@ -44,16 +46,21 @@ func AddWorktree(bareRoot string) {
 
 	worktreePath := filepath.Join(bareRoot, branchName)
 	createBranch := !gitctl.RefExists(bareRoot, branchName)
-	if err := gitctl.WorktreeAdd(bareRoot, worktreePath, branchName, createBranch); err != nil {
-		flag := ""
-		if createBranch {
-			flag = " -b " + branchName
+	err = spinner.Run(fmt.Sprintf("creating %s…", branchName), func() error {
+		if err := gitctl.WorktreeAdd(bareRoot, worktreePath, branchName, createBranch); err != nil {
+			flag := ""
+			if createBranch {
+				flag = " -b " + branchName
+			}
+			return fmt.Errorf("git worktree add%s: %s", flag, gitctl.CleanErr(err))
 		}
-		notify.Errorf("git worktree add%s: %s", flag, gitctl.CleanErr(err))
+		CopyEnvFiles(bareRoot, worktreePath)
+		return nil
+	})
+	if err != nil {
+		notify.Error(err.Error())
 		return
 	}
-
-	CopyEnvFiles(bareRoot, worktreePath)
 
 	if err := session.Open(worktreePath, session.OpenOptions{
 		WithClaude: true,

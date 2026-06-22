@@ -16,6 +16,7 @@ import (
 	"jmux/internal/notify"
 	"jmux/internal/repo"
 	"jmux/internal/session"
+	"jmux/internal/spinner"
 	"jmux/internal/worktree"
 )
 
@@ -109,7 +110,11 @@ const prEditorCmd = `nvim -c "autocmd VimEnter * ++once lua require('jmux').pr.d
 // Review checks the PR out into a worktree and opens its session: nvim (with the
 // diff open), a paired claude window, and the install window.
 func Review(bareRoot string, p ghctl.PR) {
-	path, err := checkoutWorktree(bareRoot, p)
+	var path string
+	err := spinner.Run(fmt.Sprintf("opening PR #%d…", p.Number), func() (err error) {
+		path, err = checkoutWorktree(bareRoot, p)
+		return
+	})
 	if err != nil {
 		notify.Errorf("checkout PR #%d: %s", p.Number, gitctl.CleanErr(err))
 		return
