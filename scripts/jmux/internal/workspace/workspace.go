@@ -132,7 +132,9 @@ func RunAdd() {
 	if err != nil || sel == "" {
 		return
 	}
-	worktree.AddWorktree(repo.TrimSlash(sel))
+	if err := worktree.AddWorktree(repo.TrimSlash(sel)); err != nil {
+		notify.Error(err.Error())
+	}
 }
 
 // RunRemove handles `jmux workspace remove --path P [--quiet]`. A worktree-backed
@@ -150,7 +152,14 @@ func RunRemove(args []string) {
 	}
 
 	if worktree.IsManagedWorktree(path) {
-		worktree.Remove(path, *quiet)
+		msg, err := worktree.Remove(path)
+		if !*quiet {
+			if err != nil {
+				notify.Error(err.Error())
+			} else {
+				notify.Info(msg)
+			}
+		}
 		return
 	}
 

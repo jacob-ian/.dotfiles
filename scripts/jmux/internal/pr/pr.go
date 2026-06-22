@@ -77,7 +77,9 @@ func RunRepo(dir string) {
 			return
 		}
 	}
-	Review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef})
+	if err := review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef}); err != nil {
+		notify.Error(err.Error())
+	}
 }
 
 // RunNumber handles `jmux pr <num>`: review the PR directly, skipping the picker.
@@ -100,32 +102,32 @@ func RunNumber(num int) {
 		notify.Errorf("look up PR #%d: %s", num, gitctl.CleanErr(err))
 		return
 	}
-	Review(bareRoot, p)
+	if err := review(bareRoot, p); err != nil {
+		notify.Error(err.Error())
+	}
 }
 
 // prEditorCmd opens nvim with the PR diff (`pd`) shown: a once-only VimEnter
 // hook fires after startup, so the lazy plugin is loaded by the time it runs.
 const prEditorCmd = `nvim -c "autocmd VimEnter * ++once lua require('jmux').pr.diff()"`
 
-// Review checks the PR out into a worktree and opens its session: nvim (with the
-// diff open), a paired claude window, and the install window.
-func Review(bareRoot string, p ghctl.PR) {
+// review checks the PR out into a worktree and opens its session (nvim with the
+// diff, a paired claude window, the install window), showing setup progress in a
+// spinner. Pure: it returns the error for the handler to report.
+func review(bareRoot string, p ghctl.PR) error {
 	var path string
 	err := spinner.Run(fmt.Sprintf("opening PR #%d…", p.Number), func(phase chan<- string) (err error) {
 		path, err = checkoutWorktree(bareRoot, p, phase)
 		return
 	})
 	if err != nil {
-		notify.Errorf("checkout PR #%d: %s", p.Number, gitctl.CleanErr(err))
-		return
+		return fmt.Errorf("checkout PR #%d: %s", p.Number, gitctl.CleanErr(err))
 	}
-	if err := session.Open(path, session.OpenOptions{
+	return session.Open(path, session.OpenOptions{
 		WithClaude: true,
 		InstallCmd: worktree.DetectInstallCmd(path),
 		EditorCmd:  prEditorCmd,
-	}); err != nil {
-		notify.Error(err.Error())
-	}
+	})
 }
 
 // checkoutWorktree returns the PR's head-branch worktree, fetching and creating

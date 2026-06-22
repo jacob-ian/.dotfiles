@@ -34,7 +34,15 @@ func RunRemove(args []string) {
 		target = t
 	}
 
-	Remove(target, *quiet)
+	msg, err := Remove(target)
+	if *quiet {
+		return
+	}
+	if err != nil {
+		notify.Error(err.Error())
+		return
+	}
+	notify.Info(msg)
 }
 
 // IsManagedWorktree reports whether path is a jmux-removable worktree: it lives
@@ -82,13 +90,11 @@ func pickRemoveTarget() (string, bool) {
 
 // Remove takes a worktree out of git's view and kills its tmux session. It
 // refuses any path that isn't a removable worktree (see IsManagedWorktree),
-// so it never deletes a plain directory or the main/default checkout.
-func Remove(path string, quiet bool) {
+// so it never deletes a plain directory or the main/default checkout. Pure: it
+// returns the success message (for the handler to report) or an error.
+func Remove(path string) (string, error) {
 	if !IsManagedWorktree(path) {
-		if !quiet {
-			notify.Errorf("Refusing to remove '%s': not a removable worktree", filepath.Base(path))
-		}
-		return
+		return "", fmt.Errorf("refusing to remove '%s': not a removable worktree", filepath.Base(path))
 	}
 
 	bareRoot := repo.FindBareRoot(path)
@@ -101,19 +107,14 @@ func Remove(path string, quiet bool) {
 		// session being removed, so don't kill it first — git would lose track
 		// of the cwd. After git succeeds we still need to handle the session.
 		if err := gitctl.WorktreeRemove(bareRoot, path, true); err != nil {
-			if !quiet {
-				notify.Errorf("Failed to remove worktree '%s'", displayName(path, bareRoot))
-			}
-			return
+			return "", fmt.Errorf("failed to remove worktree '%s'", displayName(path, bareRoot))
 		}
 	}
 
 	// Worktree is now gone from git's view; tear down its session.
 	session.Kill(session.Name(path))
 
-	if !quiet {
-		notify.Infof("Removed worktree '%s'", displayName(path, bareRoot))
-	}
+	return fmt.Sprintf("Removed worktree '%s'", displayName(path, bareRoot)), nil
 }
 
 // fastRemove takes the worktree out of git's view in O(1) and detaches the

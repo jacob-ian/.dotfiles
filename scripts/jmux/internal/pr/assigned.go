@@ -52,25 +52,26 @@ func RunAssigned() {
 	if !ok {
 		return
 	}
-	reviewSelection(slug, num, rowHeadRef(sel))
+	if err := reviewSelection(slug, num, rowHeadRef(sel)); err != nil {
+		notify.Error(err.Error())
+	}
 }
 
 // reviewSelection maps a picked cross-repo PR to its local clone and reviews it.
-// headRef comes from the row's hidden field, falling back to a lookup when absent.
-func reviewSelection(slug string, num int, headRef string) {
+// headRef comes from the row's hidden field, falling back to a lookup when
+// absent. Pure: it returns the error for the handler to report.
+func reviewSelection(slug string, num int, headRef string) error {
 	bareRoot := findLocalRepo(slug)
 	if bareRoot == "" {
-		notify.Errorf("No local clone of %s", slug)
-		return
+		return fmt.Errorf("no local clone of %s", slug)
 	}
 	if headRef == "" {
 		var err error
 		if headRef, err = ghctl.HeadRef(slug, num); err != nil || headRef == "" {
-			notify.Errorf("resolve branch for %s#%d: %s", slug, num, gitctl.CleanErr(err))
-			return
+			return fmt.Errorf("resolve branch for %s#%d: %s", slug, num, gitctl.CleanErr(err))
 		}
 	}
-	Review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef})
+	return review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef})
 }
 
 // findLocalRepo returns the bare repo whose origin remote is nameWithOwner, or

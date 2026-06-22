@@ -15,6 +15,8 @@ import (
 	"jmux/internal/spinner"
 )
 
+// RunAdd handles `jmux worktree add`: resolve the bare repo from cwd, then run
+// the branch flow against it.
 func RunAdd(args []string) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -26,27 +28,29 @@ func RunAdd(args []string) {
 		notify.Error("Not in a bare repo worktree")
 		return
 	}
-	AddWorktree(bareRoot)
+	if err := AddWorktree(bareRoot); err != nil {
+		notify.Error(err.Error())
+	}
 }
 
 // AddWorktree runs the branch picker for bareRoot, creates the worktree, copies
 // env files from the default branch, and opens a session with claude + install
-// windows. bareRoot must be a bare repo root.
-func AddWorktree(bareRoot string) {
+// windows. bareRoot must be a bare repo root. Pure: it returns the error for the
+// handler to report (nil when the picker is cancelled).
+func AddWorktree(bareRoot string) error {
 	branches, err := gitctl.RemoteBranches(bareRoot)
 	if err != nil {
-		notify.Error("Failed to list branches")
-		return
+		return fmt.Errorf("list branches: %s", gitctl.CleanErr(err))
 	}
 
 	branchName, err := fzfutil.PickOrQuery(branches, fzfutil.Options{Prompt: "branch> "})
 	if err != nil || branchName == "" {
-		return
+		return nil
 	}
 
 	worktreePath := filepath.Join(bareRoot, branchName)
 	createBranch := !gitctl.RefExists(bareRoot, branchName)
-	err = spinner.Run(fmt.Sprintf("creating %s…", branchName), func(phase chan<- string) error {
+	if err := spinner.Run(fmt.Sprintf("creating %s…", branchName), func(phase chan<- string) error {
 		if err := gitctl.WorktreeAdd(bareRoot, worktreePath, branchName, createBranch); err != nil {
 			flag := ""
 			if createBranch {
@@ -57,18 +61,14 @@ func AddWorktree(bareRoot string) {
 		phase <- "copying env files…"
 		CopyEnvFiles(bareRoot, worktreePath)
 		return nil
-	})
-	if err != nil {
-		notify.Error(err.Error())
-		return
+	}); err != nil {
+		return err
 	}
 
-	if err := session.Open(worktreePath, session.OpenOptions{
+	return session.Open(worktreePath, session.OpenOptions{
 		WithClaude: true,
 		InstallCmd: DetectInstallCmd(worktreePath),
-	}); err != nil {
-		notify.Error(err.Error())
-	}
+	})
 }
 
 // CopyEnvFiles copies any .env* file from the default-branch worktree into newPath.
