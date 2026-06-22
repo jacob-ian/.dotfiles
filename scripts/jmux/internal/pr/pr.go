@@ -111,8 +111,8 @@ const prEditorCmd = `nvim -c "autocmd VimEnter * ++once lua require('jmux').pr.d
 // diff open), a paired claude window, and the install window.
 func Review(bareRoot string, p ghctl.PR) {
 	var path string
-	err := spinner.Run(fmt.Sprintf("opening PR #%d…", p.Number), func() (err error) {
-		path, err = checkoutWorktree(bareRoot, p)
+	err := spinner.Run(fmt.Sprintf("opening PR #%d…", p.Number), func(phase chan<- string) (err error) {
+		path, err = checkoutWorktree(bareRoot, p, phase)
 		return
 	})
 	if err != nil {
@@ -130,8 +130,9 @@ func Review(bareRoot string, p ghctl.PR) {
 
 // checkoutWorktree returns the PR's head-branch worktree, fetching and creating
 // it (tracking origin/<branch>) if absent or reusing an existing one. Env files
-// are copied across as for any feature worktree.
-func checkoutWorktree(bareRoot string, p ghctl.PR) (string, error) {
+// are copied across as for any feature worktree. Progress phases are reported on
+// phase for the spinner; the reuse paths return before sending any.
+func checkoutWorktree(bareRoot string, p ghctl.PR, phase chan<- string) (string, error) {
 	branch := p.HeadRefName
 	path := filepath.Join(bareRoot, branch)
 	if repo.IsDir(path) {
@@ -140,12 +141,15 @@ func checkoutWorktree(bareRoot string, p ghctl.PR) (string, error) {
 	if existing := gitctl.WorktreeForBranch(bareRoot, branch); existing != "" && repo.IsDir(existing) {
 		return existing, nil
 	}
+	phase <- "fetching " + branch + "…"
 	if err := gitctl.FetchBranch(bareRoot, branch); err != nil {
 		return "", err
 	}
+	phase <- "creating worktree…"
 	if err := gitctl.WorktreeAdd(bareRoot, path, branch, false); err != nil {
 		return "", err
 	}
+	phase <- "copying env files…"
 	worktree.CopyEnvFiles(bareRoot, path)
 	return path, nil
 }

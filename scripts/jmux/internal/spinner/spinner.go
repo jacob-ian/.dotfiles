@@ -10,24 +10,34 @@ import (
 
 var frames = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 
-// Run animates msg on stderr while fn runs, clears the line, and returns fn's
-// error. Without a tty it just runs fn; work shorter than one frame shows nothing.
-func Run(msg string, fn func() error) error {
-	if !isTerminal(os.Stderr) {
-		return fn()
-	}
+// Run animates a spinner on stderr while fn runs, starting with initial and
+// switching to whatever fn sends on the phase channel, then clears the line and
+// returns fn's error. Without a tty it just drains phase and waits for fn; work
+// shorter than one frame shows nothing.
+func Run(initial string, fn func(phase chan<- string) error) error {
+	phase := make(chan string, 1) // buffered so a phase send never blocks fn
 	done := make(chan error, 1)
-	go func() { done <- fn() }()
+	go func() { done <- fn(phase) }()
 
-	tick := time.NewTicker(80 * time.Millisecond)
-	defer tick.Stop()
+	// tick stays nil off a tty, so the render case never fires but the loop
+	// still drains phase and waits for done — no special non-tty path needed.
+	var tick <-chan time.Time
+	if isTerminal(os.Stderr) {
+		t := time.NewTicker(80 * time.Millisecond)
+		defer t.Stop()
+		tick = t.C
+	}
+	msg := initial
 	for i := 0; ; i++ {
 		select {
 		case err := <-done:
-			fmt.Fprint(os.Stderr, "\r\x1b[K") // erase the spinner line
+			if tick != nil {
+				fmt.Fprint(os.Stderr, "\r\x1b[K") // erase the spinner line
+			}
 			return err
-		case <-tick.C:
-			fmt.Fprintf(os.Stderr, "\r%c %s", frames[i%len(frames)], msg)
+		case msg = <-phase:
+		case <-tick:
+			fmt.Fprintf(os.Stderr, "\r\x1b[K%c %s", frames[i%len(frames)], msg)
 		}
 	}
 }

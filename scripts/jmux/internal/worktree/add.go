@@ -46,7 +46,7 @@ func AddWorktree(bareRoot string) {
 
 	worktreePath := filepath.Join(bareRoot, branchName)
 	createBranch := !gitctl.RefExists(bareRoot, branchName)
-	err = spinner.Run(fmt.Sprintf("creating %s…", branchName), func() error {
+	err = spinner.Run(fmt.Sprintf("creating %s…", branchName), func(phase chan<- string) error {
 		if err := gitctl.WorktreeAdd(bareRoot, worktreePath, branchName, createBranch); err != nil {
 			flag := ""
 			if createBranch {
@@ -54,6 +54,7 @@ func AddWorktree(bareRoot string) {
 			}
 			return fmt.Errorf("git worktree add%s: %s", flag, gitctl.CleanErr(err))
 		}
+		phase <- "copying env files…"
 		CopyEnvFiles(bareRoot, worktreePath)
 		return nil
 	})
