@@ -17,6 +17,8 @@ type Options struct {
 	// the full row is still returned on selection.
 	Delimiter string
 	WithNth   string
+	// ANSI enables parsing of ANSI colour codes in the displayed rows.
+	ANSI bool
 }
 
 // Pick runs fzf on items and returns the selected line. Returns "" with a
@@ -75,6 +77,9 @@ func buildArgs(opts Options, printQuery bool) []string {
 	}
 	if opts.WithNth != "" {
 		args = append(args, "--with-nth="+opts.WithNth)
+	}
+	if opts.ANSI {
+		args = append(args, "--ansi")
 	}
 	if printQuery {
 		args = append(args, "--print-query")

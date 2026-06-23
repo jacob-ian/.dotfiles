@@ -17,6 +17,7 @@ import (
 	"jmux/internal/repo"
 	"jmux/internal/session"
 	"jmux/internal/spinner"
+	"jmux/internal/tag"
 	"jmux/internal/worktree"
 )
 
@@ -123,6 +124,7 @@ func review(bareRoot string, p ghctl.PR) error {
 	if err != nil {
 		return fmt.Errorf("checkout PR #%d: %s", p.Number, gitctl.CleanErr(err))
 	}
+	tag.Set(path, "pr", tag.Badge{Text: fmt.Sprintf("PR #%d", p.Number), Color: tag.Cyan})
 	return session.Open(path, session.OpenOptions{
 		WithClaude: true,
 		InstallCmd: worktree.DetectInstallCmd(path),
