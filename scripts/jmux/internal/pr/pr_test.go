@@ -55,6 +55,34 @@ func TestParseRepoNumber(t *testing.T) {
 	}
 }
 
+func TestAllowedOrgs(t *testing.T) {
+	cases := []struct {
+		env  string
+		want []string
+	}{
+		{"", nil},
+		{"   ", nil},
+		{"eucalyptusvc", []string{"eucalyptusvc"}},
+		{"eucalyptusvc,getnetfluence", []string{"eucalyptusvc", "getnetfluence"}},
+		{" eucalyptusvc , getnetfluence ", []string{"eucalyptusvc", "getnetfluence"}},
+		{"eucalyptusvc,,", []string{"eucalyptusvc"}},
+	}
+	for _, c := range cases {
+		t.Setenv(orgEnv, c.env)
+		got := allowedOrgs()
+		if len(got) != len(c.want) {
+			t.Errorf("allowedOrgs() with %q = %v, want %v", c.env, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("allowedOrgs() with %q = %v, want %v", c.env, got, c.want)
+				break
+			}
+		}
+	}
+}
+
 func TestShellQuote(t *testing.T) {
 	cases := map[string]string{
 		"/usr/bin/jmux":        `'/usr/bin/jmux'`,

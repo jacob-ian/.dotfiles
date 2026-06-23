@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -181,8 +182,8 @@ func graphqlClient() (*api.GraphQLClient, error) {
 
 // SearchMyPRs returns open PRs across all repos that request your review, are
 // assigned to you, or you authored, deduped by repo+number in that priority
-// order.
-func SearchMyPRs() ([]SearchResult, error) {
+// order. A non-empty orgs scopes the search to those owners.
+func SearchMyPRs(orgs []string) ([]SearchResult, error) {
 	cl, err := graphqlClient()
 	if err != nil {
 		return nil, fmt.Errorf("github client: %w", err)
@@ -190,10 +191,11 @@ func SearchMyPRs() ([]SearchResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
 	defer cancel()
 
+	scope := orgQualifier(orgs)
 	variables := map[string]any{
-		"reviewRequested": "is:pr is:open review-requested:@me",
-		"assigned":        "is:pr is:open assignee:@me",
-		"authored":        "is:pr is:open author:@me",
+		"reviewRequested": "is:pr is:open review-requested:@me" + scope,
+		"assigned":        "is:pr is:open assignee:@me" + scope,
+		"authored":        "is:pr is:open author:@me" + scope,
 	}
 	var resp searchMyPrsQueryResponse
 	if err := cl.DoWithContext(ctx, searchMyPRsQuery, variables, &resp); err != nil {
@@ -221,6 +223,17 @@ func SearchMyPRs() ([]SearchResult, error) {
 		}
 	}
 	return out, nil
+}
+
+// orgQualifier builds the ` org:a org:b` search suffix. GitHub ORs repeated
+// `org:` qualifiers, so any listed org matches; "" for no orgs.
+func orgQualifier(orgs []string) string {
+	var b strings.Builder
+	for _, o := range orgs {
+		b.WriteString(" org:")
+		b.WriteString(o)
+	}
+	return b.String()
 }
 
 // ViewRepo renders `gh pr view --comments` for the preview

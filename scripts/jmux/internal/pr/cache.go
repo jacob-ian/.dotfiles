@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"jmux/internal/ghctl"
@@ -15,6 +16,24 @@ import (
 // cacheTTL bounds how long `jmux pr` serves the cached list before refetching on
 // open. ctrl-r in the picker forces a refresh regardless of age.
 const cacheTTL = 5 * time.Minute
+
+// orgEnv is a comma-separated org whitelist for `jmux pr`; unset means all orgs.
+const orgEnv = "JMUX_PR_ORGS"
+
+// allowedOrgs parses orgEnv into owner names; nil means no restriction.
+func allowedOrgs() []string {
+	raw := strings.TrimSpace(os.Getenv(orgEnv))
+	if raw == "" {
+		return nil
+	}
+	var orgs []string
+	for o := range strings.SplitSeq(raw, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			orgs = append(orgs, o)
+		}
+	}
+	return orgs
+}
 
 type prCache struct {
 	FetchedAt time.Time            `json:"fetched_at"`
@@ -88,7 +107,7 @@ func loadResults(refresh bool) ([]ghctl.SearchResult, error) {
 			return results, nil
 		}
 	}
-	results, err := ghctl.SearchMyPRs()
+	results, err := ghctl.SearchMyPRs(allowedOrgs())
 	if err != nil {
 		return nil, err
 	}
