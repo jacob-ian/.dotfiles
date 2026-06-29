@@ -96,22 +96,27 @@ func render(i int, msg string) {
 	// vertically center the logo + a blank gap + the action line.
 	top := pad(height, len(logo)+2)
 
+	// Overwrite the frame in place rather than clearing the whole screen each
+	// tick: a full \x1b[2J blanks everything for an instant, which reads as
+	// flicker. Home the cursor, rewrite every row erasing to its end (\x1b[K),
+	// then clear anything below (\x1b[J) so a previous taller frame leaves nothing.
 	var b strings.Builder
-	b.WriteString("\x1b[2J\x1b[H") // clear, cursor home
-	b.WriteString(strings.Repeat("\n", top))
-	for _, l := range logo {
-		b.WriteString(strings.Repeat(" ", left))
-		b.WriteString(fg)
-		b.WriteString(l)
-		b.WriteString(reset)
-		b.WriteByte('\n')
+	b.WriteString("\x1b[H")
+	row := func(s string) {
+		b.WriteString(s)
+		b.WriteString("\x1b[K\n")
 	}
-	b.WriteByte('\n')
+	for range top {
+		row("")
+	}
+	for _, l := range logo {
+		row(strings.Repeat(" ", left) + fg + l + reset)
+	}
+	row("") // gap between logo and action
 	action := fmt.Sprintf("%c %s", frames[i%len(frames)], msg)
 	b.WriteString(strings.Repeat(" ", pad(width, utf8.RuneCountInString(action))))
-	b.WriteString(dim)
-	b.WriteString(action)
-	b.WriteString(reset)
+	b.WriteString(dim + action + reset)
+	b.WriteString("\x1b[J")
 	fmt.Fprint(os.Stderr, b.String())
 }
 
