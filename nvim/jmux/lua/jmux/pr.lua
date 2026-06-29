@@ -526,7 +526,7 @@ local function open_thread_float(t)
   for i, c in ipairs(t.comments) do
     lines[#lines + 1] = (i == 1 and "" or "↳ ") .. c.login .. " · " .. reltime(c.created_at or "")
     headers[#headers + 1] = #lines - 1
-    for _, bl in ipairs(vim.split(vim.trim(c.body), "\n")) do
+    for _, bl in ipairs(vim.split(vim.trim((c.body or ""):gsub("\r", "")), "\n")) do
       lines[#lines + 1] = bl
     end
     if i < #t.comments then
@@ -1406,8 +1406,10 @@ local function build_model(data)
   local function who(n)
     return vim.tbl_get(n, "author", "login") or "?"
   end
+  -- GitHub returns bodies with CRLF endings; strip the \r so it doesn't render
+  -- as a trailing ^M on every line.
   local function split(text)
-    return vim.split(vim.trim(text or ""), "\n")
+    return vim.split(vim.trim((text or ""):gsub("\r", "")), "\n")
   end
 
   local header = {
