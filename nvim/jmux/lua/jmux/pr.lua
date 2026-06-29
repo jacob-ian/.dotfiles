@@ -1304,6 +1304,8 @@ query($owner:String!,$repo:String!,$number:Int!){
     pullRequest(number:$number){
       title number state createdAt author{login} body
       viewerDidAuthor assignees(first:20){ nodes{ login } }
+      reviewRequests(first:50){ nodes{ requestedReviewer{
+        __typename ... on User{ login } ... on Team{ name } } } }
       isDraft mergeable reviewDecision mergeStateStatus
       latestOpinionatedReviews(first:50){ nodes{ state } }
       comments(first:100){ nodes{ author{login} body createdAt } }
@@ -1418,6 +1420,27 @@ local function build_model(data)
     header[#header + 1] = ("%s %s"):format(micon, mtext)
     header_marks[#header_marks + 1] = { row = #header - 1, col = 0, col_end = #micon, hl = mhl }
   end
+
+  -- requested reviewers the PR is still waiting on (GitHub drops a request from
+  -- this list once that reviewer submits). Users render as @login, teams as their
+  -- name. A muted hourglass keeps it distinct from the merge-summary line above.
+  local requested = {}
+  for _, rr in ipairs(vim.tbl_get(pr, "reviewRequests", "nodes") or {}) do
+    local r = rr.requestedReviewer
+    if type(r) == "table" then
+      if r.login then
+        requested[#requested + 1] = "@" .. r.login
+      elseif r.name then
+        requested[#requested + 1] = r.name
+      end
+    end
+  end
+  if #requested > 0 then
+    local icon = "◷"
+    header[#header + 1] = ("%s awaiting %s"):format(icon, table.concat(requested, ", "))
+    header_marks[#header_marks + 1] = { row = #header - 1, col = 0, col_end = #icon, hl = "DiagnosticWarn" }
+  end
+
   header[#header + 1] = ""
 
   -- the PR description is its own collapsible block, shown above the checks.
