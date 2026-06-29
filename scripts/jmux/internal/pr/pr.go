@@ -159,7 +159,7 @@ func checkoutWorktree(bareRoot string, p ghctl.PR, phase chan<- string) (string,
 		return "", err
 	}
 	phase <- "creating worktree…"
-	if err := gitctl.WorktreeAdd(bareRoot, path, branch, false); err != nil {
+	if err := gitctl.WorktreeAdd(bareRoot, path, branch, "", false); err != nil {
 		return "", err
 	}
 	phase <- "copying env files…"

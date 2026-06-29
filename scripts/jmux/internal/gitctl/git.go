@@ -90,15 +90,22 @@ func DefaultBranch(bareRoot string) string {
 	return strings.TrimPrefix(strings.TrimSpace(out), "origin/")
 }
 
-// WorktreeAdd creates a worktree at path. If createBranch is true, the branch
-// is created (-b); otherwise it must already exist locally or be reachable as
+// WorktreeAdd creates a worktree at path. If createBranch is true, the branch is
+// created (-b) from base — or the bare repo's HEAD when base is "", which is
+// usually a stale local default, so callers pass origin/<default> to start from
+// the latest. Otherwise branch must already exist locally or be reachable as
 // origin/<branch> for dwim. On failure the returned error carries git's stderr.
-func WorktreeAdd(bareRoot, path, branch string, createBranch bool) error {
+func WorktreeAdd(bareRoot, path, branch, base string, createBranch bool) error {
 	args := []string{"worktree", "add", path}
 	if createBranch {
 		args = append(args, "-b", branch)
 	} else {
 		args = append(args, branch)
+	}
+	if createBranch && base != "" {
+		// --no-track so branching off origin/<default> doesn't set the new branch's
+		// upstream to the default; it gets one when first pushed.
+		args = append(args, "--no-track", base)
 	}
 	return gitRun(bareRoot, args...)
 }
