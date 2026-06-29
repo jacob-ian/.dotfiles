@@ -1568,6 +1568,80 @@ local function build_model(data)
   return { header = header, header_marks = header_marks, pr = pr_block, checks = checks_block, blocks = blocks }
 end
 
+-- REVIEWERS_QUERY lists the repo's assignable users — the set that can be
+-- requested for review — for the `R` picker. 100 is plenty for our repos; a
+-- larger org would need pagination.
+local REVIEWERS_QUERY = [[
+query($owner:String!,$repo:String!){
+  repository(owner:$owner,name:$repo){
+    assignableUsers(first:100){ nodes{ login name } }
+  }
+}]]
+
+-- request_review fetches assignable users (minus excluded logins — the author and
+-- anyone already requested), lets you pick one, and adds them via `gh pr edit`.
+-- on_done runs after a successful request so the caller can refresh the view.
+-- Single-pick: press R again to add another.
+local function request_review(pr, excluded, on_done)
+  local owner, repo = pr.slug:match "([^/]+)/(.+)"
+  vim.notify "fetching reviewers…"
+  vim.system({
+    "gh", "api", "graphql",
+    "-f", "query=" .. REVIEWERS_QUERY,
+    "-f", "owner=" .. (owner or ""),
+    "-f", "repo=" .. (repo or ""),
+  }, { text = true }, function(res)
+    vim.schedule(function()
+      if res.code ~= 0 then
+        vim.notify("list reviewers: " .. vim.trim(res.stderr or ""), vim.log.levels.ERROR)
+        return
+      end
+      local ok, data = pcall(vim.json.decode, res.stdout)
+      local nodes = (ok and vim.tbl_get(data, "data", "repository", "assignableUsers", "nodes")) or {}
+      local items = {}
+      for _, u in ipairs(nodes) do
+        if u.login and not excluded[u.login] then
+          items[#items + 1] = u
+        end
+      end
+      table.sort(items, function(a, b)
+        return a.login < b.login
+      end)
+      if #items == 0 then
+        vim.notify("no assignable reviewers left to request", vim.log.levels.WARN)
+        return
+      end
+      vim.ui.select(items, {
+        prompt = "request review from:",
+        format_item = function(u)
+          local name = nilable(u.name)
+          return name and name ~= "" and ("%s (%s)"):format(u.login, name) or u.login
+        end,
+      }, function(choice)
+        if not choice then
+          return
+        end
+        vim.system(
+          { "gh", "pr", "edit", tostring(pr.number), "--repo", pr.slug, "--add-reviewer", choice.login },
+          { text = true },
+          function(r2)
+            vim.schedule(function()
+              if r2.code ~= 0 then
+                vim.notify("request review: " .. vim.trim(r2.stderr or ""), vim.log.levels.ERROR)
+                return
+              end
+              vim.notify("requested review from @" .. choice.login)
+              if on_done then
+                on_done()
+              end
+            end)
+          end
+        )
+      end)
+    end)
+  end)
+end
+
 -- view renders the full PR conversation — body, comments, reviews, inline review
 -- threads, and checks — into a markdown tab. Fetched async (a "Loading…" stub
 -- shows first) so opening is instant; q closes it.
@@ -1832,10 +1906,33 @@ function M.view()
             fetch_and_render(title_spinner "refreshing…")
           end, { buffer = buf, nowait = true, desc = "refresh" })
 
+          -- R requests a reviewer: pick from the repo's assignable users, skipping
+          -- the author and anyone already requested, then refresh so the new
+          -- "awaiting" line shows. gh rejects the request if you lack permission.
+          local prnode = vim.tbl_get(data, "data", "repository", "pullRequest")
+          local viewer = nilable(vim.tbl_get(data, "data", "viewer", "login"))
+          local excluded = { [viewer or ""] = true }
+          local author = nilable(vim.tbl_get(prnode or {}, "author", "login"))
+          if author then
+            excluded[author] = true
+          end
+          for _, rr in ipairs(vim.tbl_get(prnode or {}, "reviewRequests", "nodes") or {}) do
+            local rv = rr.requestedReviewer
+            if type(rv) == "table" and rv.login then
+              excluded[rv.login] = true
+            end
+          end
+          vim.keymap.set("n", "R", function()
+            request_review(pr, excluded, function()
+              fetch_and_render(title_spinner "refreshing…")
+            end)
+          end, { buffer = buf, nowait = true, desc = "request review" })
+
           -- m merges — only on open PRs you authored or are assigned to, using the
           -- repo's default merge method. Hints are rebuilt here every render, so the
           -- merge spinner is cleanly replaced once it resolves.
-          local hints = { key_hint("<C-r>", "refresh"), key_hint("⇥", "expand"), key_hint("q", "close") }
+          local hints =
+            { key_hint("<C-r>", "refresh"), key_hint("R", "request"), key_hint("⇥", "expand"), key_hint("q", "close") }
           -- a cached paint flags its age so it's clear the data may be stale and
           -- <C-r> will refetch; a live fetch (age nil) shows no such marker.
           if age then
@@ -1845,8 +1942,6 @@ function M.view()
           -- still eligible, so a stale m/M can't merge an already-merged PR.
           pcall(vim.keymap.del, "n", "m", { buffer = buf })
           pcall(vim.keymap.del, "n", "M", { buffer = buf })
-          local viewer = nilable(vim.tbl_get(data, "data", "viewer", "login"))
-          local prnode = vim.tbl_get(data, "data", "repository", "pullRequest")
           local method = nilable(vim.tbl_get(data, "data", "repository", "viewerDefaultMergeMethod"))
           local mine = prnode and prnode.viewerDidAuthor
           if prnode and not mine then
