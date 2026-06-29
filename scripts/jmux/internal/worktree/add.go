@@ -51,6 +51,12 @@ func AddWorktree(bareRoot string) error {
 	worktreePath := filepath.Join(bareRoot, branchName)
 	createBranch := !gitctl.RefExists(bareRoot, branchName)
 	if err := spinner.Run(fmt.Sprintf("creating %s…", branchName), func(phase chan<- string) error {
+		// Refresh the base branch so a later PR diff resolves against an up-to-date
+		// base. Best effort: a failed fetch (e.g. offline) shouldn't stop the add.
+		if def := gitctl.DefaultBranch(bareRoot); def != "" {
+			phase <- "fetching " + def + "…"
+			_ = gitctl.FetchBranch(bareRoot, def)
+		}
 		if err := gitctl.WorktreeAdd(bareRoot, worktreePath, branchName, createBranch); err != nil {
 			flag := ""
 			if createBranch {
