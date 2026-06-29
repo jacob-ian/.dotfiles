@@ -96,10 +96,9 @@ func render(i int, msg string) {
 	// vertically center the logo + a blank gap + the action line.
 	top := pad(height, len(logo)+2)
 
-	// Overwrite the frame in place rather than clearing the whole screen each
-	// tick: a full \x1b[2J blanks everything for an instant, which reads as
-	// flicker. Home the cursor, rewrite every row erasing to its end (\x1b[K),
-	// then clear anything below (\x1b[J) so a previous taller frame leaves nothing.
+	// Overwrite in place rather than clearing the screen each tick (a full \x1b[2J
+	// blanks for an instant, which flickers): home, rewrite each row erasing to its
+	// end (\x1b[K), then clear below (\x1b[J) so a taller previous frame leaves none.
 	var b strings.Builder
 	b.WriteString("\x1b[H")
 	row := func(s string) {
