@@ -1305,7 +1305,7 @@ query($owner:String!,$repo:String!,$number:Int!){
       title number state createdAt author{login} body
       viewerDidAuthor assignees(first:20){ nodes{ login } }
       reviewRequests(first:50){ nodes{ requestedReviewer{
-        __typename ... on User{ login } ... on Team{ name } } } }
+        __typename ... on User{ login } ... on Team{ name slug } } } }
       isDraft mergeable reviewDecision mergeStateStatus
       latestOpinionatedReviews(first:50){ nodes{ state } }
       comments(first:100){ nodes{ author{login} body createdAt } }
@@ -1578,66 +1578,108 @@ query($owner:String!,$repo:String!){
   }
 }]]
 
--- request_review fetches assignable users (minus excluded logins — the author and
--- anyone already requested), lets you pick one, and adds them via `gh pr edit`.
--- on_done runs after a successful request so the caller can refresh the view.
--- Single-pick: press R again to add another.
-local function request_review(pr, excluded, on_done)
+-- TEAMS_QUERY lists the owning org's teams (requestable as reviewers). It's
+-- best-effort: a user-owned repo has no organization (and read:org may be
+-- missing), so the call can fail — the picker then just offers users.
+local TEAMS_QUERY = [[
+query($owner:String!){
+  organization(login:$owner){ teams(first:100){ nodes{ slug name } } }
+}]]
+
+-- gh_graphql_nodes runs a one-variable-or-two GraphQL query and returns the node
+-- list at path via cb (the empty list on any failure, so callers can be lax).
+local function gh_graphql_nodes(args, path, cb)
+  vim.system(args, { text = true }, function(res)
+    vim.schedule(function()
+      if res.code ~= 0 then
+        cb {}
+        return
+      end
+      local ok, data = pcall(vim.json.decode, res.stdout)
+      cb((ok and vim.tbl_get(data, unpack(path))) or {})
+    end)
+  end)
+end
+
+-- request_review lets you pick a reviewer — an assignable user or an org team —
+-- and adds them via `gh pr edit`. The author and anyone/any team already
+-- requested are filtered out (excluded by login, excludedTeams by slug). on_done
+-- runs after success so the caller can refresh. Single-pick: press R to add more.
+local function request_review(pr, excluded, excludedTeams, on_done)
   local owner, repo = pr.slug:match "([^/]+)/(.+)"
   vim.notify "fetching reviewers…"
-  vim.system({
+
+  local function pick(items)
+    if #items == 0 then
+      vim.notify("no reviewers left to request", vim.log.levels.WARN)
+      return
+    end
+    vim.ui.select(items, {
+      prompt = "request review from:",
+      format_item = function(it)
+        return it.kind == "team" and (it.label .. "  [team]") or it.label
+      end,
+    }, function(choice)
+      if not choice then
+        return
+      end
+      vim.system(
+        { "gh", "pr", "edit", tostring(pr.number), "--repo", pr.slug, "--add-reviewer", choice.value },
+        { text = true },
+        function(r2)
+          vim.schedule(function()
+            if r2.code ~= 0 then
+              vim.notify("request review: " .. vim.trim(r2.stderr or ""), vim.log.levels.ERROR)
+              return
+            end
+            vim.notify("requested review from " .. choice.label)
+            if on_done then
+              on_done()
+            end
+          end)
+        end
+      )
+    end)
+  end
+
+  -- users first (required), then teams (best effort), then the combined picker.
+  gh_graphql_nodes({
     "gh", "api", "graphql",
     "-f", "query=" .. REVIEWERS_QUERY,
     "-f", "owner=" .. (owner or ""),
     "-f", "repo=" .. (repo or ""),
-  }, { text = true }, function(res)
-    vim.schedule(function()
-      if res.code ~= 0 then
-        vim.notify("list reviewers: " .. vim.trim(res.stderr or ""), vim.log.levels.ERROR)
-        return
+  }, { "data", "repository", "assignableUsers", "nodes" }, function(users)
+    local items = {}
+    for _, u in ipairs(users) do
+      if u.login and not excluded[u.login] then
+        local name = nilable(u.name)
+        items[#items + 1] = {
+          kind = "user",
+          value = u.login,
+          label = name and name ~= "" and ("%s (%s)"):format(u.login, name) or ("@" .. u.login),
+          sort = u.login:lower(),
+        }
       end
-      local ok, data = pcall(vim.json.decode, res.stdout)
-      local nodes = (ok and vim.tbl_get(data, "data", "repository", "assignableUsers", "nodes")) or {}
-      local items = {}
-      for _, u in ipairs(nodes) do
-        if u.login and not excluded[u.login] then
-          items[#items + 1] = u
+    end
+    gh_graphql_nodes({
+      "gh", "api", "graphql",
+      "-f", "query=" .. TEAMS_QUERY,
+      "-f", "owner=" .. (owner or ""),
+    }, { "data", "organization", "teams", "nodes" }, function(teams)
+      for _, t in ipairs(teams) do
+        if t.slug and not excludedTeams[t.slug] then
+          items[#items + 1] = {
+            kind = "team",
+            value = (owner or "") .. "/" .. t.slug,
+            label = nilable(t.name) or t.slug,
+            sort = "~" .. t.slug:lower(), -- "~" sorts teams after users
+          }
         end
       end
       table.sort(items, function(a, b)
-        return a.login < b.login
+        return a.sort < b.sort
       end)
-      if #items == 0 then
-        vim.notify("no assignable reviewers left to request", vim.log.levels.WARN)
-        return
-      end
-      vim.ui.select(items, {
-        prompt = "request review from:",
-        format_item = function(u)
-          local name = nilable(u.name)
-          return name and name ~= "" and ("%s (%s)"):format(u.login, name) or u.login
-        end,
-      }, function(choice)
-        if not choice then
-          return
-        end
-        vim.system(
-          { "gh", "pr", "edit", tostring(pr.number), "--repo", pr.slug, "--add-reviewer", choice.login },
-          { text = true },
-          function(r2)
-            vim.schedule(function()
-              if r2.code ~= 0 then
-                vim.notify("request review: " .. vim.trim(r2.stderr or ""), vim.log.levels.ERROR)
-                return
-              end
-              vim.notify("requested review from @" .. choice.login)
-              if on_done then
-                on_done()
-              end
-            end)
-          end
-        )
-      end)
+      pick(items)
     end)
   end)
 end
@@ -1912,18 +1954,23 @@ function M.view()
           local prnode = vim.tbl_get(data, "data", "repository", "pullRequest")
           local viewer = nilable(vim.tbl_get(data, "data", "viewer", "login"))
           local excluded = { [viewer or ""] = true }
+          local excludedTeams = {}
           local author = nilable(vim.tbl_get(prnode or {}, "author", "login"))
           if author then
             excluded[author] = true
           end
           for _, rr in ipairs(vim.tbl_get(prnode or {}, "reviewRequests", "nodes") or {}) do
             local rv = rr.requestedReviewer
-            if type(rv) == "table" and rv.login then
-              excluded[rv.login] = true
+            if type(rv) == "table" then
+              if rv.login then
+                excluded[rv.login] = true
+              elseif rv.slug then
+                excludedTeams[rv.slug] = true
+              end
             end
           end
           vim.keymap.set("n", "R", function()
-            request_review(pr, excluded, function()
+            request_review(pr, excluded, excludedTeams, function()
               fetch_and_render(title_spinner "refreshing…")
             end)
           end, { buffer = buf, nowait = true, desc = "request review" })
