@@ -138,6 +138,15 @@ func review(bareRoot string, p ghctl.PR) error {
 // phase for the spinner; the reuse paths return before sending any.
 func checkoutWorktree(bareRoot string, p ghctl.PR, phase chan<- string) (string, error) {
 	branch := p.HeadRefName
+
+	// Refresh the base branch (even on the reuse paths below) so the diff's
+	// base...HEAD resolves against an up-to-date base. Best effort: a failed fetch
+	// (e.g. offline) shouldn't stop the PR opening.
+	if def := gitctl.DefaultBranch(bareRoot); def != "" {
+		phase <- "fetching " + def + "…"
+		_ = gitctl.FetchBranch(bareRoot, def)
+	}
+
 	path := filepath.Join(bareRoot, branch)
 	if repo.IsDir(path) {
 		return path, nil
