@@ -23,7 +23,7 @@ func TestRenderCenters(t *testing.T) {
 	os.Stderr = old
 
 	raw, _ := io.ReadAll(r)
-	out := strings.NewReplacer("\x1b[2J\x1b[H", "", cyan, "", reset, "").Replace(string(raw))
+	out := strings.NewReplacer("\x1b[2J\x1b[H", "", fg, "", dim, "", reset, "").Replace(string(raw))
 
 	if !strings.Contains(out, "opening PR #42…") {
 		t.Errorf("action line missing from frame:\n%s", out)

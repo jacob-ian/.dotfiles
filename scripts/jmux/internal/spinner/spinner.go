@@ -31,8 +31,12 @@ var logo = []string{
 const (
 	altEnter = "\x1b[?1049h\x1b[?25l" // alternate screen + hide cursor
 	altLeave = "\x1b[?25h\x1b[?1049l" // show cursor + restore screen
-	cyan     = "\x1b[36m"
-	reset    = "\x1b[0m"
+	// fg is the terminal's default foreground — i.e. the theme's primary color —
+	// so the logo tracks whatever theme is active rather than a fixed palette
+	// slot. dim mutes the action line beneath it for contrast.
+	fg    = "\x1b[39m"
+	dim   = "\x1b[2m"
+	reset = "\x1b[0m"
 )
 
 // Run animates the splash on stderr while fn runs, starting with initial and
@@ -97,7 +101,7 @@ func render(i int, msg string) {
 	b.WriteString(strings.Repeat("\n", top))
 	for _, l := range logo {
 		b.WriteString(strings.Repeat(" ", left))
-		b.WriteString(cyan)
+		b.WriteString(fg)
 		b.WriteString(l)
 		b.WriteString(reset)
 		b.WriteByte('\n')
@@ -105,7 +109,9 @@ func render(i int, msg string) {
 	b.WriteByte('\n')
 	action := fmt.Sprintf("%c %s", frames[i%len(frames)], msg)
 	b.WriteString(strings.Repeat(" ", pad(width, utf8.RuneCountInString(action))))
+	b.WriteString(dim)
 	b.WriteString(action)
+	b.WriteString(reset)
 	fmt.Fprint(os.Stderr, b.String())
 }
 
