@@ -2002,24 +2002,40 @@ function M.view()
             end)
           end, { buffer = buf, nowait = true, desc = "request review" })
 
-          -- E edits the PR description in the multiline editor, then refreshes so
-          -- the updated body shows.
-          vim.keymap.set("n", "E", function()
-            edit_description(pr, nilable(prnode and prnode.body) or "", function()
-              fetch_and_render(title_spinner "refreshing…")
-            end)
-          end, { buffer = buf, nowait = true, desc = "edit description" })
+          -- mine: the PR is yours to act on — you authored it or are assigned. Gates
+          -- editing the description (E) and merging (m/M) so they only show when
+          -- usable.
+          local mine = prnode and prnode.viewerDidAuthor
+          if prnode and not mine then
+            for _, a in ipairs(vim.tbl_get(prnode, "assignees", "nodes") or {}) do
+              if a.login == viewer then
+                mine = true
+                break
+              end
+            end
+          end
+
+          -- E edits the PR description in the multiline editor, then refreshes so the
+          -- updated body shows. Dropped then re-added only while mine, like m/M, so a
+          -- stale binding can't linger if the PR stops being yours.
+          pcall(vim.keymap.del, "n", "E", { buffer = buf })
+          if mine then
+            vim.keymap.set("n", "E", function()
+              edit_description(pr, nilable(prnode and prnode.body) or "", function()
+                fetch_and_render(title_spinner "refreshing…")
+              end)
+            end, { buffer = buf, nowait = true, desc = "edit description" })
+          end
 
           -- m merges — only on open PRs you authored or are assigned to, using the
           -- repo's default merge method. Hints are rebuilt here every render, so the
           -- merge spinner is cleanly replaced once it resolves.
-          local hints = {
-            key_hint("<C-r>", "refresh"),
-            key_hint("R", "request"),
-            key_hint("E", "edit"),
-            key_hint("⇥", "expand"),
-            key_hint("q", "close"),
-          }
+          local hints = { key_hint("<C-r>", "refresh"), key_hint("R", "request") }
+          if mine then
+            hints[#hints + 1] = key_hint("E", "edit")
+          end
+          hints[#hints + 1] = key_hint("⇥", "expand")
+          hints[#hints + 1] = key_hint("q", "close")
           -- a cached paint flags its age so it's clear the data may be stale and
           -- <C-r> will refetch; a live fetch (age nil) shows no such marker.
           if age then
@@ -2030,15 +2046,6 @@ function M.view()
           pcall(vim.keymap.del, "n", "m", { buffer = buf })
           pcall(vim.keymap.del, "n", "M", { buffer = buf })
           local method = nilable(vim.tbl_get(data, "data", "repository", "viewerDefaultMergeMethod"))
-          local mine = prnode and prnode.viewerDidAuthor
-          if prnode and not mine then
-            for _, a in ipairs(vim.tbl_get(prnode, "assignees", "nodes") or {}) do
-              if a.login == viewer then
-                mine = true
-                break
-              end
-            end
-          end
           -- allowlist the method to a literal flag instead of interpolating it into
           -- argv, so crafted API data can never inject an arbitrary `gh` flag.
           local how = method and tostring(method):lower()
