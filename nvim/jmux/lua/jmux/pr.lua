@@ -1691,6 +1691,9 @@ end
 -- permission. An empty buffer is a no-op (prompt_multiline won't save it), so the
 -- description can't be cleared from here — edit on the web for that.
 local function edit_description(pr, body, on_done)
+  -- GitHub returns the body with CRLF endings; strip the \r so the edit buffer
+  -- doesn't show a trailing ^M on every line.
+  body = (body or ""):gsub("\r", "")
   prompt_multiline(("edit #%d description"):format(pr.number), function(text)
     vim.system(
       { "gh", "pr", "edit", tostring(pr.number), "--repo", pr.slug, "--body-file", "-" },
