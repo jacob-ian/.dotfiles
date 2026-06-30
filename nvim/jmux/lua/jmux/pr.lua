@@ -707,13 +707,14 @@ end
 -- vim.ui.input — and snacks' own input — are single-line. An optional `initial`
 -- string prefills the buffer (e.g. a suggestion block to edit); on_open(buf), if
 -- given, runs once the buffer exists (used to attach live suggestion highlights).
-local function prompt_multiline(title, on_save, initial, on_open)
+-- footer overrides the default hint line (e.g. "save" vs "stage").
+local function prompt_multiline(title, on_save, initial, on_open, footer)
   require("snacks").win {
     width = 0.6,
     height = 0.35,
     border = "rounded",
     title = " " .. title .. " ",
-    footer = " :w stage · :q close ",
+    footer = footer or " :w stage · :q close ",
     -- acwrite (not nofile) so :w fires BufWriteCmd instead of erroring.
     bo = { filetype = "markdown", buftype = "acwrite", bufhidden = "wipe" },
     wo = { wrap = true },
@@ -1684,6 +1685,32 @@ local function request_review(pr, excluded, excludedTeams, on_done)
   end)
 end
 
+-- edit_description opens the PR body in the multiline editor (prefilled with the
+-- current text) and writes it back with `gh pr edit` on :w. on_done runs after a
+-- successful save so the caller can refresh. gh rejects the edit if you lack
+-- permission. An empty buffer is a no-op (prompt_multiline won't save it), so the
+-- description can't be cleared from here — edit on the web for that.
+local function edit_description(pr, body, on_done)
+  prompt_multiline(("edit #%d description"):format(pr.number), function(text)
+    vim.system(
+      { "gh", "pr", "edit", tostring(pr.number), "--repo", pr.slug, "--body-file", "-" },
+      { stdin = text, text = true },
+      function(res)
+        vim.schedule(function()
+          if res.code ~= 0 then
+            vim.notify("edit description: " .. vim.trim(res.stderr or ""), vim.log.levels.ERROR)
+            return
+          end
+          vim.notify(("updated #%d description"):format(pr.number))
+          if on_done then
+            on_done()
+          end
+        end)
+      end
+    )
+  end, body ~= "" and body or nil, nil, " :w save · :q close ")
+end
+
 -- view renders the full PR conversation — body, comments, reviews, inline review
 -- threads, and checks — into a markdown tab. Fetched async (a "Loading…" stub
 -- shows first) so opening is instant; q closes it.
@@ -1975,11 +2002,24 @@ function M.view()
             end)
           end, { buffer = buf, nowait = true, desc = "request review" })
 
+          -- E edits the PR description in the multiline editor, then refreshes so
+          -- the updated body shows.
+          vim.keymap.set("n", "E", function()
+            edit_description(pr, nilable(prnode and prnode.body) or "", function()
+              fetch_and_render(title_spinner "refreshing…")
+            end)
+          end, { buffer = buf, nowait = true, desc = "edit description" })
+
           -- m merges — only on open PRs you authored or are assigned to, using the
           -- repo's default merge method. Hints are rebuilt here every render, so the
           -- merge spinner is cleanly replaced once it resolves.
-          local hints =
-            { key_hint("<C-r>", "refresh"), key_hint("R", "request"), key_hint("⇥", "expand"), key_hint("q", "close") }
+          local hints = {
+            key_hint("<C-r>", "refresh"),
+            key_hint("R", "request"),
+            key_hint("E", "edit"),
+            key_hint("⇥", "expand"),
+            key_hint("q", "close"),
+          }
           -- a cached paint flags its age so it's clear the data may be stale and
           -- <C-r> will refetch; a live fetch (age nil) shows no such marker.
           if age then
