@@ -135,5 +135,8 @@ func DetectInstallCmd(dir string) string {
 	if _, err := os.Stat(filepath.Join(dir, "package-lock.json")); err == nil {
 		return "npm install"
 	}
+	if _, err := os.Stat(filepath.Join(dir, "pnpm-lock.yaml")); err == nil {
+		return "pnpm install"
+	}
 	return ""
 }
