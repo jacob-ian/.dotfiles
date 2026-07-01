@@ -4,7 +4,7 @@ return {
     lazy = false,
     priority = 1000,
     config = function()
-      require("kanso").load "zen"
+      require("kanso").load "ink"
     end,
   },
   -- {
