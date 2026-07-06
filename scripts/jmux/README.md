@@ -14,7 +14,7 @@ Run `jmux help` for the command surface, or see the keybindings in
 The test for adding a command: **does it create, manage, open, or feed a
 workspace?** If it doesn't touch that lifecycle, it goes somewhere else.
 `repo clone` (creates the layout), `pr` (feeds branches into it), and
-`claude notify` (serves the sessions it opens) all pass; a linter or deploy
+`claude hook` (serves the sessions it opens) all pass; a linter or deploy
 helper would not.
 
 ## Conventions

@@ -75,6 +75,22 @@ func Set(path, ns string, b Badge) {
 	cachefile.Write(storeFile, s)
 }
 
+// Unset removes the ns badge from path, dropping the path entry when it was
+// the last one.
+func Unset(path, ns string) {
+	s := store{}
+	cachefile.Read(storeFile, &s)
+	key := repo.Resolve(path)
+	if s[key] == nil {
+		return
+	}
+	delete(s[key], ns)
+	if len(s[key]) == 0 {
+		delete(s, key)
+	}
+	cachefile.Write(storeFile, s)
+}
+
 // All maps every resolved path to its badges, ordered by namespace for stable
 // display.
 func All() map[string][]Badge {

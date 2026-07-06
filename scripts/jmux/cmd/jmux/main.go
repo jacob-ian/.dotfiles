@@ -101,13 +101,13 @@ func runPR(args []string) error {
 	return pr.RunRepo(args[0])
 }
 
-// runClaude handles `jmux claude`: notify/focus are jmux's own subcommands;
+// runClaude handles `jmux claude`: hook/focus are jmux's own subcommands;
 // anything else passes through as arguments to the claude binary.
 func runClaude(args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
-		case "notify":
-			return claudectl.RunNotify()
+		case "hook":
+			return claudectl.RunHook()
 		case "focus":
 			return claudectl.RunFocus(args[1:])
 		}
@@ -170,7 +170,7 @@ func usage() {
   jmux pr <num>                 Review PR <num> in the current repo
   jmux repo clone <url>         Bare-clone into a scan root and open main
   jmux claude [args...]         Launch claude paired with this workspace's nvim
-  jmux claude notify            Notification hook: clickable macOS alert
+  jmux claude hook              Hook entry point: status badges + notifications
   jmux fzf <picker> items|preview
                                 Internal fzf plumbing`)
 }

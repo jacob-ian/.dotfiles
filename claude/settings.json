@@ -41,7 +41,41 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.config/scripts/jmux/bin/jmux claude notify"
+            "command": "jmux claude hook",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jmux claude hook",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jmux claude hook",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jmux claude hook",
+            "async": true
           }
         ]
       }
