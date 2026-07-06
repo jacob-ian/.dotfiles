@@ -1,14 +1,11 @@
-// Package workspace presents the mid-breadth overview of places you're actively
-// working: every open tmux session unioned with every feature worktree. It sits
-// between the all-dirs picker (everything on disk) and a bare worktree list, and
-// manages the full lifecycle — add a worktree workspace (ctrl-t) or remove a
-// workspace (ctrl-x), where removal deletes the worktree only when one backs it.
+// Package workspace is the overview of places you're actively working — every
+// open tmux session unioned with every feature worktree — with bindings to add
+// (ctrl-t) and remove (ctrl-x) them.
 package workspace
 
 import (
 	"flag"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -22,15 +19,14 @@ import (
 	"jmux/internal/worktree"
 )
 
-// Workspaces returns the overview rows: feature worktrees first, then the
-// directories of any open sessions that aren't already listed, deduped by
-// resolved path.
-func Workspaces() []string {
+// workspaces returns the overview rows: feature worktrees plus the directories
+// of any open sessions, deduped by resolved path.
+func workspaces() []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(p string) {
 		p = repo.TrimSlash(p)
-		key := resolve(p)
+		key := repo.Resolve(p)
 		if key == "" || seen[key] {
 			return
 		}
@@ -72,7 +68,7 @@ func displayRows(dirs []string) []string {
 	rows := make([]string, len(dirs))
 	for i, d := range dirs {
 		display := d
-		if badges := tagged[resolve(d)]; len(badges) > 0 {
+		if badges := tagged[repo.Resolve(d)]; len(badges) > 0 {
 			parts := make([]string, len(badges))
 			for j, b := range badges {
 				parts[j] = b.Render()
@@ -93,17 +89,6 @@ func rowPath(line string) string {
 	return line
 }
 
-func resolve(p string) string {
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		return p
-	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		return real
-	}
-	return abs
-}
-
 // RunPicker handles `jmux workspace`. With --print it lists rows to stdout (the
 // form the ctrl-x reload re-runs against); otherwise it opens the fzf overview.
 func RunPicker(args []string) {
@@ -111,7 +96,7 @@ func RunPicker(args []string) {
 	printOnly := fs.Bool("print", false, "Print workspace paths and exit")
 	fs.Parse(args)
 
-	dirs := Workspaces()
+	dirs := workspaces()
 	rows := displayRows(dirs)
 
 	if *printOnly {
@@ -124,22 +109,15 @@ func RunPicker(args []string) {
 		return
 	}
 
-	self, err := os.Executable()
-	if err != nil {
-		self = "jmux"
-	}
-
-	addBind := fmt.Sprintf("ctrl-t:become(%s workspace add)", self)
-	removeBind := fmt.Sprintf(
-		"ctrl-x:execute-silent(%s workspace remove --path {2} --quiet)+reload(%s workspace --print)",
-		self, self,
-	)
-	togglePreview := "ctrl-/:toggle-preview"
-
+	self := fzfutil.Self()
 	sel, err := fzfutil.Pick(rows, fzfutil.Options{
-		Prompt:        "workspace> ",
-		Header:        "ctrl-t: add worktree · ctrl-x: remove workspace · ctrl-/: toggle preview",
-		Bindings:      []string{addBind, removeBind, togglePreview},
+		Prompt: "workspace> ",
+		Header: "ctrl-t: add worktree · ctrl-x: remove workspace · ctrl-/: toggle preview",
+		Bindings: []string{
+			fmt.Sprintf("ctrl-t:become(%s workspace add)", self),
+			fmt.Sprintf("ctrl-x:execute-silent(%s workspace remove --path {2} --quiet)+reload(%s workspace --print)", self, self),
+			"ctrl-/:toggle-preview",
+		},
 		Preview:       fmt.Sprintf("%s workspace preview --path {2}", self),
 		PreviewWindow: "follow",
 		Delimiter:     "\t",

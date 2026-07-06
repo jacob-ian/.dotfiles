@@ -13,7 +13,7 @@ import (
 	"jmux/internal/tmuxctl"
 )
 
-// fakeBareRepo creates a directory that satisfies repo.IsBareRepo (HEAD file
+// fakeBareRepo creates a directory that repo detects as a bare repo (HEAD file
 // + refs/ subdir, no .git). Returns the bare-root path.
 func fakeBareRepo(t *testing.T, path string) string {
 	t.Helper()

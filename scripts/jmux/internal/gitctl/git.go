@@ -117,8 +117,7 @@ func FetchBranch(bareRoot, branch string) error {
 }
 
 // WorktreeForBranch returns the path of the worktree that has branch checked
-// out, or "" if none does. Consulting git's worktree list finds the checkout
-// wherever it lives, so a branch already in a worktree is reused rather than
+// out, or "" if none does — so an existing checkout is reused rather than
 // failing a second `worktree add` (git forbids the same branch in two trees).
 func WorktreeForBranch(bareRoot, branch string) string {
 	out, err := gitOut(bareRoot, "worktree", "list", "--porcelain")
@@ -133,7 +132,7 @@ func WorktreeForBranch(bareRoot, branch string) string {
 func worktreeForBranch(porcelain, branch string) string {
 	want := "branch refs/heads/" + branch
 	var path string
-	for _, line := range strings.Split(porcelain, "\n") {
+	for line := range strings.SplitSeq(porcelain, "\n") {
 		if p, ok := strings.CutPrefix(line, "worktree "); ok {
 			path = p
 		} else if line == want {
@@ -164,9 +163,7 @@ func CleanErr(err error) string {
 // exists.
 func RefExists(dir, ref string) bool {
 	for _, name := range []string{ref, "origin/" + ref} {
-		cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", name)
-		cmd.Dir = dir
-		if cmd.Run() == nil {
+		if _, err := gitOut(dir, "rev-parse", "--verify", "--quiet", name); err == nil {
 			return true
 		}
 	}

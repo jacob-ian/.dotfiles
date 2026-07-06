@@ -1,13 +1,12 @@
 package pr
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"jmux/internal/cachefile"
 	"jmux/internal/ghctl"
 	"jmux/internal/gitctl"
 	"jmux/internal/notify"
@@ -16,6 +15,8 @@ import (
 // cacheTTL bounds how long `jmux pr` serves the cached list before refetching on
 // open. ctrl-r in the picker forces a refresh regardless of age.
 const cacheTTL = 5 * time.Minute
+
+const cacheFile = "prs.json"
 
 // orgEnv is a comma-separated org whitelist for `jmux pr`; unset means all orgs.
 const orgEnv = "JMUX_PR_ORGS"
@@ -40,63 +41,14 @@ type prCache struct {
 	Results   []ghctl.SearchResult `json:"results"`
 }
 
-func cachePath() (string, error) {
-	dir, err := os.UserCacheDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "jmux", "prs.json"), nil
-}
-
 // readCache returns the cached results and their age. ok is false when no
 // readable, well-formed cache exists.
 func readCache() (results []ghctl.SearchResult, age time.Duration, ok bool) {
-	path, err := cachePath()
-	if err != nil {
-		return nil, 0, false
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, 0, false
-	}
 	var c prCache
-	if err := json.Unmarshal(data, &c); err != nil {
+	if !cachefile.Read(cacheFile, &c) {
 		return nil, 0, false
 	}
 	return c.Results, time.Since(c.FetchedAt), true
-}
-
-// writeCache persists results stamped now. Best-effort: a failure just means the
-// next open refetches. The temp-then-rename keeps a concurrent jmux process from
-// reading a half-written file.
-func writeCache(results []ghctl.SearchResult) {
-	path, err := cachePath()
-	if err != nil {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return
-	}
-	data, err := json.Marshal(prCache{FetchedAt: time.Now(), Results: results})
-	if err != nil {
-		return
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "prs-*.json")
-	if err != nil {
-		return
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
-		return
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		os.Remove(tmp.Name())
-	}
 }
 
 // loadResults returns the PR list, fetching from GitHub and refreshing the cache
@@ -111,7 +63,7 @@ func loadResults(refresh bool) ([]ghctl.SearchResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	writeCache(results)
+	cachefile.Write(cacheFile, prCache{FetchedAt: time.Now(), Results: results})
 	return results, nil
 }
 

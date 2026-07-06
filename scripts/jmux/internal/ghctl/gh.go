@@ -40,7 +40,6 @@ type SearchResult struct {
 	HeadRefName string
 	BaseRefName string
 	Repository  struct {
-		Name          string
 		NameWithOwner string
 	}
 	Author struct {
@@ -148,7 +147,7 @@ fragment prFields on PullRequest {
   headRefName
   baseRefName
   author { login }
-  repository { name nameWithOwner }
+  repository { nameWithOwner }
 }`
 
 // searchMyPrsQueryResponse holds one aliased search block per review-queue qualifier.
@@ -169,7 +168,6 @@ type prSearchBlock struct {
 			Login string `json:"login"`
 		} `json:"author"`
 		Repository struct {
-			Name          string `json:"name"`
 			NameWithOwner string `json:"nameWithOwner"`
 		} `json:"repository"`
 	} `json:"nodes"`
@@ -224,7 +222,6 @@ func SearchMyPRs(orgs []string) ([]SearchResult, error) {
 			var r SearchResult
 			r.Number, r.Title, r.IsDraft, r.HeadRefName, r.BaseRefName = n.Number, n.Title, n.IsDraft, n.HeadRefName, n.BaseRefName
 			r.Author.Login = n.Author.Login
-			r.Repository.Name = n.Repository.Name
 			r.Repository.NameWithOwner = n.Repository.NameWithOwner
 			out = append(out, r)
 		}
@@ -243,7 +240,7 @@ func orgQualifier(orgs []string) string {
 	return b.String()
 }
 
-// ViewRepo renders `gh pr view --comments` for the preview
+// ViewRepo renders `gh pr view --comments` for the preview.
 func ViewRepo(slug string, num int) string {
 	ctx, cancel := context.WithTimeout(context.Background(), previewTimeout)
 	defer cancel()

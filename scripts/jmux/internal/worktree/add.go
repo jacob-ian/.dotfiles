@@ -35,8 +35,7 @@ func RunAdd(args []string) {
 
 // AddWorktree runs the branch picker for bareRoot, creates the worktree, copies
 // env files from the default branch, and opens a session with claude + install
-// windows. bareRoot must be a bare repo root. Pure: it returns the error for the
-// handler to report (nil when the picker is cancelled).
+// windows. Returns nil when the picker is cancelled.
 func AddWorktree(bareRoot string) error {
 	branches, err := gitctl.RemoteBranches(bareRoot)
 	if err != nil {
@@ -125,6 +124,8 @@ func copyFile(src, dst string) {
 	io.Copy(out, in)
 }
 
+// DetectInstallCmd returns the dependency-install command for dir based on its
+// lockfile, or "" when dir needs no install step.
 func DetectInstallCmd(dir string) string {
 	if _, err := os.Stat(filepath.Join(dir, "package.json")); err != nil {
 		return ""

@@ -3,6 +3,8 @@ package tag
 import (
 	"path/filepath"
 	"testing"
+
+	"jmux/internal/repo"
 )
 
 // withCacheDir points os.UserCacheDir at a temp dir for the test, covering both
@@ -20,7 +22,7 @@ func TestSetAllRoundTrips(t *testing.T) {
 
 	Set(dir, "pr", Badge{Text: "PR #42", Color: Cyan})
 
-	badges := All()[resolve(dir)]
+	badges := All()[repo.Resolve(dir)]
 	if len(badges) != 1 || badges[0].Text != "PR #42" || badges[0].Color != Cyan {
 		t.Fatalf("All()[%q] = %+v, want one {PR #42, cyan}", dir, badges)
 	}
@@ -33,7 +35,7 @@ func TestSetReplacesSameNamespace(t *testing.T) {
 	Set(dir, "pr", Badge{Text: "PR #1"})
 	Set(dir, "pr", Badge{Text: "PR #2"})
 
-	badges := All()[resolve(dir)]
+	badges := All()[repo.Resolve(dir)]
 	if len(badges) != 1 || badges[0].Text != "PR #2" {
 		t.Fatalf("All()[%q] = %+v, want one {PR #2}", dir, badges)
 	}
@@ -46,7 +48,7 @@ func TestAllOrdersByNamespace(t *testing.T) {
 	Set(dir, "zeta", Badge{Text: "Z"})
 	Set(dir, "alpha", Badge{Text: "A"})
 
-	badges := All()[resolve(dir)]
+	badges := All()[repo.Resolve(dir)]
 	if len(badges) != 2 || badges[0].Text != "A" || badges[1].Text != "Z" {
 		t.Fatalf("All()[%q] = %+v, want [A Z] (namespace order)", dir, badges)
 	}
@@ -61,10 +63,10 @@ func TestSetPrunesMissingDirs(t *testing.T) {
 	Set(live, "pr", Badge{Text: "PR #9"}) // this write prunes the missing entry
 
 	all := All()
-	if _, ok := all[resolve(gone)]; ok {
+	if _, ok := all[repo.Resolve(gone)]; ok {
 		t.Errorf("expected stale entry for %q to be pruned", gone)
 	}
-	if badges := all[resolve(live)]; len(badges) != 1 || badges[0].Text != "PR #9" {
+	if badges := all[repo.Resolve(live)]; len(badges) != 1 || badges[0].Text != "PR #9" {
 		t.Errorf("All()[%q] = %+v, want one {PR #9}", live, badges)
 	}
 }

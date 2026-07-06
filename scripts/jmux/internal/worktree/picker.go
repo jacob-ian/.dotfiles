@@ -3,7 +3,6 @@ package worktree
 import (
 	"flag"
 	"fmt"
-	"os"
 	"strings"
 
 	"jmux/internal/fzfutil"
@@ -36,21 +35,14 @@ func RunPicker(args []string) {
 		return
 	}
 
-	self, err := os.Executable()
-	if err != nil {
-		self = "jmux"
-	}
-
-	removeBind := fmt.Sprintf(
-		"ctrl-x:execute-silent(%s worktree remove --path {} --quiet)+reload(%s worktree --print)",
-		self, self,
-	)
-	togglePreview := "ctrl-/:toggle-preview"
-
+	self := fzfutil.Self()
 	sel, err := fzfutil.Pick(dirs, fzfutil.Options{
-		Prompt:        "worktree> ",
-		Header:        "ctrl-x: remove worktree · ctrl-/: toggle preview",
-		Bindings:      []string{removeBind, togglePreview},
+		Prompt: "worktree> ",
+		Header: "ctrl-x: remove worktree · ctrl-/: toggle preview",
+		Bindings: []string{
+			fmt.Sprintf("ctrl-x:execute-silent(%s worktree remove --path {} --quiet)+reload(%s worktree --print)", self, self),
+			"ctrl-/:toggle-preview",
+		},
 		Preview:       fmt.Sprintf("%s workspace preview --path {}", self),
 		PreviewWindow: "follow",
 	})

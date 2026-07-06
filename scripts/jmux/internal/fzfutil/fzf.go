@@ -21,6 +21,16 @@ type Options struct {
 	ANSI bool
 }
 
+// Self returns the path of the running jmux binary, for bind/preview commands
+// that re-invoke it; falls back to "jmux" (resolved via PATH) on error.
+func Self() string {
+	self, err := os.Executable()
+	if err != nil {
+		return "jmux"
+	}
+	return self
+}
+
 // Pick runs fzf on items and returns the selected line. Returns "" with a
 // non-nil error when the user cancels or fzf otherwise exits non-zero.
 func Pick(items []string, opts Options) (string, error) {

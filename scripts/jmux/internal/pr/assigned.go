@@ -2,7 +2,6 @@ package pr
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -18,32 +17,12 @@ import (
 // one repo — it searches every repo, then maps the chosen PR back to a local
 // clone to check out as usual.
 func RunAssigned() {
-	if !ghctl.Available() {
-		notify.Error("gh CLI not found — install the GitHub CLI to review PRs")
+	if !ensureGH() {
 		return
 	}
 
-	self, err := os.Executable()
-	if err != nil {
-		self = "jmux"
-	}
-
-	// start:reload loads the list async behind fzf's spinner so the open doesn't
-	// block on gh; the load event swaps the "loading…" prompt back.
-	sel, err := fzfutil.Pick(nil, fzfutil.Options{
-		Prompt: "loading… ",
-		Header: "enter: review · ctrl-r: refresh · ctrl-/: toggle preview",
-		Bindings: []string{
-			"ctrl-/:toggle-preview",
-			fmt.Sprintf("start:reload(%s pr items)", shellQuote(self)),
-			"load:change-prompt(prs> )",
-			fmt.Sprintf("ctrl-r:change-prompt(refreshing… )+reload(%s pr items --refresh)", shellQuote(self)),
-		},
-		Preview:       fmt.Sprintf("%s pr preview {}", shellQuote(self)),
-		PreviewWindow: "right:60%:wrap",
-		Delimiter:     "\t",
-		WithNth:       "1",
-	})
+	self := shellQuote(fzfutil.Self())
+	sel, err := pickPR("prs> ", self+" pr items", self+" pr items --refresh")
 	if err != nil || sel == "" {
 		return
 	}
@@ -52,28 +31,22 @@ func RunAssigned() {
 	if !ok {
 		return
 	}
-	if err := reviewSelection(slug, num, rowHeadRef(sel), rowBaseRef(sel)); err != nil {
+	if err := reviewSelection(slug, num, sel); err != nil {
 		notify.Error(err.Error())
 	}
 }
 
 // reviewSelection maps a picked cross-repo PR to its local clone and reviews it.
-// headRef comes from the row's hidden field, falling back to a lookup when
-// absent. baseRef also rides along the row; when absent checkoutWorktree falls
-// back to the repo default, so it needs no lookup. Pure: it returns the error
-// for the handler to report.
-func reviewSelection(slug string, num int, headRef, baseRef string) error {
+func reviewSelection(slug string, num int, sel string) error {
 	bareRoot := findLocalRepo(slug)
 	if bareRoot == "" {
 		return fmt.Errorf("no local clone of %s", slug)
 	}
-	if headRef == "" {
-		var err error
-		if headRef, err = ghctl.HeadRef(slug, num); err != nil || headRef == "" {
-			return fmt.Errorf("resolve branch for %s#%d: %s", slug, num, gitctl.CleanErr(err))
-		}
+	headRef, err := resolveHeadRef(sel, slug, num)
+	if err != nil {
+		return err
 	}
-	return review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef, BaseRefName: baseRef})
+	return review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef, BaseRefName: rowBaseRef(sel)})
 }
 
 // findLocalRepo returns the bare repo whose origin remote is nameWithOwner, or
@@ -88,7 +61,7 @@ func findLocalRepo(nameWithOwner string) string {
 }
 
 // parseRepoNumber extracts "owner/repo" and the number from a row's first field
-// ("owner/repo#12"). Used by the cross-repo preview.
+// ("owner/repo#12").
 func parseRepoNumber(line string) (string, int, bool) {
 	field := strings.TrimSpace(line)
 	if i := strings.IndexAny(field, " \t"); i >= 0 {

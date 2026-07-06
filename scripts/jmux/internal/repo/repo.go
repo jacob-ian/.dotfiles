@@ -13,7 +13,8 @@ var ScanRoots = []string{"$HOME/dev", "$HOME/euc", "$HOME/net"}
 // AdditionalDirs are non-repo directories included in the default picker.
 var AdditionalDirs = []string{"$HOME/.config", "$HOME/.claude"}
 
-func IsBareRepo(dir string) bool {
+// isBareRepo reports whether dir is a bare repo root (HEAD + refs/, no .git).
+func isBareRepo(dir string) bool {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		return false
 	}
@@ -29,7 +30,7 @@ func IsBareRepo(dir string) bool {
 func FindBareRoot(dir string) string {
 	cur := dir
 	for {
-		if IsBareRepo(cur) {
+		if isBareRepo(cur) {
 			return cur
 		}
 		parent := filepath.Dir(cur)
@@ -111,7 +112,7 @@ func BareRepoWorktrees(bare string, skipDefault bool) []string {
 func BareRepos() []string {
 	roots := ExpandPaths(ScanRoots)
 	return ScanReposParallel(roots, func(dir string) []string {
-		if IsBareRepo(dir) {
+		if isBareRepo(dir) {
 			return []string{dir}
 		}
 		return nil
@@ -119,14 +120,14 @@ func BareRepos() []string {
 }
 
 func ProjectDirs(dir string) []string {
-	if !IsBareRepo(dir) {
+	if !isBareRepo(dir) {
 		return []string{dir}
 	}
 	return BareRepoWorktrees(dir, false)
 }
 
 func FeatureWorktrees(dir string) []string {
-	if !IsBareRepo(dir) {
+	if !isBareRepo(dir) {
 		return nil
 	}
 	return BareRepoWorktrees(dir, true)
@@ -153,14 +154,12 @@ func ScanReposParallel(roots []string, fn func(string) []string) []string {
 	var out []string
 	var wg sync.WaitGroup
 	for _, p := range subdirs {
-		wg.Add(1)
-		go func(p string) {
-			defer wg.Done()
+		wg.Go(func() {
 			r := fn(p)
 			mu.Lock()
 			out = append(out, r...)
 			mu.Unlock()
-		}(p)
+		})
 	}
 	wg.Wait()
 	return out
@@ -181,4 +180,17 @@ func IsDir(p string) bool {
 
 func TrimSlash(s string) string {
 	return strings.TrimRight(s, "/")
+}
+
+// Resolve returns the absolute, symlink-resolved form of p, so paths that name
+// the same directory compare equal. Falls back to the best form it could make.
+func Resolve(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return real
+	}
+	return abs
 }

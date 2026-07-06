@@ -16,11 +16,9 @@ import (
 )
 
 // RunPreview prints a one-screen summary of the workspace at --path. Invoked by
-// fzf on every cursor move, so it must be fast and never error to stderr.
-//
-// Git calls are fanned out in two waves of goroutines to overlap their
-// subprocess + IO costs. On a typical repo the wall-clock is bounded by the
-// slowest single call (`git status`) rather than their sum.
+// fzf on every cursor move, so it must be fast and never error to stderr; the
+// git calls are fanned out in goroutines so wall-clock is bounded by the
+// slowest call rather than their sum.
 func RunPreview(args []string) {
 	fs := flag.NewFlagSet("workspace preview", flag.ContinueOnError)
 	path := fs.String("path", "", "Workspace path to summarise")

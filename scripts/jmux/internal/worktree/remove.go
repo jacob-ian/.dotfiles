@@ -50,18 +50,24 @@ func RunRemove(args []string) {
 // checkout. Plain directories and main checkouts return false so callers know
 // not to delete them.
 func IsManagedWorktree(path string) bool {
+	return managedBareRoot(path) != ""
+}
+
+// managedBareRoot returns the bare repo root when path is a jmux-removable
+// worktree (see IsManagedWorktree), or "".
+func managedBareRoot(path string) string {
 	bareRoot := repo.FindBareRoot(path)
 	if bareRoot == "" {
 		bareRoot = gitctl.CommonDir(path)
 	}
 	if bareRoot == "" || repo.AdminDirFor(bareRoot, path) == "" {
-		return false
+		return ""
 	}
 	base := filepath.Base(path)
 	if base == "main" || base == "master" || base == gitctl.DefaultBranch(bareRoot) {
-		return false
+		return ""
 	}
-	return true
+	return bareRoot
 }
 
 func pickRemoveTarget() (string, bool) {
@@ -90,16 +96,11 @@ func pickRemoveTarget() (string, bool) {
 
 // Remove takes a worktree out of git's view and kills its tmux session. It
 // refuses any path that isn't a removable worktree (see IsManagedWorktree),
-// so it never deletes a plain directory or the main/default checkout. Pure: it
-// returns the success message (for the handler to report) or an error.
+// so it never deletes a plain directory or the main/default checkout.
 func Remove(path string) (string, error) {
-	if !IsManagedWorktree(path) {
-		return "", fmt.Errorf("refusing to remove '%s': not a removable worktree", filepath.Base(path))
-	}
-
-	bareRoot := repo.FindBareRoot(path)
+	bareRoot := managedBareRoot(path)
 	if bareRoot == "" {
-		bareRoot = gitctl.CommonDir(path)
+		return "", fmt.Errorf("refusing to remove '%s': not a removable worktree", filepath.Base(path))
 	}
 
 	if !fastRemove(path, bareRoot) {
@@ -126,9 +127,6 @@ func Remove(path string) (string, error) {
 // <bareRoot>/worktrees/<name>, the picker reload sees the entry gone
 // immediately and the user isn't blocked.
 func fastRemove(path, bareRoot string) bool {
-	if bareRoot == "" {
-		return false
-	}
 	adminDir := repo.AdminDirFor(bareRoot, path)
 	if adminDir == "" {
 		return false

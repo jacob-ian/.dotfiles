@@ -25,43 +25,16 @@ import (
 // choice. dir picks the repo ("" or "." = current); the global queue is
 // RunAssigned.
 func RunRepo(dir string) {
-	if !ghctl.Available() {
-		notify.Error("gh CLI not found — install the GitHub CLI to review PRs")
+	if !ensureGH() {
 		return
 	}
-
-	bareRoot, ok := resolveBareRoot(dir)
+	bareRoot, slug, ok := resolveRepoSlug(dir)
 	if !ok {
 		return
 	}
 
-	slug := gitctl.RepoSlug(bareRoot)
-	if slug == "" {
-		notify.Error("Could not resolve the repo's origin remote")
-		return
-	}
-	self, err := os.Executable()
-	if err != nil {
-		self = "jmux"
-	}
-	itemsCmd := fmt.Sprintf("%s pr items --repo %s", shellQuote(self), shellQuote(slug))
-
-	// start:reload lists the repo's PRs async behind fzf's spinner so the open
-	// doesn't block on gh; the load event swaps the "loading…" prompt back.
-	sel, err := fzfutil.Pick(nil, fzfutil.Options{
-		Prompt: "loading… ",
-		Header: "enter: review · ctrl-r: refresh · ctrl-/: toggle preview",
-		Bindings: []string{
-			"ctrl-/:toggle-preview",
-			fmt.Sprintf("start:reload(%s)", itemsCmd),
-			"load:change-prompt(pr> )",
-			fmt.Sprintf("ctrl-r:change-prompt(refreshing… )+reload(%s)", itemsCmd),
-		},
-		Preview:       fmt.Sprintf("%s pr preview {}", shellQuote(self)),
-		PreviewWindow: "right:60%:wrap",
-		Delimiter:     "\t",
-		WithNth:       "1",
-	})
+	itemsCmd := fmt.Sprintf("%s pr items --repo %s", shellQuote(fzfutil.Self()), shellQuote(slug))
+	sel, err := pickPR("pr> ", itemsCmd, itemsCmd)
 	if err != nil || sel == "" {
 		return
 	}
@@ -70,13 +43,10 @@ func RunRepo(dir string) {
 	if !ok {
 		return
 	}
-	headRef := rowHeadRef(sel)
-	if headRef == "" {
-		var err error
-		if headRef, err = ghctl.HeadRef(slug, num); err != nil || headRef == "" {
-			notify.Errorf("resolve branch for %s#%d: %s", slug, num, gitctl.CleanErr(err))
-			return
-		}
+	headRef, err := resolveHeadRef(sel, slug, num)
+	if err != nil {
+		notify.Error(err.Error())
+		return
 	}
 	if err := review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef, BaseRefName: rowBaseRef(sel)}); err != nil {
 		notify.Error(err.Error())
@@ -85,17 +55,11 @@ func RunRepo(dir string) {
 
 // RunNumber handles `jmux pr <num>`: review the PR directly, skipping the picker.
 func RunNumber(num int) {
-	if !ghctl.Available() {
-		notify.Error("gh CLI not found — install the GitHub CLI to review PRs")
+	if !ensureGH() {
 		return
 	}
-	bareRoot, ok := resolveBareRoot("")
+	bareRoot, slug, ok := resolveRepoSlug("")
 	if !ok {
-		return
-	}
-	slug := gitctl.RepoSlug(bareRoot)
-	if slug == "" {
-		notify.Error("Could not resolve the repo's origin remote")
 		return
 	}
 	p, err := ghctl.GetPR(slug, num)
@@ -108,13 +72,55 @@ func RunNumber(num int) {
 	}
 }
 
+// ensureGH reports whether the gh CLI is available, notifying when it isn't.
+func ensureGH() bool {
+	if ghctl.Available() {
+		return true
+	}
+	notify.Error("gh CLI not found — install the GitHub CLI to review PRs")
+	return false
+}
+
+// pickPR opens the PR picker: start:reload fills the list asynchronously behind
+// fzf's spinner so the open doesn't block on gh, and the load event swaps the
+// "loading…" prompt back. ctrl-r reloads via refreshCmd.
+func pickPR(prompt, itemsCmd, refreshCmd string) (string, error) {
+	return fzfutil.Pick(nil, fzfutil.Options{
+		Prompt: "loading… ",
+		Header: "enter: review · ctrl-r: refresh · ctrl-/: toggle preview",
+		Bindings: []string{
+			"ctrl-/:toggle-preview",
+			fmt.Sprintf("start:reload(%s)", itemsCmd),
+			fmt.Sprintf("load:change-prompt(%s)", prompt),
+			fmt.Sprintf("ctrl-r:change-prompt(refreshing… )+reload(%s)", refreshCmd),
+		},
+		Preview:       fmt.Sprintf("%s pr preview {}", shellQuote(fzfutil.Self())),
+		PreviewWindow: "right:60%:wrap",
+		Delimiter:     "\t",
+		WithNth:       "1",
+	})
+}
+
+// resolveHeadRef returns a picker row's hidden head-branch field, falling back
+// to a gh lookup for rows that predate the field.
+func resolveHeadRef(sel, slug string, num int) (string, error) {
+	if ref := rowHeadRef(sel); ref != "" {
+		return ref, nil
+	}
+	ref, err := ghctl.HeadRef(slug, num)
+	if err != nil || ref == "" {
+		return "", fmt.Errorf("resolve branch for %s#%d: %s", slug, num, gitctl.CleanErr(err))
+	}
+	return ref, nil
+}
+
 // prEditorCmd opens nvim with the PR diff (`pd`) shown: a once-only VimEnter
 // hook fires after startup, so the lazy plugin is loaded by the time it runs.
 const prEditorCmd = `nvim -c "autocmd VimEnter * ++once lua require('jmux').pr.diff()"`
 
 // review checks the PR out into a worktree and opens its session (nvim with the
-// diff, a paired claude window, the install window), showing setup progress in a
-// spinner. Pure: it returns the error for the handler to report.
+// diff, a paired claude window, the install window), showing setup progress in
+// a spinner.
 func review(bareRoot string, p ghctl.PR) error {
 	var path string
 	err := spinner.Run(fmt.Sprintf("opening PR #%d…", p.Number), func(phase chan<- string) (err error) {
@@ -134,8 +140,7 @@ func review(bareRoot string, p ghctl.PR) error {
 
 // checkoutWorktree returns the PR's head-branch worktree, fetching and creating
 // it (tracking origin/<branch>) if absent or reusing an existing one. Env files
-// are copied across as for any feature worktree. Progress phases are reported on
-// phase for the spinner; the reuse paths return before sending any.
+// are copied across as for any feature worktree.
 func checkoutWorktree(bareRoot string, p ghctl.PR, phase chan<- string) (string, error) {
 	branch := p.HeadRefName
 
@@ -173,6 +178,20 @@ func checkoutWorktree(bareRoot string, p ghctl.PR, phase chan<- string) (string,
 	return path, nil
 }
 
+// resolveRepoSlug resolves the bare repo containing dir (cwd when "") — or one
+// the user picks — plus its origin "owner/repo" slug.
+func resolveRepoSlug(dir string) (bareRoot, slug string, ok bool) {
+	bareRoot, ok = resolveBareRoot(dir)
+	if !ok {
+		return "", "", false
+	}
+	if slug = gitctl.RepoSlug(bareRoot); slug == "" {
+		notify.Error("Could not resolve the repo's origin remote")
+		return "", "", false
+	}
+	return bareRoot, slug, true
+}
+
 // resolveBareRoot returns the bare repo containing start (cwd when start is ""),
 // or one the user picks.
 func resolveBareRoot(start string) (string, bool) {
@@ -202,17 +221,15 @@ func resolveBareRoot(start string) (string, bool) {
 
 // formatRow renders a picker row: "owner/repo#12  [draft] Title  ·  author".
 func formatRow(slug string, num int, draft bool, title, login string) string {
-	tag := ""
+	marker := ""
 	if draft {
-		tag = "[draft] "
+		marker = "[draft] "
 	}
-	return fmt.Sprintf("%s#%d  %s%s  ·  %s", slug, num, tag, title, login)
+	return fmt.Sprintf("%s#%d  %s%s  ·  %s", slug, num, marker, title, login)
 }
 
-// formatItemsRow appends the head and base branches as hidden tab fields so
-// selection can read them (via rowHeadRef/rowBaseRef) instead of a separate
-// lookup. fzf shows only the first field (WithNth "1"), so the branches stay
-// hidden while riding along in the returned selection.
+// formatItemsRow appends the head and base branches as hidden tab fields (fzf
+// shows only column 1) so selection can read them back without a gh lookup.
 func formatItemsRow(slug string, num int, draft bool, title, login, headRef, baseRef string) string {
 	return formatRow(slug, num, draft, title, login) + "\t" + headRef + "\t" + baseRef
 }
@@ -227,10 +244,7 @@ func rowField(line string, n int) string {
 	return ""
 }
 
-// rowHeadRef returns the hidden head-branch field from a picker row, or "".
 func rowHeadRef(line string) string { return rowField(line, 1) }
-
-// rowBaseRef returns the hidden base-branch field from a picker row, or "".
 func rowBaseRef(line string) string { return rowField(line, 2) }
 
 // ParseNumber extracts the leading PR number from a picker row or CLI argument.

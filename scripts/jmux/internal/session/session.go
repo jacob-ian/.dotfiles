@@ -12,6 +12,8 @@ import (
 	"jmux/internal/tmuxctl"
 )
 
+// Name derives dir's tmux session name: repo_branch for a worktree under a
+// bare repo, parent_base otherwise, with tmux-hostile characters replaced.
 func Name(dir string) string {
 	if bareRoot := repo.FindBareRoot(dir); bareRoot != "" && bareRoot != dir {
 		rel, err := filepath.Rel(bareRoot, dir)
