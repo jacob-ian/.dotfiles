@@ -157,6 +157,10 @@ func SelectWindow(target string) error {
 	return exec.Command("tmux", "select-window", "-t", target).Run()
 }
 
+func SelectPane(target string) error {
+	return exec.Command("tmux", "select-pane", "-t", target).Run()
+}
+
 func SwitchClient(name string) error {
 	return exec.Command("tmux", "switch-client", "-t", name).Run()
 }
@@ -183,6 +187,17 @@ func CurrentSession() string {
 // process, or "" when not inside tmux.
 func CurrentWindow() string {
 	return current("#W")
+}
+
+// PaneTarget returns "session:window-index" of the window containing pane, or
+// "" on error. Deliberately pane-targeted: an untargeted display-message would
+// answer for the client's active window instead.
+func PaneTarget(pane string) string {
+	out, err := exec.Command("tmux", "display-message", "-p", "-t", pane, "#S:#I").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func current(fmt string) string {

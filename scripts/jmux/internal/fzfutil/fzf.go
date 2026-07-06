@@ -21,8 +21,9 @@ type Options struct {
 	ANSI bool
 }
 
-// Self returns the path of the running jmux binary, for bind/preview commands
-// that re-invoke it; falls back to "jmux" (resolved via PATH) on error.
+// Self returns the path of the running jmux binary, for commands that
+// re-invoke it (fzf bindings, notification callbacks); falls back to "jmux"
+// (resolved via PATH) on error.
 func Self() string {
 	self, err := os.Executable()
 	if err != nil {

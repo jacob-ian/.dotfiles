@@ -36,10 +36,7 @@ func run(args []string) error {
 	case "fzf":
 		return runFzf(args[1:])
 	case "claude":
-		if err := claudectl.Run(args[1:]); err != nil {
-			return fmt.Errorf("claude: %w", err)
-		}
-		return nil
+		return runClaude(args[1:])
 	case "-h", "--help", "help":
 		usage()
 		return nil
@@ -84,6 +81,23 @@ func runPR(args []string) error {
 		return pr.RunNumber(num)
 	}
 	return pr.RunRepo(args[0])
+}
+
+// runClaude handles `jmux claude`: notify/focus are jmux's own subcommands;
+// anything else passes through as arguments to the claude binary.
+func runClaude(args []string) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "notify":
+			return claudectl.RunNotify()
+		case "focus":
+			return claudectl.RunFocus(args[1:])
+		}
+	}
+	if err := claudectl.Run(args); err != nil {
+		return fmt.Errorf("claude: %w", err)
+	}
+	return nil
 }
 
 // runFzf dispatches `jmux fzf <picker> items|preview` — plumbing invoked by
@@ -144,6 +158,8 @@ func usage() {
   jmux pr <num>                 Review PR <num> in the current repo directly
   jmux claude [args...]         Launch claude paired with the nvim instance
                                 whose workspace contains the current directory
+  jmux claude notify            Notification hook: post a macOS alert that
+                                focuses this pane on click (via jmux claude focus)
   jmux fzf <picker> items|preview
                                 Internal: list rows / render previews for the
                                 pickers' fzf bindings`)
