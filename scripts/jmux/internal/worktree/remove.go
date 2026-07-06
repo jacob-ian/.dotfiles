@@ -27,11 +27,26 @@ func RunRemove(args []string) {
 
 	target := *pathArg
 	if target == "" {
-		t, ok := pickRemoveTarget()
-		if !ok {
+		cwd, err := os.Getwd()
+		if err != nil {
+			notify.Error("Failed to read cwd")
 			return
 		}
-		target = t
+		bareRoot := gitctl.CommonDir(cwd)
+		if bareRoot == "" {
+			notify.Error("Not in a bare repo worktree")
+			return
+		}
+		candidates := repo.BareRepoWorktrees(bareRoot, true)
+		if len(candidates) == 0 {
+			notify.Info("No removable worktrees")
+			return
+		}
+		sel, err := fzfutil.Pick(candidates, fzfutil.Options{Prompt: "remove worktree> "})
+		if err != nil || sel == "" {
+			return
+		}
+		target = repo.TrimSlash(sel)
 	}
 
 	msg, err := Remove(target)
@@ -68,30 +83,6 @@ func managedBareRoot(path string) string {
 		return ""
 	}
 	return bareRoot
-}
-
-func pickRemoveTarget() (string, bool) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", false
-	}
-	bareRoot := gitctl.CommonDir(cwd)
-	if bareRoot == "" {
-		notify.Error("Not in a bare repo worktree")
-		return "", false
-	}
-
-	candidates := repo.BareRepoWorktrees(bareRoot, true)
-	if len(candidates) == 0 {
-		notify.Info("No removable worktrees")
-		return "", false
-	}
-
-	sel, err := fzfutil.Pick(candidates, fzfutil.Options{Prompt: "remove worktree> "})
-	if err != nil || sel == "" {
-		return "", false
-	}
-	return repo.TrimSlash(sel), true
 }
 
 // Remove takes a worktree out of git's view and kills its tmux session. It

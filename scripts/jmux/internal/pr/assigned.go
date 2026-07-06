@@ -17,7 +17,8 @@ import (
 // one repo — it searches every repo, then maps the chosen PR back to a local
 // clone to check out as usual.
 func RunAssigned() {
-	if !ensureGH() {
+	if !ghctl.Available() {
+		notify.Error(noGHMsg)
 		return
 	}
 

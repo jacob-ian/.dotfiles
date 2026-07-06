@@ -4,6 +4,7 @@
 package pr
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,15 +22,31 @@ import (
 	"jmux/internal/worktree"
 )
 
+// noGHMsg is shown by every command that needs the gh CLI on PATH.
+const noGHMsg = "gh CLI not found — install the GitHub CLI to review PRs"
+
+// errNoBareRepos marks a "nothing to work with" outcome that commands show as
+// plain info rather than a red error.
+var errNoBareRepos = errors.New("no bare repos found")
+
 // RunRepo handles `jmux pr <dir>`: list one repo's open PRs and review the
 // choice. dir picks the repo ("" or "." = current); the global queue is
 // RunAssigned.
 func RunRepo(dir string) {
-	if !ensureGH() {
+	if !ghctl.Available() {
+		notify.Error(noGHMsg)
 		return
 	}
-	bareRoot, slug, ok := resolveRepoSlug(dir)
-	if !ok {
+	bareRoot, slug, err := resolveRepoSlug(dir)
+	if errors.Is(err, errNoBareRepos) {
+		notify.Info("No bare repos found")
+		return
+	}
+	if err != nil {
+		notify.Error(err.Error())
+		return
+	}
+	if bareRoot == "" {
 		return
 	}
 
@@ -55,11 +72,20 @@ func RunRepo(dir string) {
 
 // RunNumber handles `jmux pr <num>`: review the PR directly, skipping the picker.
 func RunNumber(num int) {
-	if !ensureGH() {
+	if !ghctl.Available() {
+		notify.Error(noGHMsg)
 		return
 	}
-	bareRoot, slug, ok := resolveRepoSlug("")
-	if !ok {
+	bareRoot, slug, err := resolveRepoSlug("")
+	if errors.Is(err, errNoBareRepos) {
+		notify.Info("No bare repos found")
+		return
+	}
+	if err != nil {
+		notify.Error(err.Error())
+		return
+	}
+	if bareRoot == "" {
 		return
 	}
 	p, err := ghctl.GetPR(slug, num)
@@ -70,15 +96,6 @@ func RunNumber(num int) {
 	if err := review(bareRoot, p); err != nil {
 		notify.Error(err.Error())
 	}
-}
-
-// ensureGH reports whether the gh CLI is available, notifying when it isn't.
-func ensureGH() bool {
-	if ghctl.Available() {
-		return true
-	}
-	notify.Error("gh CLI not found — install the GitHub CLI to review PRs")
-	return false
 }
 
 // pickPR opens the PR picker: start:reload fills the list asynchronously behind
@@ -179,44 +196,42 @@ func checkoutWorktree(bareRoot string, p ghctl.PR, phase chan<- string) (string,
 }
 
 // resolveRepoSlug resolves the bare repo containing dir (cwd when "") — or one
-// the user picks — plus its origin "owner/repo" slug.
-func resolveRepoSlug(dir string) (bareRoot, slug string, ok bool) {
-	bareRoot, ok = resolveBareRoot(dir)
-	if !ok {
-		return "", "", false
+// the user picks — plus its origin "owner/repo" slug. A cancelled picker
+// returns empty results with a nil error.
+func resolveRepoSlug(dir string) (bareRoot, slug string, err error) {
+	bareRoot, err = resolveBareRoot(dir)
+	if err != nil || bareRoot == "" {
+		return "", "", err
 	}
 	if slug = gitctl.RepoSlug(bareRoot); slug == "" {
-		notify.Error("Could not resolve the repo's origin remote")
-		return "", "", false
+		return "", "", errors.New("could not resolve the repo's origin remote")
 	}
-	return bareRoot, slug, true
+	return bareRoot, slug, nil
 }
 
 // resolveBareRoot returns the bare repo containing start (cwd when start is ""),
-// or one the user picks.
-func resolveBareRoot(start string) (string, bool) {
+// or one the user picks. A cancelled picker returns "" with a nil error.
+func resolveBareRoot(start string) (string, error) {
 	if start == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
-			notify.Error("Failed to read cwd")
-			return "", false
+			return "", fmt.Errorf("reading cwd: %w", err)
 		}
 		start = cwd
 	}
 	if bareRoot := gitctl.CommonDir(start); bareRoot != "" {
-		return bareRoot, true
+		return bareRoot, nil
 	}
 
 	repos := repo.BareRepos()
 	if len(repos) == 0 {
-		notify.Info("No bare repos found")
-		return "", false
+		return "", errNoBareRepos
 	}
 	sel, err := fzfutil.Pick(repos, fzfutil.Options{Prompt: "repo> "})
 	if err != nil || sel == "" {
-		return "", false
+		return "", nil
 	}
-	return repo.TrimSlash(sel), true
+	return repo.TrimSlash(sel), nil
 }
 
 // formatRow renders a picker row: "owner/repo#12  [draft] Title  ·  author".

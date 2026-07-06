@@ -81,7 +81,9 @@ func formatRows(results []ghctl.SearchResult) []string {
 // so the picker keeps its current list rather than clearing.
 func RunItems(args []string) {
 	if len(args) >= 2 && args[0] == "--repo" {
-		runRepoItems(args[1])
+		if err := printRepoItems(args[1]); err != nil {
+			notify.Errorf("list PRs: %s", gitctl.CleanErr(err))
+		}
 		return
 	}
 	refresh := len(args) > 0 && args[0] == "--refresh"
@@ -97,15 +99,15 @@ func RunItems(args []string) {
 	}
 }
 
-// runRepoItems handles `jmux pr items --repo <slug>`: print one repo's open-PR
-// rows to stdout for the per-repo picker's reload binding.
-func runRepoItems(slug string) {
+// printRepoItems prints one repo's open-PR rows to stdout for the per-repo
+// picker's reload binding.
+func printRepoItems(slug string) error {
 	prs, err := ghctl.ListPRs(slug)
 	if err != nil {
-		notify.Errorf("list PRs: %s", gitctl.CleanErr(err))
-		return
+		return err
 	}
 	for _, p := range prs {
 		fmt.Println(formatItemsRow(slug, p.Number, p.IsDraft, p.Title, p.Author.Login, p.HeadRefName, p.BaseRefName))
 	}
+	return nil
 }
