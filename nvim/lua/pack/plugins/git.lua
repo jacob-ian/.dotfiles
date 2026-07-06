@@ -1,12 +1,8 @@
 return {
+  { src = "nvim-lua/plenary.nvim" },
+  { src = "sindrets/diffview.nvim" },
   {
-    "NeogitOrg/neogit",
-    lazy = false,
-    dependencies = {
-      "nvim-lua/plenary.nvim",
-      "sindrets/diffview.nvim",
-      "folke/snacks.nvim",
-    },
+    src = "NeogitOrg/neogit",
     config = function()
       local neogit = require "neogit"
       neogit.setup {
@@ -25,13 +21,10 @@ return {
     end,
   },
   {
-    "lewis6991/gitsigns.nvim",
+    src = "lewis6991/gitsigns.nvim",
     config = function()
       local gitsigns = require "gitsigns"
       gitsigns.setup {}
     end,
-  },
-  {
-    "sindrets/diffview.nvim",
   },
 }

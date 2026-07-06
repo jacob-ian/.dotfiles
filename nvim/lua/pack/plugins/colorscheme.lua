@@ -1,16 +1,14 @@
 return {
   {
-    "webhooked/kanso.nvim",
-    lazy = false,
+    src = "webhooked/kanso.nvim",
     priority = 1000,
     config = function()
       require("kanso").load "ink"
     end,
   },
   -- {
-  --   "catppuccin/nvim",
+  --   src = "catppuccin/nvim",
   --   name = "catppuccin",
-  --   lazy = false,
   --   priority = 1000,
   --   config = function()
   --     require("catppuccin").setup {

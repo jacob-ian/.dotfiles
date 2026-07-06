@@ -1,8 +1,7 @@
 return {
-  "nvim-treesitter/nvim-treesitter",
-  branch = "main",
+  src = "nvim-treesitter/nvim-treesitter",
+  version = "main",
   build = ":TSUpdate",
-  lazy = false,
   config = function()
     require("nvim-treesitter").install {
       "bash",

@@ -1,14 +1,13 @@
 return {
-  "L3MON4D3/LuaSnip",
+  src = "L3MON4D3/LuaSnip",
   build = "make install_jsregexp",
-  lazy = false,
   config = function()
     local ls = require "luasnip"
     ls.setup {
       update_events = "TextChanged,TextChangedI",
     }
     local loader = require "luasnip.loaders.from_lua"
-    loader.lazy_load { paths = { "~/.config/nvim/snippets", "~/snippets" } }
+    loader.lazy_load { paths = { vim.fn.stdpath "config" .. "/snippets", "~/snippets" } }
 
     vim.keymap.set({ "i", "s" }, "<c-l>", function()
       if ls.expand_or_jumpable() then
