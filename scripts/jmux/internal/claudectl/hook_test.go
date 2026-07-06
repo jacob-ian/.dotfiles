@@ -33,11 +33,11 @@ func TestStatusTransitions(t *testing.T) {
 		in   hookInput
 		want string
 	}{
-		{hookInput{HookEventName: "UserPromptSubmit", CWD: dir}, "claude ●"},
-		{hookInput{HookEventName: "Notification", NotificationType: "permission_prompt", CWD: dir}, "claude needs input"},
-		{hookInput{HookEventName: "Notification", NotificationType: "auth_success", CWD: dir}, "claude needs input"},
-		{hookInput{HookEventName: "UserPromptSubmit", CWD: dir}, "claude ●"},
-		{hookInput{HookEventName: "Stop", CWD: dir}, "claude idle"},
+		{hookInput{HookEventName: "UserPromptSubmit", CWD: dir}, "✻ working"},
+		{hookInput{HookEventName: "Notification", NotificationType: "permission_prompt", CWD: dir}, "✻ needs input"},
+		{hookInput{HookEventName: "Notification", NotificationType: "auth_success", CWD: dir}, "✻ needs input"},
+		{hookInput{HookEventName: "UserPromptSubmit", CWD: dir}, "✻ working"},
+		{hookInput{HookEventName: "Stop", CWD: dir}, "✻ idle"},
 		{hookInput{HookEventName: "SessionEnd", CWD: dir}, ""},
 	}
 	for i, s := range steps {

@@ -66,14 +66,14 @@ func status(in hookInput) {
 	}
 	switch in.HookEventName {
 	case eventUserPromptSubmit:
-		tag.Set(path, "claude", tag.Badge{Text: "claude ●", Color: tag.Green})
+		tag.Set(path, "claude", tag.Badge{Text: "✻ working", Color: tag.Green})
 	case eventNotification:
 		switch in.NotificationType {
 		case notifyPermissionPrompt, notifyIdlePrompt, notifyAgentNeedsInput, notifyElicitationDialog:
-			tag.Set(path, "claude", tag.Badge{Text: "claude needs input", Color: tag.Yellow})
+			tag.Set(path, "claude", tag.Badge{Text: "✻ needs input", Color: tag.Yellow})
 		}
 	case eventStop:
-		tag.Set(path, "claude", tag.Badge{Text: "claude idle", Color: tag.Gray})
+		tag.Set(path, "claude", tag.Badge{Text: "✻ idle", Color: tag.Gray})
 	case eventSessionEnd:
 		tag.Unset(path, "claude")
 	}
