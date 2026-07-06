@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,7 +10,6 @@ import (
 
 	"jmux/internal/fzfutil"
 	"jmux/internal/gitctl"
-	"jmux/internal/notify"
 	"jmux/internal/repo"
 	"jmux/internal/session"
 	"jmux/internal/spinner"
@@ -17,20 +17,16 @@ import (
 
 // RunAdd handles `jmux worktree add`: resolve the bare repo from cwd, then run
 // the branch flow against it.
-func RunAdd(args []string) {
+func RunAdd() error {
 	cwd, err := os.Getwd()
 	if err != nil {
-		notify.Error("Failed to read cwd")
-		return
+		return fmt.Errorf("reading cwd: %w", err)
 	}
 	bareRoot := gitctl.CommonDir(cwd)
 	if bareRoot == "" {
-		notify.Error("Not in a bare repo worktree")
-		return
+		return errors.New("not in a bare repo worktree")
 	}
-	if err := AddWorktree(bareRoot); err != nil {
-		notify.Error(err.Error())
-	}
+	return AddWorktree(bareRoot)
 }
 
 // AddWorktree runs the branch picker for bareRoot, creates the worktree, copies

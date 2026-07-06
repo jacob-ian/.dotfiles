@@ -89,70 +89,61 @@ func rowPath(line string) string {
 	return line
 }
 
-// RunPicker handles `jmux workspace`. With --print it lists rows to stdout (the
-// form the ctrl-x reload re-runs against); otherwise it opens the fzf overview.
-func RunPicker(args []string) {
-	fs := flag.NewFlagSet("workspace", flag.ExitOnError)
-	printOnly := fs.Bool("print", false, "Print workspace paths and exit")
-	fs.Parse(args)
+// RunItems handles `jmux fzf workspace items`: print the overview rows for the
+// picker's reload bindings.
+func RunItems() {
+	fmt.Println(strings.Join(displayRows(workspaces()), "\n"))
+}
 
+// RunPicker handles `jmux workspace`: the fzf overview.
+func RunPicker() error {
 	dirs := workspaces()
-	rows := displayRows(dirs)
-
-	if *printOnly {
-		fmt.Println(strings.Join(rows, "\n"))
-		return
-	}
-
 	if len(dirs) == 0 {
 		notify.Info("No workspaces found")
-		return
+		return nil
 	}
 
 	self := fzfutil.Self()
-	sel, err := fzfutil.Pick(rows, fzfutil.Options{
+	sel, err := fzfutil.Pick(displayRows(dirs), fzfutil.Options{
 		Prompt: "workspace> ",
 		Header: "ctrl-t: add worktree · ctrl-x: remove workspace · ctrl-/: toggle preview",
 		Bindings: []string{
 			fmt.Sprintf("ctrl-t:become(%s workspace add)", self),
-			fmt.Sprintf("ctrl-x:execute-silent(%s workspace remove --path {2} --quiet)+reload(%s workspace --print)", self, self),
+			fmt.Sprintf("ctrl-x:execute-silent(%s workspace remove --path {2} --quiet)+reload(%s fzf workspace items)", self, self),
 			"ctrl-/:toggle-preview",
 		},
-		Preview:       fmt.Sprintf("%s workspace preview --path {2}", self),
+		Preview:       fmt.Sprintf("%s fzf workspace preview --path {2}", self),
 		PreviewWindow: "follow",
 		Delimiter:     "\t",
 		WithNth:       "1",
 		ANSI:          true,
 	})
 	if err != nil || sel == "" {
-		return
+		return nil
 	}
-	if err := session.Open(repo.TrimSlash(rowPath(sel)), session.OpenOptions{}); err != nil {
-		notify.Error(err.Error())
-	}
+	return session.Open(repo.TrimSlash(rowPath(sel)), session.OpenOptions{})
 }
 
 // RunAdd handles `jmux workspace add`: pick a bare repo, then run the worktree
 // branch flow against it.
-func RunAdd() {
+func RunAdd() error {
 	repos := repo.BareRepos()
 	if len(repos) == 0 {
 		notify.Info("No bare repos found")
-		return
+		return nil
 	}
 	sel, err := fzfutil.Pick(repos, fzfutil.Options{Prompt: "repo> "})
 	if err != nil || sel == "" {
-		return
+		return nil
 	}
-	if err := worktree.AddWorktree(repo.TrimSlash(sel)); err != nil {
-		notify.Error(err.Error())
-	}
+	return worktree.AddWorktree(repo.TrimSlash(sel))
 }
 
 // RunRemove handles `jmux workspace remove --path P [--quiet]`. A worktree-backed
 // workspace is removed (worktree + session); any other workspace just has its
-// session closed — the directory is never deleted.
-func RunRemove(args []string) {
+// session closed — the directory is never deleted. --quiet suppresses the
+// success messages; failures still propagate.
+func RunRemove(args []string) error {
 	fs := flag.NewFlagSet("workspace remove", flag.ExitOnError)
 	pathArg := fs.String("path", "", "Workspace path to remove")
 	quiet := fs.Bool("quiet", false, "Suppress tmux display-message status")
@@ -160,19 +151,18 @@ func RunRemove(args []string) {
 
 	path := repo.TrimSlash(*pathArg)
 	if path == "" {
-		return
+		return nil
 	}
 
 	if worktree.IsManagedWorktree(path) {
 		msg, err := worktree.Remove(path)
-		if !*quiet {
-			if err != nil {
-				notify.Error(err.Error())
-			} else {
-				notify.Info(msg)
-			}
+		if err != nil {
+			return err
 		}
-		return
+		if !*quiet {
+			notify.Info(msg)
+		}
+		return nil
 	}
 
 	name := session.Name(path)
@@ -180,10 +170,11 @@ func RunRemove(args []string) {
 		if !*quiet {
 			notify.Infof("No session for '%s'", filepath.Base(path))
 		}
-		return
+		return nil
 	}
 	session.Kill(name)
 	if !*quiet {
 		notify.Infof("Closed workspace '%s'", filepath.Base(path))
 	}
+	return nil
 }

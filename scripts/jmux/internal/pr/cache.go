@@ -76,9 +76,10 @@ func formatRows(results []ghctl.SearchResult) []string {
 	return items
 }
 
-// RunItems handles `jmux pr items [--refresh]`: print the picker rows to stdout
-// for fzf's reload binding. On a refresh error it falls back to the cached rows
-// so the picker keeps its current list rather than clearing.
+// RunItems handles `jmux fzf pr items [--refresh|--repo <slug>]`: print the
+// picker rows to stdout for fzf's reload bindings. On a refresh error it falls
+// back to the cached rows so the picker keeps its current list rather than
+// clearing.
 func RunItems(args []string) {
 	if len(args) >= 2 && args[0] == "--repo" {
 		if err := printRepoItems(args[1]); err != nil {

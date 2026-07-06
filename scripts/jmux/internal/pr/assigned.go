@@ -8,7 +8,6 @@ import (
 	"jmux/internal/fzfutil"
 	"jmux/internal/ghctl"
 	"jmux/internal/gitctl"
-	"jmux/internal/notify"
 	"jmux/internal/repo"
 )
 
@@ -16,25 +15,22 @@ import (
 // your review or are assigned to you. Unlike `jmux pr <dir>` it isn't tied to
 // one repo — it searches every repo, then maps the chosen PR back to a local
 // clone to check out as usual.
-func RunAssigned() {
+func RunAssigned() error {
 	if !ghctl.Available() {
-		notify.Error(noGHMsg)
-		return
+		return errNoGH
 	}
 
 	self := shellQuote(fzfutil.Self())
-	sel, err := pickPR("prs> ", self+" pr items", self+" pr items --refresh")
+	sel, err := pickPR("prs> ", self+" fzf pr items", self+" fzf pr items --refresh")
 	if err != nil || sel == "" {
-		return
+		return nil
 	}
 
 	slug, num, ok := parseRepoNumber(sel)
 	if !ok {
-		return
+		return nil
 	}
-	if err := reviewSelection(slug, num, sel); err != nil {
-		notify.Error(err.Error())
-	}
+	return reviewSelection(slug, num, sel)
 }
 
 // reviewSelection maps a picked cross-repo PR to its local clone and reviews it.

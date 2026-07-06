@@ -3,100 +3,123 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"jmux/internal/claudectl"
+	"jmux/internal/notify"
 	"jmux/internal/pr"
 	"jmux/internal/session"
 	"jmux/internal/workspace"
 	"jmux/internal/worktree"
 )
 
+// main reports command failures (the sole notify.Error point) and maps them to
+// the exit code. Commands report their own notify.Info-level outcomes.
 func main() {
-	args := os.Args[1:]
-
-	if len(args) == 0 {
-		session.RunPicker()
-		return
+	if err := run(os.Args[1:]); err != nil {
+		notify.Error(err.Error())
+		os.Exit(1)
 	}
+}
 
+func run(args []string) error {
+	if len(args) == 0 {
+		return session.RunPicker()
+	}
 	switch args[0] {
 	case "workspace":
-		runWorkspace(args[1:])
+		return runWorkspace(args[1:])
 	case "worktree":
-		runWorktree(args[1:])
+		return runWorktree(args[1:])
 	case "pr":
-		runPR(args[1:])
+		return runPR(args[1:])
+	case "fzf":
+		return runFzf(args[1:])
 	case "claude":
 		if err := claudectl.Run(args[1:]); err != nil {
-			fmt.Fprintf(os.Stderr, "jmux claude: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("claude: %w", err)
 		}
+		return nil
 	case "-h", "--help", "help":
 		usage()
+		return nil
 	default:
-		fmt.Fprintf(os.Stderr, "jmux: unknown subcommand %q\n", args[0])
-		usage()
-		os.Exit(1)
+		return badUsage("jmux: unknown subcommand %q", args[0])
 	}
 }
 
-func runWorkspace(args []string) {
+func runWorkspace(args []string) error {
 	if len(args) == 0 {
-		workspace.RunPicker(nil)
-		return
+		return workspace.RunPicker()
 	}
 	switch args[0] {
 	case "add":
-		workspace.RunAdd()
+		return workspace.RunAdd()
 	case "remove":
-		workspace.RunRemove(args[1:])
-	case "preview":
-		workspace.RunPreview(args[1:])
-	case "--print":
-		workspace.RunPicker(args)
+		return workspace.RunRemove(args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "jmux workspace: unknown subcommand %q\n", args[0])
-		usage()
-		os.Exit(1)
+		return badUsage("jmux workspace: unknown subcommand %q", args[0])
 	}
 }
 
-func runWorktree(args []string) {
+func runWorktree(args []string) error {
 	if len(args) == 0 {
-		worktree.RunPicker(nil)
-		return
+		return worktree.RunPicker()
 	}
 	switch args[0] {
 	case "add":
-		worktree.RunAdd(args[1:])
+		return worktree.RunAdd()
 	case "remove":
-		worktree.RunRemove(args[1:])
-	case "--print":
-		worktree.RunPicker(args)
+		return worktree.RunRemove(args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "jmux worktree: unknown subcommand %q\n", args[0])
-		usage()
-		os.Exit(1)
+		return badUsage("jmux worktree: unknown subcommand %q", args[0])
 	}
 }
 
-func runPR(args []string) {
+func runPR(args []string) error {
 	if len(args) == 0 {
-		pr.RunAssigned()
-		return
+		return pr.RunAssigned()
 	}
-	switch args[0] {
-	case "preview":
-		pr.RunPreview(args[1:])
-	case "items":
-		pr.RunItems(args[1:])
-	default:
-		if num, ok := pr.ParseNumber(args[0]); ok {
-			pr.RunNumber(num)
-			return
+	if num, ok := pr.ParseNumber(args[0]); ok {
+		return pr.RunNumber(num)
+	}
+	return pr.RunRepo(args[0])
+}
+
+// runFzf dispatches `jmux fzf <picker> items|preview` — plumbing invoked by
+// fzf bindings, not humans. Void by design: stdout belongs to fzf, so these
+// report locally rather than propagate.
+func runFzf(args []string) error {
+	if len(args) >= 2 {
+		switch args[0] + " " + args[1] {
+		case "workspace items":
+			workspace.RunItems()
+			return nil
+		case "workspace preview":
+			workspace.RunPreview(args[2:])
+			return nil
+		case "worktree items":
+			worktree.RunItems()
+			return nil
+		case "pr items":
+			pr.RunItems(args[2:])
+			return nil
+		case "pr preview":
+			pr.RunPreview(args[2:])
+			return nil
 		}
-		pr.RunRepo(args[0])
 	}
+	return badUsage("jmux fzf: unknown command %q", strings.Join(args, " "))
+}
+
+// badUsage prints the complaint and usage to stderr and exits 1 directly:
+// argument mistakes are made at a terminal, where stderr beats a status-line
+// notification.
+func badUsage(format string, args ...any) error {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	usage()
+	os.Exit(1)
+	return nil
 }
 
 func usage() {
@@ -108,13 +131,10 @@ func usage() {
   jmux workspace remove --path P [--quiet]
                                 Remove a worktree-backed workspace, or close the
                                 session for a plain one (never deletes the dir)
-  jmux workspace preview --path P
-                                Print a summary of P (used by fzf --preview)
   jmux worktree                 Open the worktrees picker (ctrl-x removes)
   jmux worktree add             Create a worktree from a remote branch
-  jmux worktree remove          Remove a worktree (interactive)
-  jmux worktree remove --path P --quiet
-                                Remove a specific worktree (used by ctrl-x bind)
+  jmux worktree remove [--path P] [--quiet]
+                                Remove a worktree (interactive without --path)
   jmux pr                       Review queue: PRs across all your repos that await
                                 your review, are assigned to you, or you created
                                 (body + threads in the preview; ctrl-r refreshes),
@@ -123,5 +143,8 @@ func usage() {
                                 assignment (jmux pr . for the current repo)
   jmux pr <num>                 Review PR <num> in the current repo directly
   jmux claude [args...]         Launch claude paired with the nvim instance
-                                whose workspace contains the current directory`)
+                                whose workspace contains the current directory
+  jmux fzf <picker> items|preview
+                                Internal: list rows / render previews for the
+                                pickers' fzf bindings`)
 }

@@ -2,7 +2,6 @@ package session
 
 import (
 	"jmux/internal/fzfutil"
-	"jmux/internal/notify"
 	"jmux/internal/repo"
 )
 
@@ -26,16 +25,14 @@ func allDirs() []string {
 
 // RunPicker handles `jmux` (the default subcommand): picks a session dir and
 // opens it.
-func RunPicker() {
+func RunPicker() error {
 	dirs := allDirs()
 	if len(dirs) == 0 {
-		return
+		return nil
 	}
 	sel, err := fzfutil.Pick(dirs, fzfutil.Options{Prompt: "session> "})
 	if err != nil || sel == "" {
-		return
+		return nil
 	}
-	if err := Open(repo.TrimSlash(sel), OpenOptions{}); err != nil {
-		notify.Error(err.Error())
-	}
+	return Open(repo.TrimSlash(sel), OpenOptions{})
 }

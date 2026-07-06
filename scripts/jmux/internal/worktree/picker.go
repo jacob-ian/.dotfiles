@@ -1,7 +1,6 @@
 package worktree
 
 import (
-	"flag"
 	"fmt"
 	"strings"
 
@@ -16,23 +15,18 @@ func AllFeatureWorktrees() []string {
 	return repo.ScanReposParallel(roots, repo.FeatureWorktrees)
 }
 
-// RunPicker with --print just lists worktree paths to stdout; this form is
-// what the ctrl-x remove binding reloads against.
-func RunPicker(args []string) {
-	fs := flag.NewFlagSet("worktree", flag.ExitOnError)
-	printOnly := fs.Bool("print", false, "Print worktree paths and exit")
-	fs.Parse(args)
+// RunItems handles `jmux fzf worktree items`: print worktree paths for the
+// picker's reload binding.
+func RunItems() {
+	fmt.Println(strings.Join(AllFeatureWorktrees(), "\n"))
+}
 
+// RunPicker handles `jmux worktree`: the feature-worktrees picker.
+func RunPicker() error {
 	dirs := AllFeatureWorktrees()
-
-	if *printOnly {
-		fmt.Println(strings.Join(dirs, "\n"))
-		return
-	}
-
 	if len(dirs) == 0 {
 		notify.Info("No worktrees found")
-		return
+		return nil
 	}
 
 	self := fzfutil.Self()
@@ -40,16 +34,14 @@ func RunPicker(args []string) {
 		Prompt: "worktree> ",
 		Header: "ctrl-x: remove worktree · ctrl-/: toggle preview",
 		Bindings: []string{
-			fmt.Sprintf("ctrl-x:execute-silent(%s worktree remove --path {} --quiet)+reload(%s worktree --print)", self, self),
+			fmt.Sprintf("ctrl-x:execute-silent(%s worktree remove --path {} --quiet)+reload(%s fzf worktree items)", self, self),
 			"ctrl-/:toggle-preview",
 		},
-		Preview:       fmt.Sprintf("%s workspace preview --path {}", self),
+		Preview:       fmt.Sprintf("%s fzf workspace preview --path {}", self),
 		PreviewWindow: "follow",
 	})
 	if err != nil || sel == "" {
-		return
+		return nil
 	}
-	if err := session.Open(repo.TrimSlash(sel), session.OpenOptions{}); err != nil {
-		notify.Error(err.Error())
-	}
+	return session.Open(repo.TrimSlash(sel), session.OpenOptions{})
 }

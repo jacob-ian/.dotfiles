@@ -22,8 +22,8 @@ import (
 	"jmux/internal/worktree"
 )
 
-// noGHMsg is shown by every command that needs the gh CLI on PATH.
-const noGHMsg = "gh CLI not found — install the GitHub CLI to review PRs"
+// errNoGH is returned by every command that needs the gh CLI on PATH.
+var errNoGH = errors.New("gh CLI not found — install the GitHub CLI to review PRs")
 
 // errNoBareRepos marks a "nothing to work with" outcome that commands show as
 // plain info rather than a red error.
@@ -32,70 +32,60 @@ var errNoBareRepos = errors.New("no bare repos found")
 // RunRepo handles `jmux pr <dir>`: list one repo's open PRs and review the
 // choice. dir picks the repo ("" or "." = current); the global queue is
 // RunAssigned.
-func RunRepo(dir string) {
+func RunRepo(dir string) error {
 	if !ghctl.Available() {
-		notify.Error(noGHMsg)
-		return
+		return errNoGH
 	}
 	bareRoot, slug, err := resolveRepoSlug(dir)
 	if errors.Is(err, errNoBareRepos) {
 		notify.Info("No bare repos found")
-		return
+		return nil
 	}
 	if err != nil {
-		notify.Error(err.Error())
-		return
+		return err
 	}
 	if bareRoot == "" {
-		return
+		return nil
 	}
 
-	itemsCmd := fmt.Sprintf("%s pr items --repo %s", shellQuote(fzfutil.Self()), shellQuote(slug))
+	itemsCmd := fmt.Sprintf("%s fzf pr items --repo %s", shellQuote(fzfutil.Self()), shellQuote(slug))
 	sel, err := pickPR("pr> ", itemsCmd, itemsCmd)
 	if err != nil || sel == "" {
-		return
+		return nil
 	}
 
 	_, num, ok := parseRepoNumber(sel)
 	if !ok {
-		return
+		return nil
 	}
 	headRef, err := resolveHeadRef(sel, slug, num)
 	if err != nil {
-		notify.Error(err.Error())
-		return
+		return err
 	}
-	if err := review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef, BaseRefName: rowBaseRef(sel)}); err != nil {
-		notify.Error(err.Error())
-	}
+	return review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef, BaseRefName: rowBaseRef(sel)})
 }
 
 // RunNumber handles `jmux pr <num>`: review the PR directly, skipping the picker.
-func RunNumber(num int) {
+func RunNumber(num int) error {
 	if !ghctl.Available() {
-		notify.Error(noGHMsg)
-		return
+		return errNoGH
 	}
 	bareRoot, slug, err := resolveRepoSlug("")
 	if errors.Is(err, errNoBareRepos) {
 		notify.Info("No bare repos found")
-		return
+		return nil
 	}
 	if err != nil {
-		notify.Error(err.Error())
-		return
+		return err
 	}
 	if bareRoot == "" {
-		return
+		return nil
 	}
 	p, err := ghctl.GetPR(slug, num)
 	if err != nil {
-		notify.Errorf("look up PR #%d: %s", num, gitctl.CleanErr(err))
-		return
+		return fmt.Errorf("look up PR #%d: %s", num, gitctl.CleanErr(err))
 	}
-	if err := review(bareRoot, p); err != nil {
-		notify.Error(err.Error())
-	}
+	return review(bareRoot, p)
 }
 
 // pickPR opens the PR picker: start:reload fills the list asynchronously behind
@@ -111,7 +101,7 @@ func pickPR(prompt, itemsCmd, refreshCmd string) (string, error) {
 			fmt.Sprintf("load:change-prompt(%s)", prompt),
 			fmt.Sprintf("ctrl-r:change-prompt(refreshing… )+reload(%s)", refreshCmd),
 		},
-		Preview:       fmt.Sprintf("%s pr preview {}", shellQuote(fzfutil.Self())),
+		Preview:       fmt.Sprintf("%s fzf pr preview {}", shellQuote(fzfutil.Self())),
 		PreviewWindow: "right:60%:wrap",
 		Delimiter:     "\t",
 		WithNth:       "1",

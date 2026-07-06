@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -17,9 +18,9 @@ import (
 
 // RunRemove handles `jmux worktree remove`.
 //   - With --path P: skip fzf and target P directly.
-//   - With --quiet:  suppress tmux display-message.
+//   - With --quiet:  suppress the success message (failures still propagate).
 //   - Without flags: open an fzf picker rooted at the bare repo of cwd.
-func RunRemove(args []string) {
+func RunRemove(args []string) error {
 	fs := flag.NewFlagSet("worktree remove", flag.ExitOnError)
 	pathArg := fs.String("path", "", "Worktree path to remove (skips fzf)")
 	quiet := fs.Bool("quiet", false, "Suppress tmux display-message status")
@@ -29,35 +30,32 @@ func RunRemove(args []string) {
 	if target == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
-			notify.Error("Failed to read cwd")
-			return
+			return fmt.Errorf("reading cwd: %w", err)
 		}
 		bareRoot := gitctl.CommonDir(cwd)
 		if bareRoot == "" {
-			notify.Error("Not in a bare repo worktree")
-			return
+			return errors.New("not in a bare repo worktree")
 		}
 		candidates := repo.BareRepoWorktrees(bareRoot, true)
 		if len(candidates) == 0 {
 			notify.Info("No removable worktrees")
-			return
+			return nil
 		}
 		sel, err := fzfutil.Pick(candidates, fzfutil.Options{Prompt: "remove worktree> "})
 		if err != nil || sel == "" {
-			return
+			return nil
 		}
 		target = repo.TrimSlash(sel)
 	}
 
 	msg, err := Remove(target)
-	if *quiet {
-		return
-	}
 	if err != nil {
-		notify.Error(err.Error())
-		return
+		return err
 	}
-	notify.Info(msg)
+	if !*quiet {
+		notify.Info(msg)
+	}
+	return nil
 }
 
 // IsManagedWorktree reports whether path is a jmux-removable worktree: it lives
