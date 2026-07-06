@@ -33,6 +33,31 @@ func TestFormatRowRoundTrips(t *testing.T) {
 	}
 }
 
+func TestFormatItemsRowRoundTrips(t *testing.T) {
+	line := formatItemsRow("eucalyptusvc/mobile", 42, true, "Add widget", "octocat", "feat/widget", "release/1.2")
+	if slug, num, ok := parseRepoNumber(line); !ok || slug != "eucalyptusvc/mobile" || num != 42 {
+		t.Fatalf("parseRepoNumber(formatItemsRow(...)) = (%q, %d, %v); line=%q", slug, num, ok, line)
+	}
+	if got := rowHeadRef(line); got != "feat/widget" {
+		t.Errorf("rowHeadRef = %q, want %q", got, "feat/widget")
+	}
+	if got := rowBaseRef(line); got != "release/1.2" {
+		t.Errorf("rowBaseRef = %q, want %q", got, "release/1.2")
+	}
+}
+
+// Older rows (from a cache written before the base field existed) carry only the
+// head branch; rowBaseRef must degrade to "" rather than misread another field.
+func TestRowRefsTolerateMissingBaseField(t *testing.T) {
+	line := formatRow("owner/repo", 7, false, "Title", "author") + "\tfeat/x"
+	if got := rowHeadRef(line); got != "feat/x" {
+		t.Errorf("rowHeadRef = %q, want %q", got, "feat/x")
+	}
+	if got := rowBaseRef(line); got != "" {
+		t.Errorf("rowBaseRef = %q, want %q", got, "")
+	}
+}
+
 func TestParseRepoNumber(t *testing.T) {
 	cases := []struct {
 		in       string

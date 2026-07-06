@@ -78,7 +78,7 @@ func RunRepo(dir string) {
 			return
 		}
 	}
-	if err := review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef}); err != nil {
+	if err := review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef, BaseRefName: rowBaseRef(sel)}); err != nil {
 		notify.Error(err.Error())
 	}
 }
@@ -139,12 +139,18 @@ func review(bareRoot string, p ghctl.PR) error {
 func checkoutWorktree(bareRoot string, p ghctl.PR, phase chan<- string) (string, error) {
 	branch := p.HeadRefName
 
-	// Refresh the base branch (even on the reuse paths below) so the diff's
-	// base...HEAD resolves against an up-to-date base. Best effort: a failed fetch
-	// (e.g. offline) shouldn't stop the PR opening.
-	if def := gitctl.DefaultBranch(bareRoot); def != "" {
-		phase <- "fetching " + def + "…"
-		_ = gitctl.FetchBranch(bareRoot, def)
+	// Refresh the PR's base branch (even on the reuse paths below) so the diff's
+	// base...HEAD resolves against an up-to-date base. baseRefName is the PR's
+	// actual target, which isn't always the repo default (stacked or
+	// release-branch PRs); fall back to the default branch when we don't know it.
+	// Best effort: a failed fetch (e.g. offline) shouldn't stop the PR opening.
+	base := p.BaseRefName
+	if base == "" {
+		base = gitctl.DefaultBranch(bareRoot)
+	}
+	if base != "" {
+		phase <- "fetching " + base + "…"
+		_ = gitctl.FetchBranch(bareRoot, base)
 	}
 
 	path := filepath.Join(bareRoot, branch)
@@ -203,20 +209,29 @@ func formatRow(slug string, num int, draft bool, title, login string) string {
 	return fmt.Sprintf("%s#%d  %s%s  ·  %s", slug, num, tag, title, login)
 }
 
-// formatItemsRow appends the head branch as a hidden tab field so selection can
-// read it (via rowHeadRef) instead of doing a separate HeadRef lookup.
-func formatItemsRow(slug string, num int, draft bool, title, login, headRef string) string {
-	return formatRow(slug, num, draft, title, login) + "\t" + headRef
+// formatItemsRow appends the head and base branches as hidden tab fields so
+// selection can read them (via rowHeadRef/rowBaseRef) instead of a separate
+// lookup. fzf shows only the first field (WithNth "1"), so the branches stay
+// hidden while riding along in the returned selection.
+func formatItemsRow(slug string, num int, draft bool, title, login, headRef, baseRef string) string {
+	return formatRow(slug, num, draft, title, login) + "\t" + headRef + "\t" + baseRef
 }
 
-// rowHeadRef returns the hidden head-branch field from a picker row, or "" when
-// absent.
-func rowHeadRef(line string) string {
-	if i := strings.IndexByte(line, '\t'); i >= 0 {
-		return strings.TrimSpace(line[i+1:])
+// rowField returns the n-th tab-separated field of a picker row (0 = visible
+// column), or "" when absent — tolerating older rows that carry fewer fields.
+func rowField(line string, n int) string {
+	parts := strings.Split(line, "\t")
+	if n < len(parts) {
+		return strings.TrimSpace(parts[n])
 	}
 	return ""
 }
+
+// rowHeadRef returns the hidden head-branch field from a picker row, or "".
+func rowHeadRef(line string) string { return rowField(line, 1) }
+
+// rowBaseRef returns the hidden base-branch field from a picker row, or "".
+func rowBaseRef(line string) string { return rowField(line, 2) }
 
 // ParseNumber extracts the leading PR number from a picker row or CLI argument.
 func ParseNumber(s string) (int, bool) {

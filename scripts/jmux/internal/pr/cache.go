@@ -119,7 +119,7 @@ func loadResults(refresh bool) ([]ghctl.SearchResult, error) {
 func formatRows(results []ghctl.SearchResult) []string {
 	items := make([]string, len(results))
 	for i, r := range results {
-		items[i] = formatItemsRow(r.Repository.NameWithOwner, r.Number, r.IsDraft, r.Title, r.Author.Login, r.HeadRefName)
+		items[i] = formatItemsRow(r.Repository.NameWithOwner, r.Number, r.IsDraft, r.Title, r.Author.Login, r.HeadRefName, r.BaseRefName)
 	}
 	return items
 }
@@ -154,6 +154,6 @@ func runRepoItems(slug string) {
 		return
 	}
 	for _, p := range prs {
-		fmt.Println(formatItemsRow(slug, p.Number, p.IsDraft, p.Title, p.Author.Login, p.HeadRefName))
+		fmt.Println(formatItemsRow(slug, p.Number, p.IsDraft, p.Title, p.Author.Login, p.HeadRefName, p.BaseRefName))
 	}
 }

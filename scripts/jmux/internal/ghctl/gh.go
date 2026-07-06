@@ -26,6 +26,7 @@ type PR struct {
 	Title       string
 	IsDraft     bool
 	HeadRefName string
+	BaseRefName string
 	Author      struct {
 		Login string
 	}
@@ -37,6 +38,7 @@ type SearchResult struct {
 	Title       string
 	IsDraft     bool
 	HeadRefName string
+	BaseRefName string
 	Repository  struct {
 		Name          string
 		NameWithOwner string
@@ -86,13 +88,16 @@ type pull struct {
 	Head   struct {
 		Ref string `json:"ref"`
 	} `json:"head"`
+	Base struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
 	User struct {
 		Login string `json:"login"`
 	} `json:"user"`
 }
 
 func (p pull) toPR() PR {
-	pr := PR{Number: p.Number, Title: p.Title, IsDraft: p.Draft, HeadRefName: p.Head.Ref}
+	pr := PR{Number: p.Number, Title: p.Title, IsDraft: p.Draft, HeadRefName: p.Head.Ref, BaseRefName: p.Base.Ref}
 	pr.Author.Login = p.User.Login
 	return pr
 }
@@ -141,6 +146,7 @@ fragment prFields on PullRequest {
   title
   isDraft
   headRefName
+  baseRefName
   author { login }
   repository { name nameWithOwner }
 }`
@@ -158,6 +164,7 @@ type prSearchBlock struct {
 		Title       string `json:"title"`
 		IsDraft     bool   `json:"isDraft"`
 		HeadRefName string `json:"headRefName"`
+		BaseRefName string `json:"baseRefName"`
 		Author      struct {
 			Login string `json:"login"`
 		} `json:"author"`
@@ -215,7 +222,7 @@ func SearchMyPRs(orgs []string) ([]SearchResult, error) {
 			}
 			seen[key] = true
 			var r SearchResult
-			r.Number, r.Title, r.IsDraft, r.HeadRefName = n.Number, n.Title, n.IsDraft, n.HeadRefName
+			r.Number, r.Title, r.IsDraft, r.HeadRefName, r.BaseRefName = n.Number, n.Title, n.IsDraft, n.HeadRefName, n.BaseRefName
 			r.Author.Login = n.Author.Login
 			r.Repository.Name = n.Repository.Name
 			r.Repository.NameWithOwner = n.Repository.NameWithOwner

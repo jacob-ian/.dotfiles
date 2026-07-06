@@ -2150,6 +2150,22 @@ function M.browser()
   end)
 end
 
+-- ensure_base makes sure the PR base commit is present in the local object store.
+-- baseRefOid is GitHub's current tip of the base branch, which advances whenever
+-- anything merges into it; if we haven't fetched since, that SHA is absent and
+-- DiffviewOpen fails with "not a valid object name". GitHub serves fetch-by-sha,
+-- so pull just that one commit on demand. Returns true once the base is available.
+local function ensure_base(base)
+  if sh { "git", "cat-file", "-e", base .. "^{commit}" } then
+    return true
+  end
+  local _, err = sh { "git", "fetch", "--no-tags", "origin", base }
+  if sh { "git", "cat-file", "-e", base .. "^{commit}" } then
+    return true
+  end
+  return false, err
+end
+
 -- diff opens the PR's changes — base...HEAD, the merge-base range GitHub shows —
 -- in diffview, where pending comments appear as gutter signs. load() first so a
 -- restored review decorates on open. Resolving the base is one gh call, cached.
@@ -2161,6 +2177,14 @@ function M.diff()
   local pr, err = pr_info()
   if not pr or not pr.base then
     vim.notify(err or "could not resolve PR base", vim.log.levels.ERROR)
+    return
+  end
+  local ok_base, berr = ensure_base(pr.base)
+  if not ok_base then
+    vim.notify(
+      "could not fetch PR base " .. pr.base:sub(1, 7) .. ": " .. (berr or ""),
+      vim.log.levels.ERROR
+    )
     return
   end
   vim.cmd("DiffviewOpen " .. pr.base .. "...HEAD")
