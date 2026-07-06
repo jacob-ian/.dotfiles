@@ -18,6 +18,7 @@ return {
       "go",
       "gomod",
       "gosum",
+      "gotmpl",
       "graphql",
       "hcl",
       "html",
