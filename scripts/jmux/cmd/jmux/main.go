@@ -157,30 +157,20 @@ func badUsage(format string, args ...any) error {
 func usage() {
 	fmt.Fprintln(os.Stderr, `Usage:
   jmux                          Open the all-dirs picker
-  jmux workspace                Open the workspace overview: open sessions +
-                                feature worktrees (ctrl-t adds, ctrl-x removes)
-  jmux workspace add            Pick a bare repo, then create a worktree from it
+  jmux workspace                Overview picker: open sessions + feature worktrees
+  jmux workspace add            Pick a bare repo and create a worktree in it
   jmux workspace remove --path P [--quiet]
-                                Remove a worktree-backed workspace, or close the
-                                session for a plain one (never deletes the dir)
-  jmux worktree                 Open the worktrees picker (ctrl-x removes)
+                                Remove the workspace (never deletes a plain dir)
+  jmux worktree                 Open the worktrees picker
   jmux worktree add             Create a worktree from a remote branch
   jmux worktree remove [--path P] [--quiet]
-                                Remove a worktree (interactive without --path)
-  jmux pr                       Review queue: PRs across all your repos that await
-                                your review, are assigned to you, or you created
-                                (body + threads in the preview; ctrl-r refreshes),
-                                then check one out into a worktree and open it
-  jmux pr <dir>                 Open PRs for the repo at <dir>, regardless of
-                                assignment (jmux pr . for the current repo)
-  jmux pr <num>                 Review PR <num> in the current repo directly
-  jmux repo clone <url>         Clone as a bare repo into a scan root, set up
-                                origin refs, and open the default-branch worktree
-  jmux claude [args...]         Launch claude paired with the nvim instance
-                                whose workspace contains the current directory
-  jmux claude notify            Notification hook: post a macOS alert that
-                                focuses this pane on click (via jmux claude focus)
+                                Remove a worktree
+  jmux pr                       Review queue: check a PR out into a worktree
+  jmux pr <dir>                 PRs for the repo at <dir> (. for current)
+  jmux pr <num>                 Review PR <num> in the current repo
+  jmux repo clone <url>         Bare-clone into a scan root and open main
+  jmux claude [args...]         Launch claude paired with this workspace's nvim
+  jmux claude notify            Notification hook: clickable macOS alert
   jmux fzf <picker> items|preview
-                                Internal: list rows / render previews for the
-                                pickers' fzf bindings`)
+                                Internal fzf plumbing`)
 }
