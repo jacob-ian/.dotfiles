@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"jmux/internal/claudectl"
+	"jmux/internal/clone"
 	"jmux/internal/notify"
 	"jmux/internal/pr"
 	"jmux/internal/session"
@@ -33,6 +34,8 @@ func run(args []string) error {
 		return runWorktree(args[1:])
 	case "pr":
 		return runPR(args[1:])
+	case "repo":
+		return runRepo(args[1:])
 	case "fzf":
 		return runFzf(args[1:])
 	case "claude":
@@ -70,6 +73,21 @@ func runWorktree(args []string) error {
 		return worktree.RunRemove(args[1:])
 	default:
 		return badUsage("jmux worktree: unknown subcommand %q", args[0])
+	}
+}
+
+func runRepo(args []string) error {
+	if len(args) == 0 {
+		return badUsage("jmux repo: expected clone <url>")
+	}
+	switch args[0] {
+	case "clone":
+		if len(args) != 2 {
+			return badUsage("jmux repo clone: expected <url>")
+		}
+		return clone.Run(args[1])
+	default:
+		return badUsage("jmux repo: unknown subcommand %q", args[0])
 	}
 }
 
@@ -156,6 +174,8 @@ func usage() {
   jmux pr <dir>                 Open PRs for the repo at <dir>, regardless of
                                 assignment (jmux pr . for the current repo)
   jmux pr <num>                 Review PR <num> in the current repo directly
+  jmux repo clone <url>         Clone as a bare repo into a scan root, set up
+                                origin refs, and open the default-branch worktree
   jmux claude [args...]         Launch claude paired with the nvim instance
                                 whose workspace contains the current directory
   jmux claude notify            Notification hook: post a macOS alert that

@@ -233,6 +233,24 @@ func LogOneline(dir, revRange string, n int) string {
 	return strings.TrimRight(out, "\n")
 }
 
+// CloneBare clones url as a bare repo at dest, running from dir.
+func CloneBare(dir, url, dest string) error {
+	return gitRun(dir, "clone", "--bare", url, dest)
+}
+
+// SetupBareRemote gives a fresh bare clone the remote plumbing the rest of
+// jmux assumes: a fetch refspec (clone --bare sets none, leaving FetchBranch
+// inert), populated origin/* refs, and origin/HEAD (what DefaultBranch reads).
+func SetupBareRemote(bareRoot string) error {
+	if err := gitRun(bareRoot, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
+		return err
+	}
+	if err := gitRun(bareRoot, "fetch", "origin"); err != nil {
+		return err
+	}
+	return gitRun(bareRoot, "remote", "set-head", "origin", "--auto")
+}
+
 // WorktreeRemove removes a worktree from git's view. Use force to drop
 // uncommitted changes. bareRoot may be "" to run in the current process cwd.
 func WorktreeRemove(bareRoot, path string, force bool) error {
