@@ -1,6 +1,17 @@
 package pr
 
-import "testing"
+import (
+	"os"
+	"testing"
+
+	"jmux/internal/tag"
+)
+
+// TestMain wires the pr tag renderer, as main does for the binary.
+func TestMain(m *testing.M) {
+	RegisterTag()
+	os.Exit(m.Run())
+}
 
 func TestParseNumber(t *testing.T) {
 	cases := []struct {
@@ -118,5 +129,12 @@ func TestShellQuote(t *testing.T) {
 		if got := shellQuote(in); got != want {
 			t.Errorf("shellQuote(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestTagRenders(t *testing.T) {
+	got := tag.New(tagKind, "", tagData{Number: 42}).Text()
+	if got != "\uf407 #42" {
+		t.Errorf("pr tag Text() = %q, want the glyph and #42", got)
 	}
 }

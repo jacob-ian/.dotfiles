@@ -17,6 +17,11 @@ import (
 // main reports command failures (the sole notify.Error point) and maps them to
 // the exit code. Commands report their own notify.Info-level outcomes.
 func main() {
+	// Tag renderers wire here, not in init, so the binary's badge vocabulary
+	// is explicit.
+	claudectl.RegisterTag()
+	pr.RegisterTag()
+
 	if err := run(os.Args[1:]); err != nil {
 		notify.Error(err.Error())
 		os.Exit(1)

@@ -73,7 +73,7 @@ func displayRows(dirs []string) []string {
 	panes := tmuxctl.PaneWindows()
 	rows := make([]string, len(dirs))
 	for i, d := range dirs {
-		var live []tag.Badge
+		var live []tag.Tag
 		paned := 0
 		for _, b := range tagged[repo.Resolve(d)] {
 			if b.Pane != "" {
@@ -87,7 +87,7 @@ func displayRows(dirs []string) []string {
 		// Namespace order is arbitrary for pane-carrying badges (session ids);
 		// order them by window index instead, matching the tmux status line.
 		// Pane-less badges sort as -1, keeping them first in namespace order.
-		slices.SortStableFunc(live, func(a, b tag.Badge) int {
+		slices.SortStableFunc(live, func(a, b tag.Tag) int {
 			return cmp.Compare(windowIndex(a, panes), windowIndex(b, panes))
 		})
 		display := d
@@ -106,9 +106,9 @@ func displayRows(dirs []string) []string {
 	return rows
 }
 
-// windowIndex returns b's window index for sorting, or -1 for badges without a
-// pane (or whose index doesn't parse), so they sort ahead of pane badges.
-func windowIndex(b tag.Badge, panes map[string]string) int {
+// windowIndex returns b's window index for sorting, or -1 for tags without a
+// pane (or whose index doesn't parse), so they sort ahead of pane tags.
+func windowIndex(b tag.Tag, panes map[string]string) int {
 	if b.Pane == "" {
 		return -1
 	}

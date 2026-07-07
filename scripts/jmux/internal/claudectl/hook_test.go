@@ -1,12 +1,19 @@
 package claudectl
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"jmux/internal/repo"
 	"jmux/internal/tag"
 )
+
+// TestMain wires the claude tag renderer, as main does for the binary.
+func TestMain(m *testing.M) {
+	RegisterTag()
+	os.Exit(m.Run())
+}
 
 // withCacheDir points os.UserCacheDir at a temp dir for the test, covering both
 // the linux ($XDG_CACHE_HOME) and darwin ($HOME/Library/Caches) resolutions.
@@ -22,7 +29,7 @@ func badgeText(dir string) string {
 	if len(badges) == 0 {
 		return ""
 	}
-	return badges[0].Text
+	return badges[0].Text()
 }
 
 func TestStatusTransitions(t *testing.T) {
@@ -62,14 +69,14 @@ func TestStatusPerSession(t *testing.T) {
 
 	status(hookInput{HookEventName: "Stop", CWD: dir, SessionID: "bbb"})
 	badges := tag.All()[repo.Resolve(dir)]
-	if badges[0].Text != "✻ working" || badges[1].Text != "✻ idle" {
+	if badges[0].Text() != "✻ working" || badges[1].Text() != "✻ idle" {
 		t.Fatalf("badges = %q, %q; want session aaa still working, bbb idle",
-			badges[0].Text, badges[1].Text)
+			badges[0].Text(), badges[1].Text())
 	}
 
 	status(hookInput{HookEventName: "SessionEnd", CWD: dir, SessionID: "bbb"})
 	badges = tag.All()[repo.Resolve(dir)]
-	if len(badges) != 1 || badges[0].Text != "✻ working" {
+	if len(badges) != 1 || badges[0].Text() != "✻ working" {
 		t.Fatalf("badges after bbb SessionEnd = %v, want only aaa working", badges)
 	}
 }

@@ -4,12 +4,14 @@
 package pr
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"jmux/internal/fzfutil"
 	"jmux/internal/ghctl"
@@ -21,6 +23,28 @@ import (
 	"jmux/internal/tag"
 	"jmux/internal/worktree"
 )
+
+const tagKind = "pr"
+
+type tagData struct {
+	Number int `json:"number"`
+}
+
+var registerTagOnce sync.Once
+
+// RegisterTag wires this package's workspace-tag renderer; idempotent so main
+// and tests can both call it. \uf407 is nf-oct-git_pull_request.
+func RegisterTag() {
+	registerTagOnce.Do(func() {
+		tag.Register(tagKind, func(data json.RawMessage) (string, tag.Color) {
+			var d tagData
+			if json.Unmarshal(data, &d) != nil || d.Number == 0 {
+				return "", ""
+			}
+			return fmt.Sprintf("\uf407 #%d", d.Number), tag.Cyan
+		})
+	})
+}
 
 // errNoGH is returned by every command that needs the gh CLI on PATH.
 var errNoGH = errors.New("gh CLI not found — install the GitHub CLI to review PRs")
@@ -137,7 +161,7 @@ func review(bareRoot string, p ghctl.PR) error {
 	if err != nil {
 		return fmt.Errorf("checkout PR #%d: %s", p.Number, gitctl.CleanErr(err))
 	}
-	tag.Set(path, "pr", tag.Badge{Text: fmt.Sprintf("PR #%d", p.Number), Color: tag.Cyan})
+	tag.Set(path, tagKind, tag.New(tagKind, "", tagData{Number: p.Number}))
 	return session.Open(path, session.OpenOptions{
 		WithClaude: true,
 		InstallCmd: worktree.DetectInstallCmd(path),

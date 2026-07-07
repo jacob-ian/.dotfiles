@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 
 	"jmux/internal/fzfutil"
 	"jmux/internal/gitctl"
@@ -37,6 +38,52 @@ const (
 	notifyElicitationDialog = "elicitation_dialog"
 )
 
+// sessionStatus is a session's state as reported by its hooks — the claude
+// tag's payload.
+type sessionStatus string
+
+const (
+	statusWorking    sessionStatus = "working"
+	statusNeedsInput sessionStatus = "needs_input"
+	statusIdle       sessionStatus = "idle"
+)
+
+// tagKind doubles as the namespace prefix: session namespaces are
+// "claude:<session_id>".
+const tagKind = "claude"
+
+type tagData struct {
+	Status sessionStatus `json:"status"`
+}
+
+var registerTagOnce sync.Once
+
+// RegisterTag wires this package's workspace-tag renderer; idempotent so main
+// and tests can both call it.
+func RegisterTag() {
+	registerTagOnce.Do(func() {
+		tag.Register(tagKind, func(data json.RawMessage) (string, tag.Color) {
+			var d tagData
+			if json.Unmarshal(data, &d) != nil {
+				return "", ""
+			}
+			switch d.Status {
+			case statusWorking:
+				return "✻ working", tag.Green
+			case statusNeedsInput:
+				return "✻ needs input", tag.Yellow
+			case statusIdle:
+				return "✻ idle", tag.Gray
+			}
+			return "", ""
+		})
+	})
+}
+
+func claudeTag(status sessionStatus, pane string) tag.Tag {
+	return tag.New(tagKind, pane, tagData{Status: status})
+}
+
 // RunHook handles `jmux claude hook`, the single entry point for the hook
 // events wired in settings.json (UserPromptSubmit, Notification, Stop,
 // SessionEnd). Every event updates the workspace's claude badge; a
@@ -67,21 +114,21 @@ func status(in hookInput) {
 	if path == "" {
 		path = in.CWD
 	}
-	ns := "claude"
+	ns := tagKind
 	if in.SessionID != "" {
 		ns += ":" + in.SessionID
 	}
 	pane := os.Getenv("TMUX_PANE")
 	switch in.HookEventName {
 	case eventUserPromptSubmit:
-		tag.Set(path, ns, tag.Badge{Text: "✻ working", Color: tag.Green, Pane: pane})
+		tag.Set(path, ns, claudeTag(statusWorking, pane))
 	case eventNotification:
 		switch in.NotificationType {
 		case notifyPermissionPrompt, notifyIdlePrompt, notifyAgentNeedsInput, notifyElicitationDialog:
-			tag.Set(path, ns, tag.Badge{Text: "✻ needs input", Color: tag.Yellow, Pane: pane})
+			tag.Set(path, ns, claudeTag(statusNeedsInput, pane))
 		}
 	case eventStop:
-		tag.Set(path, ns, tag.Badge{Text: "✻ idle", Color: tag.Gray, Pane: pane})
+		tag.Set(path, ns, claudeTag(statusIdle, pane))
 	case eventSessionEnd:
 		tag.Unset(path, ns)
 	}
