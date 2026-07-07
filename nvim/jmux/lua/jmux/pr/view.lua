@@ -310,12 +310,14 @@ query($owner:String!){
   organization(login:$owner){ teams(first:100){ nodes{ slug name } } }
 }]]
 
--- request_review lets you pick a reviewer — an assignable user or an org team —
--- and adds them via `gh pr edit`. The author and anyone/any team already
--- requested are filtered out (excluded by login, excludedTeams by slug). on_done
--- runs after success so the caller can refresh. Single-pick: press R to add more.
--- spin, when given, is a fn(label)→stop animating a loader through the fetch and
--- the edit; without it a notify marks the start.
+-- request_review picks reviewers — assignable users or org teams — and adds
+-- them via one `gh pr edit`. The author and anyone/any team already requested
+-- are filtered out (excluded by login, excludedTeams by slug). Uses snacks'
+-- picker directly rather than vim.ui.select so several reviewers can be
+-- Tab-marked and confirmed together (<CR> on an unmarked item still single-picks).
+-- on_done runs after success so the caller can refresh. spin, when given, is a
+-- fn(label)→stop animating a loader through the fetch and the edit; without it
+-- a notify marks the start.
 local function request_review(pr, excluded, excludedTeams, on_done, spin)
   local owner = gh.owner_repo(pr.slug)
   local stop = spin and spin "fetching reviewers…" or nil
@@ -323,41 +325,58 @@ local function request_review(pr, excluded, excludedTeams, on_done, spin)
     vim.notify "fetching reviewers…"
   end
 
+  local function request(chosen)
+    if #chosen == 0 then
+      return
+    end
+    local values, labels = {}, {}
+    for _, it in ipairs(chosen) do
+      values[#values + 1] = it.value
+      labels[#labels + 1] = it.label
+    end
+    local who = #labels > 3 and (#labels .. " reviewers") or table.concat(labels, ", ")
+    local stop2 = spin and spin("requesting " .. who .. "…") or nil
+    -- --add-reviewer takes a comma-separated list, so any number of picks is
+    -- still one gh call.
+    vim.system(
+      { "gh", "pr", "edit", tostring(pr.number), "--repo", pr.slug, "--add-reviewer", table.concat(values, ",") },
+      { text = true },
+      function(r2)
+        vim.schedule(function()
+          if stop2 then
+            stop2()
+          end
+          if r2.code ~= 0 then
+            vim.notify("request review: " .. vim.trim(r2.stderr or ""), vim.log.levels.ERROR)
+            return
+          end
+          vim.notify("requested review from " .. who)
+          if on_done then
+            on_done()
+          end
+        end)
+      end
+    )
+  end
+
   local function pick(items)
     if #items == 0 then
       vim.notify("no reviewers left to request", vim.log.levels.WARN)
       return
     end
-    vim.ui.select(items, {
-      prompt = "request review from:",
-      format_item = function(it)
-        return it.kind == "team" and (it.label .. "  [team]") or it.label
+    require("snacks").picker {
+      title = "request review · ⇥ marks several",
+      items = items,
+      format = "text",
+      layout = { preset = "select" },
+      confirm = function(picker)
+        -- fallback keeps the single-pick flow: <CR> with nothing marked acts
+        -- on the item under the cursor.
+        local chosen = picker:selected { fallback = true }
+        picker:close()
+        request(chosen)
       end,
-    }, function(choice)
-      if not choice then
-        return
-      end
-      local stop2 = spin and spin("requesting " .. choice.label .. "…") or nil
-      vim.system(
-        { "gh", "pr", "edit", tostring(pr.number), "--repo", pr.slug, "--add-reviewer", choice.value },
-        { text = true },
-        function(r2)
-          vim.schedule(function()
-            if stop2 then
-              stop2()
-            end
-            if r2.code ~= 0 then
-              vim.notify("request review: " .. vim.trim(r2.stderr or ""), vim.log.levels.ERROR)
-              return
-            end
-            vim.notify("requested review from " .. choice.label)
-            if on_done then
-              on_done()
-            end
-          end)
-        end
-      )
-    end)
+    }
   end
 
   -- users and teams fetch concurrently — neither depends on the other, so the
@@ -371,24 +390,28 @@ local function request_review(pr, excluded, excludedTeams, on_done, spin)
     if stop then
       stop()
     end
+    -- text is what the picker shows and matches on; label is the short name
+    -- used in notifications.
     local items = {}
     for _, u in ipairs(users_r) do
       if u.login and not excluded[u.login] then
         local name = nilable(u.name)
+        local label = name and name ~= "" and ("%s (%s)"):format(u.login, name) or ("@" .. u.login)
         items[#items + 1] = {
-          kind = "user",
           value = u.login,
-          label = name and name ~= "" and ("%s (%s)"):format(u.login, name) or ("@" .. u.login),
+          label = label,
+          text = label,
           sort = u.login:lower(),
         }
       end
     end
     for _, t in ipairs(teams_r) do
       if t.slug and not excludedTeams[t.slug] then
+        local label = nilable(t.name) or t.slug
         items[#items + 1] = {
-          kind = "team",
           value = (owner or "") .. "/" .. t.slug,
-          label = nilable(t.name) or t.slug,
+          label = label,
+          text = label .. "  [team]",
           sort = "~" .. t.slug:lower(), -- "~" sorts teams after users
         }
       end
