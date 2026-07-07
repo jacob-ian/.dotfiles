@@ -62,16 +62,34 @@ func openSessionDirs() []string {
 
 // displayRows renders each path as an fzf row "<display>\t<path>": the path
 // followed by its colour-rendered badges. Bindings act on the hidden path field
-// (column 2), so badges never leak into a path.
+// (column 2), so badges never leak into a path. Pane-carrying badges whose pane
+// has died are dropped (their source is gone but never fired a cleanup event),
+// and when several survive for one path each gets a "@window" label so
+// concurrent claude agents are tellable apart.
 func displayRows(dirs []string) []string {
 	tagged := tag.All()
+	panes := tmuxctl.PaneWindows()
 	rows := make([]string, len(dirs))
 	for i, d := range dirs {
+		var live []tag.Badge
+		paned := 0
+		for _, b := range tagged[repo.Resolve(d)] {
+			if b.Pane != "" {
+				if _, ok := panes[b.Pane]; !ok {
+					continue
+				}
+				paned++
+			}
+			live = append(live, b)
+		}
 		display := d
-		if badges := tagged[repo.Resolve(d)]; len(badges) > 0 {
-			parts := make([]string, len(badges))
-			for j, b := range badges {
+		if len(live) > 0 {
+			parts := make([]string, len(live))
+			for j, b := range live {
 				parts[j] = b.Render()
+				if b.Pane != "" && paned > 1 {
+					parts[j] += " @" + panes[b.Pane]
+				}
 			}
 			display = d + "  ·  " + strings.Join(parts, "  ·  ")
 		}
@@ -172,6 +190,10 @@ func RunRemove(args []string) error {
 		}
 		return nil
 	}
+	// Killing the session takes claude down without a SessionEnd hook, so its
+	// badges would outlive it — the directory stays, so path pruning never
+	// catches them either.
+	tag.UnsetPrefix(path, "claude")
 	session.Kill(name)
 	if !*quiet {
 		notify.Infof("Closed workspace '%s'", filepath.Base(path))

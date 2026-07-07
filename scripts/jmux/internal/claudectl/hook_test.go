@@ -49,6 +49,31 @@ func TestStatusTransitions(t *testing.T) {
 	}
 }
 
+func TestStatusPerSession(t *testing.T) {
+	withCacheDir(t)
+	t.Setenv("TMUX_PANE", "")
+	dir := t.TempDir()
+
+	status(hookInput{HookEventName: "UserPromptSubmit", CWD: dir, SessionID: "aaa"})
+	status(hookInput{HookEventName: "UserPromptSubmit", CWD: dir, SessionID: "bbb"})
+	if n := len(tag.All()[repo.Resolve(dir)]); n != 2 {
+		t.Fatalf("badges = %d, want one per session (2)", n)
+	}
+
+	status(hookInput{HookEventName: "Stop", CWD: dir, SessionID: "bbb"})
+	badges := tag.All()[repo.Resolve(dir)]
+	if badges[0].Text != "✻ working" || badges[1].Text != "✻ idle" {
+		t.Fatalf("badges = %q, %q; want session aaa still working, bbb idle",
+			badges[0].Text, badges[1].Text)
+	}
+
+	status(hookInput{HookEventName: "SessionEnd", CWD: dir, SessionID: "bbb"})
+	badges = tag.All()[repo.Resolve(dir)]
+	if len(badges) != 1 || badges[0].Text != "✻ working" {
+		t.Fatalf("badges after bbb SessionEnd = %v, want only aaa working", badges)
+	}
+}
+
 func TestStatusIgnoresEmptyCWD(t *testing.T) {
 	withCacheDir(t)
 	status(hookInput{HookEventName: "Stop"})

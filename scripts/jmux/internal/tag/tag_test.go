@@ -71,6 +71,34 @@ func TestSetPrunesMissingDirs(t *testing.T) {
 	}
 }
 
+func TestUnsetPrefix(t *testing.T) {
+	withCacheDir(t)
+	dir := t.TempDir()
+
+	Set(dir, "claude", Badge{Text: "legacy"})
+	Set(dir, "claude:abc", Badge{Text: "working"})
+	Set(dir, "pr", Badge{Text: "open"})
+
+	UnsetPrefix(dir, "claude")
+
+	badges := All()[repo.Resolve(dir)]
+	if len(badges) != 1 || badges[0].Text != "open" {
+		t.Fatalf("badges = %+v, want only the pr badge", badges)
+	}
+}
+
+func TestUnsetPrefixDropsEmptyPath(t *testing.T) {
+	withCacheDir(t)
+	dir := t.TempDir()
+
+	Set(dir, "claude:abc", Badge{Text: "working"})
+	UnsetPrefix(dir, "claude")
+
+	if n := len(All()); n != 0 {
+		t.Fatalf("store has %d paths, want 0", n)
+	}
+}
+
 func TestAllNoStore(t *testing.T) {
 	withCacheDir(t)
 	if got := All(); len(got) != 0 {

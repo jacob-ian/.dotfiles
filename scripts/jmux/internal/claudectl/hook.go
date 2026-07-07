@@ -18,6 +18,7 @@ type hookInput struct {
 	NotificationType string `json:"notification_type"`
 	Message          string `json:"message"`
 	CWD              string `json:"cwd"`
+	SessionID        string `json:"session_id"`
 }
 
 // The hook_event_name values jmux is wired to in settings.json.
@@ -52,8 +53,10 @@ func RunHook() error {
 	return nil
 }
 
-// status maps a hook event onto the workspace's "claude" badge, so the
-// overview shows live session state.
+// status maps a hook event onto the workspace's claude badge for the session
+// that fired it, so the overview shows live state per agent. The namespace
+// carries the session id so concurrent agents in one worktree don't clobber
+// each other's badge.
 func status(in hookInput) {
 	if in.CWD == "" {
 		return
@@ -64,24 +67,34 @@ func status(in hookInput) {
 	if path == "" {
 		path = in.CWD
 	}
+	ns := "claude"
+	if in.SessionID != "" {
+		ns += ":" + in.SessionID
+	}
+	pane := os.Getenv("TMUX_PANE")
 	switch in.HookEventName {
 	case eventUserPromptSubmit:
-		tag.Set(path, "claude", tag.Badge{Text: "✻ working", Color: tag.Green})
+		tag.Set(path, ns, tag.Badge{Text: "✻ working", Color: tag.Green, Pane: pane})
 	case eventNotification:
 		switch in.NotificationType {
 		case notifyPermissionPrompt, notifyIdlePrompt, notifyAgentNeedsInput, notifyElicitationDialog:
-			tag.Set(path, "claude", tag.Badge{Text: "✻ needs input", Color: tag.Yellow})
+			tag.Set(path, ns, tag.Badge{Text: "✻ needs input", Color: tag.Yellow, Pane: pane})
 		}
 	case eventStop:
-		tag.Set(path, "claude", tag.Badge{Text: "✻ idle", Color: tag.Gray})
+		tag.Set(path, ns, tag.Badge{Text: "✻ idle", Color: tag.Gray, Pane: pane})
 	case eventSessionEnd:
-		tag.Unset(path, "claude")
+		tag.Unset(path, ns)
 	}
 }
 
 // push interrupts the user about a Notification: ping every attached client's
 // status line, and post a macOS alert whose click jumps back to this pane.
+// Skipped entirely when the pane is already on screen — the user is looking
+// at the prompt the notification would point them to.
 func push(in hookInput) error {
+	if tmuxctl.PaneVisible(os.Getenv("TMUX_PANE")) {
+		return nil
+	}
 	msg := in.Message
 	if msg == "" {
 		msg = "Needs your attention"

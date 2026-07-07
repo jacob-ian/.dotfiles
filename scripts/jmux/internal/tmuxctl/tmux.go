@@ -208,6 +208,37 @@ func CurrentWindow() string {
 	return current("#W")
 }
 
+// PaneVisible reports whether pane is currently on screen: it is the active
+// pane of the active window of a session with at least one attached client.
+// False for an empty pane id or when tmux can't resolve it.
+func PaneVisible(pane string) bool {
+	if pane == "" {
+		return false
+	}
+	out, err := exec.Command("tmux", "display-message", "-p", "-t", pane,
+		"#{pane_active}#{window_active}#{?session_attached,1,0}").Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "111"
+}
+
+// PaneWindows maps every pane id to the index of its containing window, for
+// resolving stored pane ids to display labels in one tmux call.
+func PaneWindows() map[string]string {
+	out, err := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id} #{window_index}").Output()
+	if err != nil {
+		return nil
+	}
+	m := map[string]string{}
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		if id, win, ok := strings.Cut(line, " "); ok {
+			m[id] = win
+		}
+	}
+	return m
+}
+
 // PaneTarget returns "session:window-index" of the window containing pane, or
 // "" on error. Deliberately pane-targeted: an untargeted display-message would
 // answer for the client's active window instead.

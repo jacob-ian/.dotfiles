@@ -5,6 +5,7 @@ package tag
 
 import (
 	"sort"
+	"strings"
 
 	"jmux/internal/cachefile"
 	"jmux/internal/repo"
@@ -37,9 +38,12 @@ var ansiCodes = map[Color]string{
 }
 
 // Badge is a single workspace tag: display text and the colour to show it in.
+// Pane, when set, is the tmux pane id the badge's source runs in, letting the
+// overview label the badge with its window and drop it when the pane is gone.
 type Badge struct {
 	Text  string `json:"text"`
 	Color Color  `json:"color,omitempty"`
+	Pane  string `json:"pane,omitempty"`
 }
 
 // Render wraps the text in its colour's ANSI code for an --ansi fzf list; an
@@ -85,6 +89,26 @@ func Unset(path, ns string) {
 		return
 	}
 	delete(s[key], ns)
+	if len(s[key]) == 0 {
+		delete(s, key)
+	}
+	cachefile.Write(storeFile, s)
+}
+
+// UnsetPrefix removes every badge on path whose namespace starts with prefix,
+// dropping the path entry when nothing remains.
+func UnsetPrefix(path, prefix string) {
+	s := store{}
+	cachefile.Read(storeFile, &s)
+	key := repo.Resolve(path)
+	if s[key] == nil {
+		return
+	}
+	for ns := range s[key] {
+		if strings.HasPrefix(ns, prefix) {
+			delete(s[key], ns)
+		}
+	}
 	if len(s[key]) == 0 {
 		delete(s, key)
 	}
