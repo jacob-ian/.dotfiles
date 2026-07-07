@@ -4,10 +4,12 @@
 package workspace
 
 import (
+	"cmp"
 	"flag"
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"jmux/internal/fzfutil"
@@ -82,6 +84,12 @@ func displayRows(dirs []string) []string {
 			}
 			live = append(live, b)
 		}
+		// Namespace order is arbitrary for pane-carrying badges (session ids);
+		// order them by window index instead, matching the tmux status line.
+		// Pane-less badges sort as -1, keeping them first in namespace order.
+		slices.SortStableFunc(live, func(a, b tag.Badge) int {
+			return cmp.Compare(windowIndex(a, panes), windowIndex(b, panes))
+		})
 		display := d
 		if len(live) > 0 {
 			parts := make([]string, len(live))
@@ -96,6 +104,19 @@ func displayRows(dirs []string) []string {
 		rows[i] = display + "\t" + d
 	}
 	return rows
+}
+
+// windowIndex returns b's window index for sorting, or -1 for badges without a
+// pane (or whose index doesn't parse), so they sort ahead of pane badges.
+func windowIndex(b tag.Badge, panes map[string]string) int {
+	if b.Pane == "" {
+		return -1
+	}
+	n, err := strconv.Atoi(panes[b.Pane])
+	if err != nil {
+		return -1
+	}
+	return n
 }
 
 // rowPath returns the hidden path field of a workspace row (the text after the
