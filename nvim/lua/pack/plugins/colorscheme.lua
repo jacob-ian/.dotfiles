@@ -4,6 +4,10 @@ return {
     priority = 1000,
     config = function()
       require("kanso").load "ink"
+      -- kanso paints the picker's selected mark in the background colour
+      -- (SnacksPickerSelected = { fg = theme.ui.bg }), so Tab-marks are
+      -- invisible; give them an accent instead.
+      vim.api.nvim_set_hl(0, "SnacksPickerSelected", { link = "Special" })
     end,
   },
   -- {
