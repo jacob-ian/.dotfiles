@@ -247,7 +247,13 @@ func PaneTarget(pane string) string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	target := strings.TrimSpace(string(out))
+	// A pane tmux can't resolve still expands the format, with empty fields —
+	// a bare ":" is no target.
+	if strings.Trim(target, ":.") == "" {
+		return ""
+	}
+	return target
 }
 
 func current(fmt string) string {

@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 
 	"jmux/internal/fzfutil"
 	"jmux/internal/gitctl"
+	"jmux/internal/notify"
 	"jmux/internal/tag"
 	"jmux/internal/tmuxctl"
 )
@@ -135,15 +135,13 @@ func status(in hookInput) {
 	}
 }
 
-// push interrupts the user about a Notification: ping every attached client's
-// status line, and post a macOS alert whose click jumps back to this pane.
-// Skipped entirely when the pane is already on screen — the user is looking
-// at the prompt the notification would point them to.
+// push interrupts the user about a Notification, unless the pane is already
+// on screen — the user is looking at the prompt the notification would point
+// them to.
 func push(in hookInput) error {
 	if tmuxctl.PaneVisible(os.Getenv("TMUX_PANE")) {
 		return nil
 	}
-	title := "jmux"
 	msg := in.Message
 	if msg == "" {
 		switch in.NotificationType {
@@ -159,33 +157,20 @@ func push(in hookInput) error {
 			msg = "Needs your attention."
 		}
 	}
-	// Claude's own messages arrive without terminal punctuation.
-	if !strings.HasSuffix(msg, ".") && !strings.HasSuffix(msg, "?") && !strings.HasSuffix(msg, "!") {
-		msg += "."
-	}
 
 	pane := os.Getenv("TMUX_PANE")
 	if pane == "" {
 		pane = "%0"
 	}
 	target := tmuxctl.PaneTarget(pane)
-
-	// The alert only helps when the terminal isn't frontmost; the client ping
-	// covers being inside tmux, wherever the client is looking.
-	for _, c := range tmuxctl.ListClients() {
-		tmuxctl.DisplayToClient(c, fmt.Sprintf("claude (%s): %s", target, msg))
+	body := msg
+	if target != "" {
+		body = target + " — " + msg
 	}
 
-	tn, err := exec.LookPath("terminal-notifier")
-	if err != nil {
-		return exec.Command("osascript", "-e",
-			fmt.Sprintf("display notification %q with title %q", msg, title)).Run()
-	}
-	return exec.Command(tn,
-		"-title", title,
-		"-message", msg+"\nClick to jump to the pane.",
-		"-execute", fmt.Sprintf("%s claude focus %s %s", fzfutil.Self(), target, pane),
-	).Run()
+	return notify.Interrupt("jmux", body,
+		"Click to jump to the pane.",
+		fmt.Sprintf("%s claude focus %s %s", fzfutil.Self(), target, pane))
 }
 
 // RunFocus handles `jmux claude focus <session:window> <pane>`, the alert's
