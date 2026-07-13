@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"jmux/internal/fzfutil"
@@ -142,16 +143,25 @@ func push(in hookInput) error {
 	if tmuxctl.PaneVisible(os.Getenv("TMUX_PANE")) {
 		return nil
 	}
+	title := "jmux"
 	msg := in.Message
 	if msg == "" {
-		msg = "Needs your attention"
+		switch in.NotificationType {
+		case notifyPermissionPrompt:
+			msg = "Claude needs permission."
+		case notifyIdlePrompt:
+			msg = "Claude is waiting for input."
+		case notifyAgentNeedsInput:
+			msg = "An agent needs input."
+		case notifyElicitationDialog:
+			msg = "Claude is asking a question."
+		default:
+			msg = "Needs your attention."
+		}
 	}
-	title := "Claude Code"
-	switch in.NotificationType {
-	case notifyPermissionPrompt:
-		title = "Claude Code — Permission Required"
-	case notifyIdlePrompt:
-		title = "Claude Code — Waiting for Input"
+	// Claude's own messages arrive without terminal punctuation.
+	if !strings.HasSuffix(msg, ".") && !strings.HasSuffix(msg, "?") && !strings.HasSuffix(msg, "!") {
+		msg += "."
 	}
 
 	pane := os.Getenv("TMUX_PANE")
@@ -173,7 +183,7 @@ func push(in hookInput) error {
 	}
 	return exec.Command(tn,
 		"-title", title,
-		"-message", msg,
+		"-message", msg+"\nClick to jump to the pane.",
 		"-execute", fmt.Sprintf("%s claude focus %s %s", fzfutil.Self(), target, pane),
 	).Run()
 }
