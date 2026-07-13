@@ -162,15 +162,10 @@ func push(in hookInput) error {
 	if pane == "" {
 		pane = "%0"
 	}
-	target := tmuxctl.PaneTarget(pane)
-	body := msg
-	if target != "" {
-		body = target + " — " + msg
-	}
-
-	return notify.Interrupt("jmux", body,
+	source := tmuxctl.PaneTarget(pane)
+	return notify.Interrupt(source, msg,
 		"Click to jump to the pane.",
-		fmt.Sprintf("%s claude focus %s %s", fzfutil.Self(), target, pane))
+		fmt.Sprintf("%s claude focus %s %s", fzfutil.Self(), source, pane))
 }
 
 // RunFocus handles `jmux claude focus <session:window> <pane>`, the alert's

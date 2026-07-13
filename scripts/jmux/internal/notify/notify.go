@@ -1,7 +1,7 @@
 // Package notify routes user-facing messages at two tiers: Info/Error are
 // passive status messages shown in the current view (tmux status line inside
 // a session, stderr otherwise); Interrupt reaches the user wherever they are
-// looking, across every attached tmux client and via a macOS alert.
+// looking via a macOS alert.
 package notify
 
 import (
@@ -42,16 +42,16 @@ func Errorf(format string, args ...any) {
 	Error(fmt.Sprintf(format, args...))
 }
 
-// Interrupt reaches the user wherever they are looking: every attached tmux
-// client gets a status-line ping, and a macOS alert is posted whose click
-// runs onClick. cta is appended to the alert body on its own line only when
-// the delivery mechanism supports clicking.
-func Interrupt(title, body, cta, onClick string) error {
-	body = punctuate(body)
-	for _, c := range tmuxctl.ListClients() {
-		tmuxctl.DisplayToClient(c, title+": "+body)
+// Interrupt reaches the user wherever they are looking via a macOS alert
+// whose click runs onClick. The title is "jmux - <source>" (or just "jmux"
+// when source is empty). cta is appended to the alert body on its own line
+// only when the delivery mechanism supports clicking.
+func Interrupt(source, body, cta, onClick string) error {
+	title := "jmux"
+	if source != "" {
+		title += " - " + source
 	}
-	return alert(title, body, cta, onClick)
+	return alert(title, punctuate(body), cta, onClick)
 }
 
 func punctuate(s string) string {

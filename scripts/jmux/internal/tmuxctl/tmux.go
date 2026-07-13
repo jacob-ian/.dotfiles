@@ -50,25 +50,6 @@ func SessionOption(name, key string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// ListClients returns the names of all attached tmux clients.
-func ListClients() []string {
-	out, err := exec.Command("tmux", "list-clients", "-F", "#{client_name}").Output()
-	if err != nil {
-		return nil
-	}
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" {
-		return nil
-	}
-	return strings.Split(trimmed, "\n")
-}
-
-// DisplayToClient shows msg on the named client's status line, whichever
-// session it is viewing.
-func DisplayToClient(client, msg string) {
-	exec.Command("tmux", "display-message", "-c", client, msg).Run()
-}
-
 // SessionPath returns the current path of the session's active pane, used as a
 // fallback for sessions created before @jmux_dir stamping existed.
 func SessionPath(name string) string {
