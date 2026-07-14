@@ -47,8 +47,7 @@ func terminalFocused() bool {
 }
 
 // terminalBundleID returns the bundle id of the app hosting an attached tmux
-// client, or "" when there is none to find (no server, no attached client, or
-// a chain that never reaches an app).
+// client, or "" when there is none to find.
 func terminalBundleID() string {
 	parents := processParents()
 	for _, client := range tmuxctl.ClientPIDs() {

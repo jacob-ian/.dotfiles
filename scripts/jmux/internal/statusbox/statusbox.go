@@ -172,11 +172,10 @@ func Publish() {
 	}
 }
 
-// RunClick handles `jmux statusline click <range> [client]`, the status-line
-// mouse binding's dispatch: rangeGo jumps the clicking client to the
-// displayed item's pane, and both ranges dismiss it — a click means the
-// notification was seen, and a renewed claim reinstates it. A click that
-// races the display going stale republishes to self-heal.
+// RunClick handles `jmux statusline click <range> [client]`, the mouse
+// binding's dispatch: rangeGo jumps the clicking client to the displayed
+// item's pane; both ranges dismiss it — the notification was seen, and a
+// renewed claim reinstates it. Stale clicks republish to self-heal.
 func RunClick(args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: jmux statusline click <range> [client]")
@@ -213,8 +212,7 @@ func RunClick(args []string) error {
 	return fmt.Errorf("unknown status range %q", args[0])
 }
 
-// dismiss records the displayed item as seen and republishes, advancing the
-// box to the next queued claim or the summary.
+// dismiss marks the displayed item seen and republishes, advancing the box.
 func dismiss(st state) {
 	if st.Dismissed == nil {
 		st.Dismissed = map[string]time.Time{}

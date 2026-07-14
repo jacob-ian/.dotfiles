@@ -10,8 +10,6 @@ import (
 	"jmux/internal/tag"
 )
 
-// testData is the payload of the test-only tag kind registered by TestMain,
-// standing in for any producer's attention claim.
 type testData struct {
 	Waiting bool      `json:"waiting"`
 	Since   time.Time `json:"since"`
