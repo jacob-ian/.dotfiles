@@ -97,12 +97,17 @@ func TestAllDismissedShowsSummary(t *testing.T) {
 		map[string]string{"%1": "a:1", "%2": "b:1"},
 	)
 	box, disp, _ := renderBox(items, map[string]time.Time{"test %1": t3, "test %2": t3})
-	want := "#[fg=colour245]✻ 2 waiting #[fg=default]"
+	want := "#[fg=colour245]✻ 2 need input #[fg=default]"
 	if box != want {
 		t.Errorf("box = %q, want %q", box, want)
 	}
 	if disp != nil {
 		t.Errorf("display = %+v, want nil in summary state", disp)
+	}
+
+	box, _, _ = renderBox(items[:1], map[string]time.Time{"test %2": t3})
+	if !strings.Contains(box, "1 needs input") {
+		t.Errorf("box = %q, want singular verb", box)
 	}
 }
 

@@ -124,7 +124,11 @@ func renderBox(items []item, dismissed map[string]time.Time) (box string, disp *
 		return box, &displayed{Kind: head.kind, Pane: head.pane}, keep
 	}
 	if len(items) > 0 {
-		box = fmt.Sprintf("#[fg=colour245]✻ %d waiting #[fg=default]", len(items))
+		verb := "need input"
+		if len(items) == 1 {
+			verb = "needs input"
+		}
+		box = fmt.Sprintf("#[fg=colour245]✻ %d %s #[fg=default]", len(items), verb)
 	}
 	return box, nil, keep
 }
