@@ -50,7 +50,7 @@ func TestRenderNotification(t *testing.T) {
 		map[string]string{"%5": "euc-web:2"},
 	)
 	box, disp, _ := renderBox(items, nil)
-	want := "#[fg=yellow]#[range=user|jmux-go]✻ euc-web:2 needs input#[norange] │#[range=user|jmux-x] ✕ #[norange]#[fg=default]"
+	want := "#[fg=yellow]#[range=user|jmux-content]✻ euc-web:2 needs input#[norange] │#[range=user|jmux-x] ✕ #[norange]#[fg=default]"
 	if box != want {
 		t.Errorf("box = %q, want %q", box, want)
 	}

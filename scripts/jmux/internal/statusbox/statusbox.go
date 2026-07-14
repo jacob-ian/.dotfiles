@@ -20,14 +20,14 @@ import (
 )
 
 // boxOption is the tmux user option the status line references via
-// #{E:@jmux_statusbox}; rangeGo/rangeDismiss are the user-range names the
+// #{E:@jmux_statusbox}; rangeContent/rangeX are the user-range names the
 // MouseDown1Status binding dispatches on (tmux caps range arguments at 15
 // bytes). Only the displayed notification carries ranges, so the names are
 // fixed and the click resolves through the persisted display item.
 const (
 	boxOption    = "@jmux_statusbox"
-	rangeGo      = "jmux-go"
-	rangeDismiss = "jmux-x"
+	rangeContent = "jmux-content"
+	rangeX       = "jmux-x"
 )
 
 const stateFile = "statusbox.json"
@@ -120,7 +120,7 @@ func renderBox(items []item, dismissed map[string]time.Time) (box string, disp *
 			text += fmt.Sprintf(" +%d", n)
 		}
 		box = fmt.Sprintf("#[fg=yellow]#[range=user|%s]%s#[norange] │#[range=user|%s] ✕ #[norange]#[fg=default]",
-			rangeGo, text, rangeDismiss)
+			rangeContent, text, rangeX)
 		return box, &displayed{Kind: head.kind, Pane: head.pane}, keep
 	}
 	if len(items) > 0 {
@@ -177,7 +177,7 @@ func Publish() {
 }
 
 // RunClick handles `jmux statusline click <range> [client]`, the mouse
-// binding's dispatch: rangeGo jumps the clicking client to the displayed
+// binding's dispatch: rangeContent jumps the clicking client to the displayed
 // item's pane; both ranges dismiss it — the notification was seen, and a
 // renewed claim reinstates it. Stale clicks republish to self-heal.
 func RunClick(args []string) error {
@@ -195,7 +195,7 @@ func RunClick(args []string) error {
 		return nil
 	}
 	switch args[0] {
-	case rangeGo:
+	case rangeContent:
 		target := tmuxctl.PaneTarget(st.Display.Pane)
 		if target == "" {
 			Publish()
@@ -209,7 +209,7 @@ func RunClick(args []string) error {
 		}
 		dismiss(st)
 		return nil
-	case rangeDismiss:
+	case rangeX:
 		dismiss(st)
 		return nil
 	}
