@@ -10,6 +10,7 @@ import (
 	"jmux/internal/notify"
 	"jmux/internal/pr"
 	"jmux/internal/session"
+	"jmux/internal/statusbox"
 	"jmux/internal/workspace"
 	"jmux/internal/worktree"
 )
@@ -45,6 +46,8 @@ func run(args []string) error {
 		return runFzf(args[1:])
 	case "claude":
 		return runClaude(args[1:])
+	case "statusline":
+		return runStatusline(args[1:])
 	case "-h", "--help", "help":
 		usage()
 		return nil
@@ -123,6 +126,21 @@ func runClaude(args []string) error {
 	return nil
 }
 
+// runStatusline handles `jmux statusline`: render republishes the multibox;
+// click is the status-line mouse binding's dispatch, not for humans.
+func runStatusline(args []string) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "render":
+			statusbox.Publish()
+			return nil
+		case "click":
+			return statusbox.RunClick(args[1:])
+		}
+	}
+	return badUsage("jmux statusline: expected render or click <range>")
+}
+
 // runFzf dispatches `jmux fzf <picker> items|preview` — plumbing invoked by
 // fzf bindings, not humans. Void by design: stdout belongs to fzf, so these
 // report locally rather than propagate.
@@ -176,6 +194,8 @@ func usage() {
   jmux repo clone <url>         Bare-clone into a scan root and open main
   jmux claude [args...]         Launch claude paired with this workspace's nvim
   jmux claude hook              Hook entry point: status badges + notifications
+  jmux statusline render        Republish the status-line multibox
+  jmux statusline click <range> Internal status-line mouse plumbing
   jmux fzf <picker> items|preview
                                 Internal fzf plumbing`)
 }

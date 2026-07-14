@@ -16,6 +16,7 @@ import (
 	"jmux/internal/notify"
 	"jmux/internal/repo"
 	"jmux/internal/session"
+	"jmux/internal/statusbox"
 	"jmux/internal/tag"
 	"jmux/internal/tmuxctl"
 	"jmux/internal/worktree"
@@ -213,9 +214,10 @@ func RunRemove(args []string) error {
 	}
 	// Killing the session takes claude down without a SessionEnd hook, so its
 	// badges would outlive it — the directory stays, so path pruning never
-	// catches them either.
+	// catches them either. The multibox has the same staleness problem.
 	tag.UnsetPrefix(path, "claude")
 	session.Kill(name)
+	statusbox.Publish()
 	if !*quiet {
 		notify.Infof("Closed workspace '%s'", filepath.Base(path))
 	}

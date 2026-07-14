@@ -35,6 +35,46 @@ func ListSessions() []string {
 	return strings.Split(trimmed, "\n")
 }
 
+// ListClients returns the names of all attached tmux clients.
+func ListClients() []string {
+	out, err := exec.Command("tmux", "list-clients", "-F", "#{client_name}").Output()
+	if err != nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "\n")
+}
+
+// ClientPIDs returns the pids of all attached tmux clients.
+func ClientPIDs() []int {
+	out, err := exec.Command("tmux", "list-clients", "-F", "#{client_pid}").Output()
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for l := range strings.FieldsSeq(string(out)) {
+		if pid, err := strconv.Atoi(l); err == nil {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+// SetGlobalOption sets a server-wide option (e.g. a user option like
+// "@jmux_statusbox" that status-line formats reference).
+func SetGlobalOption(key, value string) {
+	exec.Command("tmux", "set-option", "-g", key, value).Run()
+}
+
+// RefreshStatus redraws the named client's status line without touching its
+// panes.
+func RefreshStatus(client string) {
+	exec.Command("tmux", "refresh-client", "-S", "-t", client).Run()
+}
+
 // SetSessionOption sets a session-scoped option (e.g. a user option like
 // "@jmux_dir") on the named session.
 func SetSessionOption(name, key, value string) {
@@ -165,6 +205,16 @@ func SwitchClient(name string) error {
 	return exec.Command("tmux", "switch-client", "-t", name).Run()
 }
 
+// SwitchClientTo points the named client at target, or lets tmux pick the
+// client when client is empty.
+func SwitchClientTo(client, target string) error {
+	args := []string{"switch-client"}
+	if client != "" {
+		args = append(args, "-c", client)
+	}
+	return exec.Command("tmux", append(args, "-t", target)...).Run()
+}
+
 func Attach(name string) error {
 	cmd := exec.Command("tmux", "attach", "-t", name)
 	cmd.Stdin = os.Stdin
@@ -215,6 +265,24 @@ func PaneWindows() map[string]string {
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if id, win, ok := strings.Cut(line, " "); ok {
 			m[id] = win
+		}
+	}
+	return m
+}
+
+// PaneLabels maps every pane id to "session:window-index" — a display label
+// that doubles as a switch-client target. Membership doubles as a pane
+// liveness check.
+func PaneLabels() map[string]string {
+	out, err := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id} #{session_name}:#{window_index}").Output()
+	if err != nil {
+		return nil
+	}
+	m := map[string]string{}
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		// Cut on the first space: pane ids never contain one, session names may.
+		if id, label, ok := strings.Cut(line, " "); ok {
+			m[id] = label
 		}
 	}
 	return m

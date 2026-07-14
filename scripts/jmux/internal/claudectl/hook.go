@@ -5,12 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"sync"
+	"time"
 
 	"jmux/internal/fzfutil"
 	"jmux/internal/gitctl"
 	"jmux/internal/notify"
+	"jmux/internal/statusbox"
 	"jmux/internal/tag"
 	"jmux/internal/tmuxctl"
 )
@@ -54,13 +55,14 @@ const (
 const tagKind = "claude"
 
 type tagData struct {
-	Status sessionStatus `json:"status"`
+	Status    sessionStatus `json:"status"`
+	UpdatedAt time.Time     `json:"updated_at,omitzero"`
 }
 
 var registerTagOnce sync.Once
 
-// RegisterTag wires this package's workspace-tag renderer; idempotent so main
-// and tests can both call it.
+// RegisterTag wires this package's workspace-tag renderer and its statusbox
+// attention claim; idempotent so main and tests can both call it.
 func RegisterTag() {
 	registerTagOnce.Do(func() {
 		tag.Register(tagKind, func(data json.RawMessage) (string, tag.Color) {
@@ -78,11 +80,22 @@ func RegisterTag() {
 			}
 			return "", ""
 		})
+		tag.RegisterAttention(tagKind, func(data json.RawMessage) tag.Attention {
+			var d tagData
+			if json.Unmarshal(data, &d) != nil {
+				return tag.Attention{}
+			}
+			a := tag.Attention{Since: d.UpdatedAt}
+			if d.Status == statusNeedsInput {
+				a.Verb = "needs input"
+			}
+			return a
+		})
 	})
 }
 
 func claudeTag(status sessionStatus, pane string) tag.Tag {
-	return tag.New(tagKind, pane, tagData{Status: status})
+	return tag.New(tagKind, pane, tagData{Status: status, UpdatedAt: time.Now()})
 }
 
 // RunHook handles `jmux claude hook`, the single entry point for the hook
@@ -95,6 +108,7 @@ func RunHook() error {
 		return fmt.Errorf("decoding hook input: %w", err)
 	}
 	status(in)
+	statusbox.Publish()
 	if in.HookEventName == eventNotification {
 		return push(in)
 	}
@@ -137,7 +151,7 @@ func status(in hookInput) {
 
 // push interrupts the user about a Notification, unless the pane is already
 // on screen — the user is looking at the prompt the notification would point
-// them to.
+// them to. (Interrupt itself stays quiet whenever the terminal is frontmost.)
 func push(in hookInput) error {
 	if tmuxctl.PaneVisible(os.Getenv("TMUX_PANE")) {
 		return nil
@@ -176,7 +190,7 @@ func RunFocus(args []string) error {
 		return errors.New("usage: jmux claude focus <session:window> <pane>")
 	}
 	os.Setenv("PATH", os.Getenv("PATH")+":/opt/homebrew/bin")
-	_ = exec.Command("open", "-a", "kitty").Run()
+	notify.ActivateTerminal()
 	if err := tmuxctl.SwitchClient(args[0]); err != nil {
 		return fmt.Errorf("switching to %s: %w", args[0], err)
 	}

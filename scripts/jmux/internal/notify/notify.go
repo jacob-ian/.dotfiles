@@ -43,10 +43,15 @@ func Errorf(format string, args ...any) {
 }
 
 // Interrupt reaches the user wherever they are looking via a macOS alert
-// whose click runs onClick. The title is "jmux - <source>" (or just "jmux"
+// whose click runs onClick — unless the terminal itself is frontmost, where
+// passive signals (the status-line multibox) are already in view and an
+// alert would duplicate them. The title is "jmux - <source>" (or just "jmux"
 // when source is empty). cta is appended to the alert body on its own line
 // only when the delivery mechanism supports clicking.
 func Interrupt(source, body, cta, onClick string) error {
+	if terminalFocused() {
+		return nil
+	}
 	title := "jmux"
 	if source != "" {
 		title += " - " + source
