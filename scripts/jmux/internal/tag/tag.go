@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
-	"time"
 
 	"jmux/internal/cachefile"
 	"jmux/internal/repo"
@@ -50,45 +49,12 @@ var renderers = map[string]func(json.RawMessage) (string, Color){}
 
 // Register wires a kind's renderer: decode the tag's data and return its
 // display text and colour (empty text hides the tag). Producers expose an
-// idempotent RegisterTag that main calls; duplicate kinds panic.
+// idempotent package Register fn that main calls; duplicate kinds panic.
 func Register(kind string, describe func(data json.RawMessage) (string, Color)) {
 	if renderers[kind] != nil {
 		panic("tag: duplicate Register for kind " + kind)
 	}
 	renderers[kind] = describe
-}
-
-// Attention is a tag's claim on the user's attention: Verb is a short phrase
-// like "needs input" (empty means no claim), Since is when the tag's state
-// last changed — Verb-less tags still report it so a newer quiet tag can
-// supersede a stale claim on the same pane.
-type Attention struct {
-	Verb  string
-	Since time.Time
-}
-
-// attentions maps a kind to its registered attention fn. Registration is
-// optional: kinds without one never claim attention.
-var attentions = map[string]func(json.RawMessage) Attention{}
-
-// RegisterAttention wires a kind's attention fn: decode the tag's data and
-// return its claim. Same contract as Register — producers call it from an
-// idempotent RegisterTag; duplicate kinds panic.
-func RegisterAttention(kind string, describe func(data json.RawMessage) Attention) {
-	if attentions[kind] != nil {
-		panic("tag: duplicate RegisterAttention for kind " + kind)
-	}
-	attentions[kind] = describe
-}
-
-// Attention returns the tag's claim via its kind's registered attention fn,
-// or the zero claim for kinds without one.
-func (t Tag) Attention() Attention {
-	describe := attentions[t.Kind]
-	if describe == nil {
-		return Attention{}
-	}
-	return describe(t.Data)
 }
 
 // describe renders the tag via its kind's registered renderer. Kinds without

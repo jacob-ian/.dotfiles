@@ -9,7 +9,7 @@ import (
 
 // TestMain wires the pr tag renderer, as main does for the binary.
 func TestMain(m *testing.M) {
-	RegisterTag()
+	Register()
 	os.Exit(m.Run())
 }
 

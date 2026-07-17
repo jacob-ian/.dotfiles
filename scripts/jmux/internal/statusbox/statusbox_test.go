@@ -1,34 +1,10 @@
 package statusbox
 
 import (
-	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 	"time"
-
-	"jmux/internal/tag"
 )
-
-type testData struct {
-	Waiting bool      `json:"waiting"`
-	Since   time.Time `json:"since"`
-}
-
-func TestMain(m *testing.M) {
-	tag.RegisterAttention("test", func(data json.RawMessage) tag.Attention {
-		var d testData
-		if json.Unmarshal(data, &d) != nil {
-			return tag.Attention{}
-		}
-		a := tag.Attention{Since: d.Since}
-		if d.Waiting {
-			a.Verb = "needs input"
-		}
-		return a
-	})
-	os.Exit(m.Run())
-}
 
 var (
 	t1 = time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
@@ -36,37 +12,29 @@ var (
 	t3 = t1.Add(2 * time.Minute)
 )
 
-func waiting(pane string, since time.Time) tag.Tag {
-	return tag.New("test", pane, testData{Waiting: true, Since: since})
-}
-
-func quiet(pane string, since time.Time) tag.Tag {
-	return tag.New("test", pane, testData{Since: since})
+func waiting(kind, id, label string, since time.Time) Notice {
+	return Notice{Kind: kind, ID: id, Label: label, Verb: "needs input", Plural: "need input", Since: since}
 }
 
 func TestRenderNotification(t *testing.T) {
-	items := buildItems(
-		map[string][]tag.Tag{"/w": {waiting("%5", t1)}},
-		map[string]string{"%5": "euc-web:2"},
-	)
-	box, disp, _ := renderBox(items, nil)
+	box, disp, _ := renderBox([]Notice{waiting("claude.needs_input", "%5", "euc-web:2", t1)}, nil)
 	want := "#[fg=yellow]#[range=user|jmux-content]✻ euc-web:2 needs input#[norange] │#[range=user|jmux-x] ✕ #[norange]#[fg=default]"
 	if box != want {
 		t.Errorf("box = %q, want %q", box, want)
 	}
-	if disp == nil || disp.Kind != "test" || disp.Pane != "%5" {
-		t.Errorf("display = %+v, want test/%%5", disp)
+	if disp == nil || disp.Kind != "claude.needs_input" || disp.ID != "%5" {
+		t.Errorf("display = %+v, want claude.needs_input/%%5", disp)
 	}
 }
 
 func TestRenderQueuedCountAndOrder(t *testing.T) {
-	items := buildItems(
-		map[string][]tag.Tag{"/a": {waiting("%1", t1)}, "/b": {waiting("%2", t2)}},
-		map[string]string{"%1": "old:1", "%2": "new:1"},
-	)
-	box, disp, _ := renderBox(items, nil)
-	if disp.Pane != "%2" {
-		t.Errorf("display pane = %s, want newest %%2", disp.Pane)
+	notices := []Notice{
+		waiting("claude.needs_input", "%2", "new:1", t2),
+		waiting("claude.needs_input", "%1", "old:1", t1),
+	}
+	box, disp, _ := renderBox(notices, nil)
+	if disp.ID != "%2" {
+		t.Errorf("display id = %s, want newest %%2", disp.ID)
 	}
 	wantText := "✻ new:1 needs input +1"
 	if !strings.Contains(box, wantText) {
@@ -75,28 +43,28 @@ func TestRenderQueuedCountAndOrder(t *testing.T) {
 }
 
 func TestDismissalRevealsNext(t *testing.T) {
-	items := buildItems(
-		map[string][]tag.Tag{"/a": {waiting("%1", t1)}, "/b": {waiting("%2", t2)}},
-		map[string]string{"%1": "old:1", "%2": "new:1"},
-	)
-	box, disp, keep := renderBox(items, map[string]time.Time{"test %2": t3})
-	if disp.Pane != "%1" {
-		t.Errorf("display pane = %s, want %%1 after dismissing %%2", disp.Pane)
+	notices := []Notice{
+		waiting("claude.needs_input", "%2", "new:1", t2),
+		waiting("claude.needs_input", "%1", "old:1", t1),
+	}
+	box, disp, keep := renderBox(notices, map[string]time.Time{"claude.needs_input %2": t3})
+	if disp.ID != "%1" {
+		t.Errorf("display id = %s, want %%1 after dismissing %%2", disp.ID)
 	}
 	if strings.Contains(box, "+") {
 		t.Errorf("box = %q, want no queued count", box)
 	}
-	if _, ok := keep["test %2"]; !ok {
+	if _, ok := keep["claude.needs_input %2"]; !ok {
 		t.Errorf("keep = %v, want the %%2 dismissal retained", keep)
 	}
 }
 
 func TestAllDismissedShowsSummary(t *testing.T) {
-	items := buildItems(
-		map[string][]tag.Tag{"/a": {waiting("%1", t1)}, "/b": {waiting("%2", t2)}},
-		map[string]string{"%1": "a:1", "%2": "b:1"},
-	)
-	box, disp, _ := renderBox(items, map[string]time.Time{"test %1": t3, "test %2": t3})
+	notices := []Notice{
+		waiting("claude.needs_input", "%1", "a:1", t1),
+		waiting("claude.needs_input", "%2", "b:1", t2),
+	}
+	box, disp, _ := renderBox(notices, map[string]time.Time{"claude.needs_input %1": t3, "claude.needs_input %2": t3})
 	want := "#[fg=colour245]✻ 2 need input #[fg=default]"
 	if box != want {
 		t.Errorf("box = %q, want %q", box, want)
@@ -105,18 +73,29 @@ func TestAllDismissedShowsSummary(t *testing.T) {
 		t.Errorf("display = %+v, want nil in summary state", disp)
 	}
 
-	box, _, _ = renderBox(items[:1], map[string]time.Time{"test %2": t3})
+	box, _, _ = renderBox(notices[:1], map[string]time.Time{"claude.needs_input %1": t3})
 	if !strings.Contains(box, "1 needs input") {
 		t.Errorf("box = %q, want singular verb", box)
 	}
 }
 
+func TestSummaryGroupsMixedVerbs(t *testing.T) {
+	notices := []Notice{
+		waiting("claude.needs_input", "%1", "a:1", t1),
+		waiting("claude.needs_input", "%2", "b:1", t1),
+		{Kind: "pr.review_requested", ID: "o/r#1", Label: "r#1", Verb: "needs review", Plural: "need review"},
+	}
+	dismissed := map[string]time.Time{"claude.needs_input %1": t3, "claude.needs_input %2": t3, "pr.review_requested o/r#1": t3}
+	box, _, _ := renderBox(notices, dismissed)
+	want := "#[fg=colour245]✻ 2 need input · 1 needs review #[fg=default]"
+	if box != want {
+		t.Errorf("box = %q, want %q", box, want)
+	}
+}
+
 func TestRenotificationInvalidatesDismissal(t *testing.T) {
-	items := buildItems(
-		map[string][]tag.Tag{"/a": {waiting("%1", t3)}},
-		map[string]string{"%1": "a:1"},
-	)
-	box, _, keep := renderBox(items, map[string]time.Time{"test %1": t2})
+	notices := []Notice{waiting("claude.needs_input", "%1", "a:1", t3)}
+	box, _, keep := renderBox(notices, map[string]time.Time{"claude.needs_input %1": t2})
 	if !strings.Contains(box, "needs input") {
 		t.Errorf("box = %q, want the renewed claim shown", box)
 	}
@@ -125,16 +104,19 @@ func TestRenotificationInvalidatesDismissal(t *testing.T) {
 	}
 }
 
-func TestQuietedAndDeadClaimsPruneDismissals(t *testing.T) {
-	// %1's claim was quieted by a newer tag in the same pane; %2's pane died.
-	items := buildItems(
-		map[string][]tag.Tag{"/a": {waiting("%1", t1), quiet("%1", t2), waiting("%2", t1)}},
-		map[string]string{"%1": "a:1"},
-	)
-	if len(items) != 0 {
-		t.Fatalf("items = %v, want none", items)
+func TestZeroSinceDismissalSticks(t *testing.T) {
+	notices := []Notice{{Kind: "pr.review_requested", ID: "o/r#1", Label: "r#1", Verb: "needs review"}}
+	box, disp, keep := renderBox(notices, map[string]time.Time{"pr.review_requested o/r#1": t1})
+	if disp != nil || !strings.Contains(box, "1 needs review") {
+		t.Errorf("box = %q display = %+v, want dismissed notice in summary only", box, disp)
 	}
-	box, _, keep := renderBox(items, map[string]time.Time{"test %1": t3, "test %2": t3})
+	if _, ok := keep["pr.review_requested o/r#1"]; !ok {
+		t.Errorf("keep = %v, want zero-Since dismissal retained", keep)
+	}
+}
+
+func TestGoneNoticesPruneDismissals(t *testing.T) {
+	box, _, keep := renderBox(nil, map[string]time.Time{"claude.needs_input %1": t3})
 	if box != "" {
 		t.Errorf("box = %q, want empty", box)
 	}
@@ -143,16 +125,37 @@ func TestQuietedAndDeadClaimsPruneDismissals(t *testing.T) {
 	}
 }
 
-func TestIgnoresPanelessAndUnregistered(t *testing.T) {
-	items := buildItems(
-		map[string][]tag.Tag{"/a": {
-			waiting("", t1),
-			tag.New("unregistered", "%1", testData{Waiting: true, Since: t1}),
-		}},
-		map[string]string{"%1": "a:1"},
-	)
-	if len(items) != 0 {
-		t.Errorf("items = %v, want none", items)
+func TestSourceDuplicatePanics(t *testing.T) {
+	Source("dup", func() []Notice { return nil })
+	defer func() {
+		if recover() == nil {
+			t.Error("duplicate Source did not panic")
+		}
+	}()
+	Source("dup", func() []Notice { return nil })
+}
+
+func TestHandlerDuplicatePanics(t *testing.T) {
+	Handler("dup", nil)
+	defer func() {
+		if recover() == nil {
+			t.Error("duplicate Handler did not panic")
+		}
+	}()
+	Handler("dup", nil)
+}
+
+func TestFindMatchesByKey(t *testing.T) {
+	notices := []Notice{
+		{Kind: "claude.needs_input", ID: "%1", Label: "a:1"},
+		{Kind: "claude.needs_input", ID: "%2", Label: "b:1"},
+	}
+	n, ok := find(notices, "claude.needs_input %1")
+	if !ok || n.Label != "a:1" {
+		t.Errorf("find(claude.needs_input %%1) = %+v %v, want the %%1 notice", n, ok)
+	}
+	if _, ok := find(notices, "claude.needs_input %9"); ok {
+		t.Error("find(claude.needs_input %9) matched, want not found")
 	}
 }
 
@@ -171,11 +174,7 @@ func TestTruncateLabel(t *testing.T) {
 }
 
 func TestEscapesLabel(t *testing.T) {
-	items := buildItems(
-		map[string][]tag.Tag{"/a": {waiting("%1", t1)}},
-		map[string]string{"%1": "a#b:1"},
-	)
-	box, _, _ := renderBox(items, nil)
+	box, _, _ := renderBox([]Notice{waiting("claude.needs_input", "%1", "a#b:1", t1)}, nil)
 	if !strings.Contains(box, "a##b:1") {
 		t.Errorf("box = %q, want '#' doubled in label", box)
 	}

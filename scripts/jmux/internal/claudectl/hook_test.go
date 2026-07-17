@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"jmux/internal/repo"
 	"jmux/internal/tag"
@@ -11,7 +12,7 @@ import (
 
 // TestMain wires the claude tag renderer, as main does for the binary.
 func TestMain(m *testing.M) {
-	RegisterTag()
+	Register()
 	os.Exit(m.Run())
 }
 
@@ -86,5 +87,54 @@ func TestStatusIgnoresEmptyCWD(t *testing.T) {
 	status(hookInput{HookEventName: "Stop"})
 	if n := len(tag.All()); n != 0 {
 		t.Fatalf("tag store has %d entries, want 0", n)
+	}
+}
+
+var (
+	tA = time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
+	tB = tA.Add(time.Minute)
+)
+
+func waitingTag(pane string, at time.Time) tag.Tag {
+	return tag.New(tagKind, pane, tagData{Status: statusNeedsInput, UpdatedAt: at})
+}
+
+func workingTag(pane string, at time.Time) tag.Tag {
+	return tag.New(tagKind, pane, tagData{Status: statusWorking, UpdatedAt: at})
+}
+
+func TestNoticesFromTags(t *testing.T) {
+	labels := map[string]string{"%1": "a:1", "%2": "b:2"}
+
+	got := noticesFromTags(map[string][]tag.Tag{"/w": {waitingTag("%1", tA)}}, labels)
+	if len(got) != 1 || got[0].ID != "%1" || got[0].Label != "a:1" ||
+		got[0].Verb != "needs input" || !got[0].Since.Equal(tA) {
+		t.Errorf("notices = %+v, want one for %%1", got)
+	}
+
+	// Paneless, dead-pane, and non-claude tags never notice.
+	got = noticesFromTags(map[string][]tag.Tag{"/w": {
+		waitingTag("", tA),
+		waitingTag("%9", tA),
+		tag.New("pr", "%1", tagData{Status: statusNeedsInput, UpdatedAt: tA}),
+	}}, labels)
+	if len(got) != 0 {
+		t.Errorf("notices = %+v, want none", got)
+	}
+
+	// A newer quiet session in the same pane supersedes a stale claim.
+	got = noticesFromTags(map[string][]tag.Tag{"/w": {
+		waitingTag("%1", tA), workingTag("%1", tB),
+	}}, labels)
+	if len(got) != 0 {
+		t.Errorf("notices = %+v, want the stale claim superseded", got)
+	}
+
+	// And the reverse: a newer claim wins over an older quiet session.
+	got = noticesFromTags(map[string][]tag.Tag{"/w": {
+		workingTag("%2", tA), waitingTag("%2", tB),
+	}}, labels)
+	if len(got) != 1 || got[0].ID != "%2" {
+		t.Errorf("notices = %+v, want one for %%2", got)
 	}
 }

@@ -54,17 +54,21 @@ const (
 // "claude:<session_id>".
 const tagKind = "claude"
 
+// kindNeedsInput is the statusbox notice kind — the event, not the domain,
+// so dismissing it never suppresses other claude notice types.
+const kindNeedsInput = tagKind + ".needs_input"
+
 type tagData struct {
 	Status    sessionStatus `json:"status"`
 	UpdatedAt time.Time     `json:"updated_at,omitzero"`
 }
 
-var registerTagOnce sync.Once
+var registerOnce sync.Once
 
-// RegisterTag wires this package's workspace-tag renderer and its statusbox
-// attention claim; idempotent so main and tests can both call it.
-func RegisterTag() {
-	registerTagOnce.Do(func() {
+// Register wires this package's workspace-tag renderer and statusbox notice
+// source; idempotent so main and tests can both call it.
+func Register() {
+	registerOnce.Do(func() {
 		tag.Register(tagKind, func(data json.RawMessage) (string, tag.Color) {
 			var d tagData
 			if json.Unmarshal(data, &d) != nil {
@@ -80,18 +84,62 @@ func RegisterTag() {
 			}
 			return "", ""
 		})
-		tag.RegisterAttention(tagKind, func(data json.RawMessage) tag.Attention {
-			var d tagData
-			if json.Unmarshal(data, &d) != nil {
-				return tag.Attention{}
-			}
-			a := tag.Attention{Since: d.UpdatedAt}
-			if d.Status == statusNeedsInput {
-				a.Verb = "needs input"
-			}
-			return a
+		statusbox.Source(kindNeedsInput, func() []statusbox.Notice {
+			return noticesFromTags(tag.All(), tmuxctl.PaneLabels())
+		})
+		statusbox.Handler(kindNeedsInput, func(n statusbox.Notice, client string) error {
+			return focusPane(n.ID, client)
 		})
 	})
+}
+
+// noticesFromTags maps needs_input tags to notices, dropping tags with no
+// pane to jump to (unset or dead). Deduping per pane keeps the most recently
+// updated session, so a newer quiet session supersedes a stale claim from a
+// predecessor in the same pane.
+func noticesFromTags(tags map[string][]tag.Tag, labels map[string]string) []statusbox.Notice {
+	newest := map[string]tagData{}
+	for _, ts := range tags {
+		for _, t := range ts {
+			if t.Kind != tagKind || t.Pane == "" || labels[t.Pane] == "" {
+				continue
+			}
+			var d tagData
+			if json.Unmarshal(t.Data, &d) != nil {
+				continue
+			}
+			if prev, ok := newest[t.Pane]; !ok || d.UpdatedAt.After(prev.UpdatedAt) {
+				newest[t.Pane] = d
+			}
+		}
+	}
+	var out []statusbox.Notice
+	for pane, d := range newest {
+		if d.Status != statusNeedsInput {
+			continue
+		}
+		out = append(out, statusbox.Notice{
+			ID:     pane,
+			Label:  labels[pane],
+			Verb:   "needs input",
+			Plural: "need input",
+			Since:  d.UpdatedAt,
+		})
+	}
+	return out
+}
+
+// focusPane jumps the client to the pane, resolving its window at jump time
+// so a pane that moved still focuses correctly.
+func focusPane(pane, client string) error {
+	target := tmuxctl.PaneTarget(pane)
+	if target == "" {
+		return errors.New("pane is gone")
+	}
+	if err := tmuxctl.SwitchClientTo(client, target); err != nil {
+		return fmt.Errorf("switching to %s: %w", target, err)
+	}
+	return tmuxctl.SelectPane(pane)
 }
 
 func claudeTag(status sessionStatus, pane string) tag.Tag {
@@ -176,23 +224,19 @@ func push(in hookInput) error {
 	if pane == "" {
 		pane = "%0"
 	}
-	source := tmuxctl.PaneTarget(pane)
-	return notify.Interrupt(source, msg,
+	return notify.Interrupt(tmuxctl.PaneTarget(pane), msg,
 		"Click to jump to the pane.",
-		fmt.Sprintf("%s claude focus %s %s", fzfutil.Self(), source, pane))
+		fzfutil.Self()+" claude focus "+pane)
 }
 
-// RunFocus handles `jmux claude focus <session:window> <pane>`, the alert's
-// click callback. terminal-notifier runs it with a minimal PATH, hence the
+// RunFocus handles `jmux claude focus <pane>`, the macOS alert's click
+// callback. terminal-notifier runs it with a minimal PATH, hence the
 // homebrew append.
 func RunFocus(args []string) error {
-	if len(args) < 2 {
-		return errors.New("usage: jmux claude focus <session:window> <pane>")
+	if len(args) < 1 || args[0] == "" {
+		return errors.New("usage: jmux claude focus <pane>")
 	}
 	os.Setenv("PATH", os.Getenv("PATH")+":/opt/homebrew/bin")
 	notify.ActivateTerminal()
-	if err := tmuxctl.SwitchClient(args[0]); err != nil {
-		return fmt.Errorf("switching to %s: %w", args[0], err)
-	}
-	return tmuxctl.SelectPane(args[1])
+	return focusPane(args[0], "")
 }

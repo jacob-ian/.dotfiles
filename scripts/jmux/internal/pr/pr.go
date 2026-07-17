@@ -30,12 +30,12 @@ type tagData struct {
 	Number int `json:"number"`
 }
 
-var registerTagOnce sync.Once
+var registerOnce sync.Once
 
-// RegisterTag wires this package's workspace-tag renderer; idempotent so main
+// Register wires this package's workspace-tag renderer; idempotent so main
 // and tests can both call it. \uf407 is nf-oct-git_pull_request.
-func RegisterTag() {
-	registerTagOnce.Do(func() {
+func Register() {
+	registerOnce.Do(func() {
 		tag.Register(tagKind, func(data json.RawMessage) (string, tag.Color) {
 			var d tagData
 			if json.Unmarshal(data, &d) != nil || d.Number == 0 {
