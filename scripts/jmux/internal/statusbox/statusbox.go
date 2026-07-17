@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"jmux/internal/cachefile"
 	"jmux/internal/tmuxctl"
@@ -164,21 +163,12 @@ func summarize(notices []Notice) string {
 // dismiss target past status-right-length.
 const maxLabel = 24
 
-// truncateLabel shortens the name part of "name:suffix", keeping the suffix
-// — it's the jump-target hint.
 func truncateLabel(label string) string {
-	if utf8.RuneCountInString(label) <= maxLabel {
+	r := []rune(label)
+	if len(r) <= maxLabel {
 		return label
 	}
-	name, win := label, ""
-	if i := strings.LastIndex(label, ":"); i >= 0 {
-		name, win = label[:i], label[i:]
-	}
-	keep := max(maxLabel-utf8.RuneCountInString(win)-1, 1)
-	if r := []rune(name); len(r) > keep {
-		name = string(r[:keep])
-	}
-	return name + "…" + win
+	return string(r[:maxLabel-1]) + "…"
 }
 
 // escapeStatus doubles '#' so free-text labels never expand as formats or

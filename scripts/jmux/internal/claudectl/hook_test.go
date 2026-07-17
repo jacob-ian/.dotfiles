@@ -104,12 +104,12 @@ func workingTag(pane string, at time.Time) tag.Tag {
 }
 
 func TestNoticesFromTags(t *testing.T) {
-	labels := map[string]string{"%1": "a:1", "%2": "b:2"}
+	panes := map[string]string{"%1": "a:1", "%2": "b:2"}
 
-	got := noticesFromTags(map[string][]tag.Tag{"/w": {waitingTag("%1", tA)}}, labels)
-	if len(got) != 1 || got[0].ID != "%1" || got[0].Label != "a:1" ||
+	got := noticesFromTags(map[string][]tag.Tag{"/ws/euc-web": {waitingTag("%1", tA)}}, panes)
+	if len(got) != 1 || got[0].ID != "%1" || got[0].Label != "euc-web" ||
 		got[0].Verb != "needs input" || !got[0].Since.Equal(tA) {
-		t.Errorf("notices = %+v, want one for %%1", got)
+		t.Errorf("notices = %+v, want one for %%1 labelled euc-web", got)
 	}
 
 	// Paneless, dead-pane, and non-claude tags never notice.
@@ -117,7 +117,7 @@ func TestNoticesFromTags(t *testing.T) {
 		waitingTag("", tA),
 		waitingTag("%9", tA),
 		tag.New("pr", "%1", tagData{Status: statusNeedsInput, UpdatedAt: tA}),
-	}}, labels)
+	}}, panes)
 	if len(got) != 0 {
 		t.Errorf("notices = %+v, want none", got)
 	}
@@ -125,7 +125,7 @@ func TestNoticesFromTags(t *testing.T) {
 	// A newer quiet session in the same pane supersedes a stale claim.
 	got = noticesFromTags(map[string][]tag.Tag{"/w": {
 		waitingTag("%1", tA), workingTag("%1", tB),
-	}}, labels)
+	}}, panes)
 	if len(got) != 0 {
 		t.Errorf("notices = %+v, want the stale claim superseded", got)
 	}
@@ -133,7 +133,7 @@ func TestNoticesFromTags(t *testing.T) {
 	// And the reverse: a newer claim wins over an older quiet session.
 	got = noticesFromTags(map[string][]tag.Tag{"/w": {
 		workingTag("%2", tA), waitingTag("%2", tB),
-	}}, labels)
+	}}, panes)
 	if len(got) != 1 || got[0].ID != "%2" {
 		t.Errorf("notices = %+v, want one for %%2", got)
 	}

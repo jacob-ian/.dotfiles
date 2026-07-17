@@ -11,6 +11,7 @@ import (
 	"jmux/internal/fzfutil"
 	"jmux/internal/gitctl"
 	"jmux/internal/notify"
+	"jmux/internal/session"
 	"jmux/internal/statusbox"
 	"jmux/internal/tag"
 	"jmux/internal/tmuxctl"
@@ -93,37 +94,42 @@ func Register() {
 	})
 }
 
-// noticesFromTags maps needs_input tags to notices, dropping tags with no
-// pane to jump to (unset or dead). Deduping per pane keeps the most recently
-// updated session, so a newer quiet session supersedes a stale claim from a
-// predecessor in the same pane.
-func noticesFromTags(tags map[string][]tag.Tag, labels map[string]string) []statusbox.Notice {
-	newest := map[string]tagData{}
-	for _, ts := range tags {
+// noticesFromTags maps needs_input tags to notices labelled by workspace,
+// dropping tags with no pane to jump to (unset, or absent from the live
+// panes). Deduping per pane keeps the most recently updated session, so a
+// newer quiet session supersedes a stale claim from a predecessor in the
+// same pane.
+func noticesFromTags(tags map[string][]tag.Tag, panes map[string]string) []statusbox.Notice {
+	type claim struct {
+		d    tagData
+		path string
+	}
+	newest := map[string]claim{}
+	for path, ts := range tags {
 		for _, t := range ts {
-			if t.Kind != tagKind || t.Pane == "" || labels[t.Pane] == "" {
+			if t.Kind != tagKind || t.Pane == "" || panes[t.Pane] == "" {
 				continue
 			}
 			var d tagData
 			if json.Unmarshal(t.Data, &d) != nil {
 				continue
 			}
-			if prev, ok := newest[t.Pane]; !ok || d.UpdatedAt.After(prev.UpdatedAt) {
-				newest[t.Pane] = d
+			if prev, ok := newest[t.Pane]; !ok || d.UpdatedAt.After(prev.d.UpdatedAt) {
+				newest[t.Pane] = claim{d: d, path: path}
 			}
 		}
 	}
 	var out []statusbox.Notice
-	for pane, d := range newest {
-		if d.Status != statusNeedsInput {
+	for pane, c := range newest {
+		if c.d.Status != statusNeedsInput {
 			continue
 		}
 		out = append(out, statusbox.Notice{
 			ID:     pane,
-			Label:  labels[pane],
+			Label:  session.DisplayName(c.path),
 			Verb:   "needs input",
 			Plural: "need input",
-			Since:  d.UpdatedAt,
+			Since:  c.d.UpdatedAt,
 		})
 	}
 	return out

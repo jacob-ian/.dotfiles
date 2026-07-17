@@ -29,6 +29,20 @@ func Name(dir string) string {
 	return strings.ReplaceAll(parent+"_"+base, ".", "_")
 }
 
+// DisplayName derives dir's human label: repo:branch for a worktree under a
+// bare repo (slashes in the branch kept, so it reads like a git ref), the
+// directory's base name otherwise.
+func DisplayName(dir string) string {
+	if bareRoot := repo.FindBareRoot(dir); bareRoot != "" && bareRoot != dir {
+		rel, err := filepath.Rel(bareRoot, dir)
+		if err != nil {
+			rel = filepath.Base(dir)
+		}
+		return filepath.Base(bareRoot) + ":" + rel
+	}
+	return filepath.Base(dir)
+}
+
 type OpenOptions struct {
 	WithClaude bool
 	// InstallCmd, if non-empty, runs in a detached "install" window. The shell

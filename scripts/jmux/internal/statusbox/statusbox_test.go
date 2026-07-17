@@ -161,10 +161,9 @@ func TestFindMatchesByKey(t *testing.T) {
 
 func TestTruncateLabel(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"short:2", "short:2"},
-		{"exactly-24-runes-long:12", "exactly-24-runes-long:12"},
-		{"a-very-long-session-name-indeed:3", "a-very-long-session-n…:3"},
-		{"no-window-separator-and-very-long", "no-window-separator-and…"},
+		{"repo:branch", "repo:branch"},
+		{"exactly-24-runes-long-ok", "exactly-24-runes-long-ok"},
+		{"doctors-ui:fix-zoom-iframe", "doctors-ui:fix-zoom-ifr…"},
 	}
 	for _, c := range cases {
 		if got := truncateLabel(c.in); got != c.want {

@@ -62,6 +62,22 @@ func TestName(t *testing.T) {
 			}
 		})
 	}
+
+	displays := []struct {
+		dir  string
+		want string
+	}{
+		{wtSimple, "myrepo:feature-a"},
+		{wtNested, "myrepo:feat/foo"},
+		{wtDot, "myrepo:v1.2.3"},
+		{bare, "myrepo"},
+		{nonRepo, "regular"},
+	}
+	for _, tt := range displays {
+		if got := DisplayName(tt.dir); got != tt.want {
+			t.Errorf("DisplayName(%q) = %q, want %q", tt.dir, got, tt.want)
+		}
+	}
 }
 
 // TestKillReapsNvimCore checks end-to-end that Kill takes down the detached
