@@ -34,7 +34,7 @@ query($owner:String!,$repo:String!,$number:Int!){
       latestOpinionatedReviews(first:50){ nodes{ state } }
       comments(first:100){ nodes{ author{login} body createdAt } }
       reviews(first:100){ nodes{ id author{login} body state createdAt } }
-      reviewThreads(first:100){ nodes{ id isResolved path line
+      reviewThreads(first:100){ nodes{ id isResolved isOutdated path line
         comments(first:100){ nodes{ author{login} body createdAt pullRequestReview{id} } } } }
       commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:100){ nodes{
         __typename
@@ -233,6 +233,9 @@ local function build_model(data)
     -- header: author/time · status; the location sits beneath it, then the body
     -- (replies marked ↳).
     local status = t.isResolved and "✓ resolved" or "● open"
+    if t.isOutdated then
+      status = status .. " · outdated"
+    end
     local lines = { ("`%s`"):format(loc) }
     for i, c in ipairs(comments) do
       if i > 1 then
