@@ -33,6 +33,17 @@ const (
 	eventSessionEnd       = "SessionEnd"
 )
 
+// The hook events that mean the user answered whatever claude was blocked on.
+// Approvals have no decision-time hook, so the approved tool completing (or
+// failing) stands in for one; denials and elicitation answers do fire at
+// decision time.
+const (
+	eventPostToolUse        = "PostToolUse"
+	eventPostToolUseFailure = "PostToolUseFailure"
+	eventPermissionDenied   = "PermissionDenied"
+	eventElicitationResult  = "ElicitationResult"
+)
+
 // The notification_type values that mean claude is blocked on the user.
 const (
 	notifyPermissionPrompt  = "permission_prompt"
@@ -154,15 +165,17 @@ func claudeTag(status sessionStatus, pane string) tag.Tag {
 
 // RunHook handles `jmux claude hook`, the single entry point for the hook
 // events wired in settings.json (UserPromptSubmit, Notification, Stop,
-// SessionEnd). Every event updates the workspace's claude badge; a
-// Notification also pushes an interruption.
+// SessionEnd, and the answered events). Events that change the workspace's
+// claude badge republish the statusbox; a Notification also pushes an
+// interruption.
 func RunHook() error {
 	var in hookInput
 	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
 		return fmt.Errorf("decoding hook input: %w", err)
 	}
-	status(in)
-	statusbox.Publish()
+	if status(in) {
+		statusbox.Publish()
+	}
 	if in.HookEventName == eventNotification {
 		return push(in)
 	}
@@ -172,10 +185,11 @@ func RunHook() error {
 // status maps a hook event onto the workspace's claude badge for the session
 // that fired it, so the overview shows live state per agent. The namespace
 // carries the session id so concurrent agents in one worktree don't clobber
-// each other's badge.
-func status(in hookInput) {
+// each other's badge. Reports whether the badge changed, so no-op events
+// skip the statusbox republish.
+func status(in hookInput) bool {
 	if in.CWD == "" {
-		return
+		return false
 	}
 	// Badges key on workspace paths, but claude's cwd may be a subdirectory —
 	// map it to the worktree root the overview actually lists.
@@ -195,12 +209,38 @@ func status(in hookInput) {
 		switch in.NotificationType {
 		case notifyPermissionPrompt, notifyIdlePrompt, notifyAgentNeedsInput, notifyElicitationDialog:
 			tag.Set(path, ns, claudeTag(statusNeedsInput, pane))
+		default:
+			return false
 		}
+	case eventPostToolUse, eventPostToolUseFailure, eventPermissionDenied, eventElicitationResult:
+		// PostToolUse fires on every tool call, so the common case — already
+		// working, mid agentic run — must stay a single cache read.
+		if currentStatus(path, ns) == statusWorking {
+			return false
+		}
+		tag.Set(path, ns, claudeTag(statusWorking, pane))
 	case eventStop:
 		tag.Set(path, ns, claudeTag(statusIdle, pane))
 	case eventSessionEnd:
 		tag.Unset(path, ns)
+	default:
+		return false
 	}
+	return true
+}
+
+// currentStatus reads the session's current badge status, "" when unset or
+// undecodable.
+func currentStatus(path, ns string) sessionStatus {
+	t, ok := tag.Get(path, ns)
+	if !ok {
+		return ""
+	}
+	var d tagData
+	if json.Unmarshal(t.Data, &d) != nil {
+		return ""
+	}
+	return d.Status
 }
 
 // push interrupts the user about a Notification, unless the pane is already

@@ -116,6 +116,14 @@ func Set(path, ns string, t Tag) {
 	cachefile.Write(storeFile, s)
 }
 
+// Get returns path's tag under namespace ns, when present.
+func Get(path, ns string) (Tag, bool) {
+	s := store{}
+	cachefile.Read(storeFile, &s)
+	t, ok := s[repo.Resolve(path)][ns]
+	return t, ok
+}
+
 // Unset removes the ns tag from path, dropping the path entry when it was
 // the last one.
 func Unset(path, ns string) {

@@ -44,6 +44,13 @@ func TestStatusTransitions(t *testing.T) {
 		{hookInput{HookEventName: "UserPromptSubmit", CWD: dir}, "✻ working"},
 		{hookInput{HookEventName: "Notification", NotificationType: "permission_prompt", CWD: dir}, "✻ needs input"},
 		{hookInput{HookEventName: "Notification", NotificationType: "auth_success", CWD: dir}, "✻ needs input"},
+		{hookInput{HookEventName: "PostToolUse", CWD: dir}, "✻ working"},
+		{hookInput{HookEventName: "Notification", NotificationType: "permission_prompt", CWD: dir}, "✻ needs input"},
+		{hookInput{HookEventName: "PermissionDenied", CWD: dir}, "✻ working"},
+		{hookInput{HookEventName: "Notification", NotificationType: "elicitation_dialog", CWD: dir}, "✻ needs input"},
+		{hookInput{HookEventName: "ElicitationResult", CWD: dir}, "✻ working"},
+		{hookInput{HookEventName: "Notification", NotificationType: "permission_prompt", CWD: dir}, "✻ needs input"},
+		{hookInput{HookEventName: "PostToolUseFailure", CWD: dir}, "✻ working"},
 		{hookInput{HookEventName: "UserPromptSubmit", CWD: dir}, "✻ working"},
 		{hookInput{HookEventName: "Stop", CWD: dir}, "✻ idle"},
 		{hookInput{HookEventName: "SessionEnd", CWD: dir}, ""},
@@ -79,6 +86,25 @@ func TestStatusPerSession(t *testing.T) {
 	badges = tag.All()[repo.Resolve(dir)]
 	if len(badges) != 1 || badges[0].Text() != "✻ working" {
 		t.Fatalf("badges after bbb SessionEnd = %v, want only aaa working", badges)
+	}
+}
+
+// Answered events fire per tool call, so once the badge says working they
+// must report no change (skipping the tag write and the republish); from any
+// other state they transition to working and report a change.
+func TestAnsweredEventsSkipWhenAlreadyWorking(t *testing.T) {
+	withCacheDir(t)
+	dir := t.TempDir()
+
+	status(hookInput{HookEventName: "Notification", NotificationType: "permission_prompt", CWD: dir})
+	if !status(hookInput{HookEventName: "PostToolUse", CWD: dir}) {
+		t.Fatal("PostToolUse after needs_input reported no change, want a transition to working")
+	}
+	if status(hookInput{HookEventName: "PostToolUse", CWD: dir}) {
+		t.Fatal("PostToolUse while already working reported a change, want a no-op")
+	}
+	if got := badgeText(dir); got != "✻ working" {
+		t.Fatalf("badge = %q, want ✻ working", got)
 	}
 }
 
