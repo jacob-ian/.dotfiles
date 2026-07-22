@@ -133,6 +133,45 @@ function M.prompt_multiline(title, on_save, initial, on_open, footer)
   end
 end
 
+-- hover_win tracks the open hover float, so re-invoking replaces it instead
+-- of stacking a second one.
+local hover_win
+
+-- hover shows lines in a small unfocused float anchored below the cursor,
+-- closed by the first cursor movement or by leaving the source buffer.
+function M.hover(lines)
+  if hover_win and vim.api.nvim_win_is_valid(hover_win) then
+    vim.api.nvim_win_close(hover_win, true)
+  end
+  local src = vim.api.nvim_get_current_buf()
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].bufhidden = "wipe"
+  local width = 1
+  for _, l in ipairs(lines) do
+    width = math.max(width, vim.fn.strdisplaywidth(l))
+  end
+  local win = vim.api.nvim_open_win(buf, false, {
+    relative = "cursor",
+    row = 1,
+    col = 0,
+    width = width,
+    height = #lines,
+    style = "minimal",
+    border = "rounded",
+  })
+  hover_win = win
+  vim.api.nvim_create_autocmd({ "CursorMoved", "BufLeave" }, {
+    buffer = src,
+    once = true,
+    callback = function()
+      if vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_win_close(win, true)
+      end
+    end,
+  })
+end
+
 -- lang_of maps a file path to a treesitter language (or nil), so each code block
 -- can be highlighted with the right parser regardless of the others.
 function M.lang_of(path)

@@ -32,10 +32,13 @@ query($owner:String!,$repo:String!,$number:Int!){
         __typename ... on User{ login } ... on Team{ name slug } } } }
       isDraft mergeable reviewDecision mergeStateStatus
       latestOpinionatedReviews(first:50){ nodes{ state } }
-      comments(first:100){ nodes{ author{login} body createdAt } }
-      reviews(first:100){ nodes{ id author{login} body state createdAt } }
+      comments(first:100){ nodes{ id author{login} body createdAt
+        reactionGroups{ content users{ totalCount } } } }
+      reviews(first:100){ nodes{ id author{login} body state createdAt
+        reactionGroups{ content users{ totalCount } } } }
       reviewThreads(first:100){ nodes{ id isResolved isOutdated path line
-        comments(first:100){ nodes{ author{login} body createdAt pullRequestReview{id} } } } }
+        comments(first:100){ nodes{ id author{login} body createdAt pullRequestReview{id}
+          reactionGroups{ content users{ totalCount } } } } } }
       commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:100){ nodes{
         __typename
         ... on CheckRun{ name conclusion status startedAt completedAt }
@@ -44,6 +47,67 @@ query($owner:String!,$repo:String!,$number:Int!){
     }
   }
 }]]
+
+-- REACTORS_QUERY resolves who reacted, on demand for the K hover. VIEW_QUERY
+-- ships only counts: bare totalCounts cost nothing against GitHub's 500k
+-- node limit, while logins under threads × comments × users multiply past it.
+local REACTORS_QUERY = [[
+query($ids:[ID!]!){
+  nodes(ids:$ids){
+    id
+    ... on Reactable{ reactionGroups{ content users(first:100){ totalCount nodes{ login } } } }
+  }
+}]]
+
+-- REACTIONS maps GitHub's ReactionContent enum to the emoji GitHub renders.
+local REACTIONS = {
+  THUMBS_UP = "👍",
+  THUMBS_DOWN = "👎",
+  LAUGH = "😄",
+  HOORAY = "🎉",
+  CONFUSED = "😕",
+  HEART = "❤️",
+  ROCKET = "🚀",
+  EYES = "👀",
+}
+
+-- reaction_line renders a node's reactions as "👍 2 · 🎉 1", or nil when
+-- nothing has reacted (including nodes fetched before reactions were queried).
+local function reaction_line(n)
+  local parts = {}
+  for _, g in ipairs(nilable(n.reactionGroups) or {}) do
+    local count = vim.tbl_get(g, "users", "totalCount") or 0
+    if count > 0 then
+      parts[#parts + 1] = ("%s %d"):format(REACTIONS[g.content] or g.content, count)
+    end
+  end
+  if #parts > 0 then
+    return table.concat(parts, " · ")
+  end
+end
+
+-- reaction_who lists a REACTORS_QUERY node's reactions with their reactors,
+-- one line per emoji ("👍 @alice @bob"), or nil when nothing has reacted.
+-- Reactors beyond the query's first:100 collapse to "+n more".
+local function reaction_who(n)
+  local out = {}
+  for _, g in ipairs(nilable(n.reactionGroups) or {}) do
+    local total = vim.tbl_get(g, "users", "totalCount") or 0
+    if total > 0 then
+      local names = {}
+      for _, u in ipairs(vim.tbl_get(g, "users", "nodes") or {}) do
+        names[#names + 1] = "@" .. (u.login or "?")
+      end
+      if total > #names then
+        names[#names + 1] = ("+%d more"):format(total - #names)
+      end
+      out[#out + 1] = ("%s %s"):format(REACTIONS[g.content] or g.content, table.concat(names, " "))
+    end
+  end
+  if #out > 0 then
+    return out
+  end
+end
 
 -- check_mark maps a status-check node to (icon, highlight): green tick passed,
 -- red cross failed, yellow dot running, muted circle skipped/neutral.
@@ -125,7 +189,7 @@ end
 local function build_model(data)
   local pr = vim.tbl_get(data, "data", "repository", "pullRequest")
   if type(pr) ~= "table" then
-    return { header = { "  no PR data" }, blocks = {} }
+    return { header = { "  no PR data" }, blocks = {}, reactions = {} }
   end
   local function who(n)
     return vim.tbl_get(n, "author", "login") or "?"
@@ -213,6 +277,12 @@ local function build_model(data)
     }
   end
 
+  -- reactions maps a block/kid id to the reactable node ids behind it (each
+  -- item { id, prefix? }, prefix labelling thread replies), for the K hover's
+  -- lazy reactor fetch; keys match rows_by_id, so the cursor row resolves
+  -- straight to an entry. The fetched lines memoize onto the entry.
+  local reactions = {}
+
   -- group inline threads under the review that opened them.
   local by_review, orphans = {}, {}
   for _, t in ipairs(vim.tbl_get(pr, "reviewThreads", "nodes") or {}) do
@@ -238,28 +308,55 @@ local function build_model(data)
     end
     local lines = { ("`%s`"):format(loc) }
     for i, c in ipairs(comments) do
+      -- the root's reactions ride on the kid's header; replies show theirs
+      -- inline, under the reply they belong to.
       if i > 1 then
         lines[#lines + 1] = ("↳ @%s · %s"):format(who(c), reltime(c.createdAt or ""))
       end
       vim.list_extend(lines, split(c.body))
+      local rx = i > 1 and reaction_line(c) or nil
+      if rx then
+        lines[#lines + 1] = rx
+      end
       lines[#lines + 1] = ""
     end
     local root = comments[1]
-    return {
-      id = t.id or loc,
-      header = root and ("@%s · %s · %s"):format(who(root), reltime(root.createdAt or ""), status)
-        or (loc .. " · " .. status),
-      lines = lines,
-    }
+    local header = root and ("@%s · %s · %s"):format(who(root), reltime(root.createdAt or ""), status)
+      or (loc .. " · " .. status)
+    local rx = root and reaction_line(root)
+    if rx then
+      header = header .. " · " .. rx
+    end
+    -- the whole thread's reactors hover on the kid's row, replies labelled by
+    -- author so their reactions stay attributable.
+    local items = {}
+    for i, c in ipairs(comments) do
+      if reaction_line(c) and nilable(c.id) then
+        items[#items + 1] = { id = c.id, prefix = i > 1 and ("↳ @%s"):format(who(c)) or nil }
+      end
+    end
+    if #items > 0 then
+      reactions[t.id or loc] = { items = items }
+    end
+    return { id = t.id or loc, header = header, lines = lines }
   end
 
   -- time-ordered conversation (ISO-8601 sorts chronologically as a string).
   local blocks = {}
   for _, c in ipairs(vim.tbl_get(pr, "comments", "nodes") or {}) do
+    local header = ("@%s · %s"):format(who(c), reltime(c.createdAt or ""))
+    local id = "c" .. tostring(c.createdAt) .. who(c)
+    local rx = reaction_line(c)
+    if rx then
+      header = header .. " · " .. rx
+      if nilable(c.id) then
+        reactions[id] = { items = { { id = c.id } } }
+      end
+    end
     blocks[#blocks + 1] = {
       at = c.createdAt or "",
-      id = "c" .. tostring(c.createdAt) .. who(c),
-      header = ("@%s · %s"):format(who(c), reltime(c.createdAt or "")),
+      id = id,
+      header = header,
       body = split(c.body),
       kids = {},
     }
@@ -274,10 +371,19 @@ local function build_model(data)
       for _, t in ipairs(rt) do
         kids[#kids + 1] = thread_kid(t)
       end
+      local header = ("@%s · %s · %s"):format(who(r), tostring(r.state or ""):lower(), reltime(r.createdAt or ""))
+      local id = r.id or ("r" .. tostring(r.createdAt))
+      local rx = reaction_line(r)
+      if rx then
+        header = header .. " · " .. rx
+        if nilable(r.id) then
+          reactions[id] = { items = { { id = r.id } } }
+        end
+      end
       blocks[#blocks + 1] = {
         at = r.createdAt or "",
-        id = r.id or ("r" .. tostring(r.createdAt)),
-        header = ("@%s · %s · %s"):format(who(r), tostring(r.state or ""):lower(), reltime(r.createdAt or "")),
+        id = id,
+        header = header,
         body = vim.trim(r.body or "") ~= "" and split(r.body) or {},
         kids = kids,
       }
@@ -292,7 +398,14 @@ local function build_model(data)
     blocks[#blocks + 1] = { at = "", id = k.id, header = k.header, body = k.lines, kids = {} }
   end
 
-  return { header = header, header_marks = header_marks, pr = pr_block, checks = checks_block, blocks = blocks }
+  return {
+    header = header,
+    header_marks = header_marks,
+    pr = pr_block,
+    checks = checks_block,
+    blocks = blocks,
+    reactions = reactions,
+  }
 end
 
 -- REVIEWERS_QUERY lists the repo's assignable users — the set that can be
@@ -701,6 +814,63 @@ function M.view()
             fetch_and_render(title_spinner "refreshing…")
           end, { buffer = buf, nowait = true, desc = "refresh" })
 
+          -- K peeks at who reacted to the comment/review/thread under the
+          -- cursor. Reactor logins aren't in the main query (they'd blow the
+          -- node limit), so they fetch on demand — memoized on the entry for
+          -- the render's lifetime — and the hover only pops if the cursor is
+          -- still on the same row when they land.
+          vim.keymap.set("n", "K", function()
+            local w = vim.api.nvim_get_current_win()
+            if vim.api.nvim_win_get_buf(w) ~= buf then
+              return
+            end
+            local id = id_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
+            local entry = id and model.reactions[id]
+            if not entry then
+              return
+            end
+            if entry.lines then
+              ui.hover(entry.lines)
+              return
+            end
+            local ids = {}
+            for _, it in ipairs(entry.items) do
+              ids[#ids + 1] = it.id
+            end
+            local stop = spin "fetching reactions…"
+            gh.graphql(REACTORS_QUERY, { ids = ids }, function(rdata, rerr)
+              stop()
+              if not rdata then
+                vim.notify("reactions: " .. (rerr or ""), vim.log.levels.ERROR)
+                return
+              end
+              local by_id = {}
+              for _, n in ipairs(vim.tbl_get(rdata, "data", "nodes") or {}) do
+                if type(n) == "table" and n.id then
+                  by_id[n.id] = reaction_who(n)
+                end
+              end
+              local lines = {}
+              for _, it in ipairs(entry.items) do
+                local rw = by_id[it.id]
+                if rw then
+                  if it.prefix then
+                    lines[#lines + 1] = it.prefix
+                  end
+                  vim.list_extend(lines, rw)
+                end
+              end
+              if #lines == 0 then
+                return
+              end
+              entry.lines = lines
+              local w2 = vim.api.nvim_get_current_win()
+              if vim.api.nvim_win_get_buf(w2) == buf and id_by_row[vim.api.nvim_win_get_cursor(w2)[1] - 1] == id then
+                ui.hover(entry.lines)
+              end
+            end)
+          end, { buffer = buf, nowait = true, desc = "who reacted" })
+
           -- R requests a reviewer: pick from the repo's assignable users, skipping
           -- the author and anyone already requested, then refresh so the new
           -- "awaiting" line shows. gh rejects the request if you lack permission.
@@ -784,7 +954,12 @@ function M.view()
           -- m merges — only on open PRs you authored or are assigned to, using the
           -- repo's default merge method. Hints are rebuilt here every render, so the
           -- merge spinner is cleanly replaced once it resolves.
-          hints = { ui.key_hint("<C-r>", "refresh"), ui.key_hint("R", "request"), ui.key_hint("r", "reply") }
+          hints = {
+            ui.key_hint("<C-r>", "refresh"),
+            ui.key_hint("R", "request"),
+            ui.key_hint("r", "reply"),
+            ui.key_hint("K", "reactions"),
+          }
           if mine then
             hints[#hints + 1] = ui.key_hint("E", "edit")
           end
