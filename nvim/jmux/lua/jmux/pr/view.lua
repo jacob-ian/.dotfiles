@@ -1,6 +1,7 @@
 -- The pv conversation view: the whole PR — description, checks, comments,
 -- reviews, inline threads — rendered as a collapsible markdown tab, with
--- refresh, reply, reviewer requests, description editing, and merging.
+-- refresh, reply, reactions, reviewer requests, description editing, and
+-- merging.
 
 local diff = require "jmux.pr.diff"
 local gh = require "jmux.pr.gh"
@@ -26,19 +27,20 @@ query($owner:String!,$repo:String!,$number:Int!){
   repository(owner:$owner,name:$repo){
     viewerDefaultMergeMethod
     pullRequest(number:$number){
-      title number state createdAt author{login} body
+      id title number state createdAt author{login} body
+      reactionGroups{ content viewerHasReacted users{ totalCount } }
       viewerDidAuthor assignees(first:20){ nodes{ login } }
       reviewRequests(first:50){ nodes{ requestedReviewer{
         __typename ... on User{ login } ... on Team{ name slug } } } }
       isDraft mergeable reviewDecision mergeStateStatus
       latestOpinionatedReviews(first:50){ nodes{ state } }
       comments(first:100){ nodes{ id author{login} body createdAt
-        reactionGroups{ content users{ totalCount } } } }
+        reactionGroups{ content viewerHasReacted users{ totalCount } } } }
       reviews(first:100){ nodes{ id author{login} body state createdAt
-        reactionGroups{ content users{ totalCount } } } }
+        reactionGroups{ content viewerHasReacted users{ totalCount } } } }
       reviewThreads(first:100){ nodes{ id isResolved isOutdated path line
         comments(first:100){ nodes{ id author{login} body createdAt pullRequestReview{id}
-          reactionGroups{ content users{ totalCount } } } } } }
+          reactionGroups{ content viewerHasReacted users{ totalCount } } } } } }
       commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:100){ nodes{
         __typename
         ... on CheckRun{ name conclusion status startedAt completedAt }
@@ -59,6 +61,17 @@ query($ids:[ID!]!){
   }
 }]]
 
+-- ADD_REACTION / REMOVE_REACTION set and unset the viewer's reaction on any
+-- Reactable node, for the `a` react picker.
+local ADD_REACTION = [[
+mutation($subject:ID!,$content:ReactionContent!){
+  addReaction(input:{subjectId:$subject,content:$content}){ clientMutationId }
+}]]
+local REMOVE_REACTION = [[
+mutation($subject:ID!,$content:ReactionContent!){
+  removeReaction(input:{subjectId:$subject,content:$content}){ clientMutationId }
+}]]
+
 -- REACTIONS maps GitHub's ReactionContent enum to the emoji GitHub renders.
 local REACTIONS = {
   THUMBS_UP = "👍",
@@ -70,6 +83,21 @@ local REACTIONS = {
   ROCKET = "🚀",
   EYES = "👀",
 }
+
+-- REACTION_ORDER fixes the react picker's emoji order to GitHub's own.
+local REACTION_ORDER = { "THUMBS_UP", "THUMBS_DOWN", "LAUGH", "HOORAY", "CONFUSED", "HEART", "ROCKET", "EYES" }
+
+-- my_reactions collects the reaction contents the viewer has already given a
+-- node, so the react picker offers those as removals.
+local function my_reactions(n)
+  local mine = {}
+  for _, g in ipairs(nilable(n.reactionGroups) or {}) do
+    if g.viewerHasReacted then
+      mine[g.content] = true
+    end
+  end
+  return mine
+end
 
 -- reaction_line renders a node's reactions as "👍 2 · 🎉 1", or nil when
 -- nothing has reacted (including nodes fetched before reactions were queried).
@@ -189,7 +217,7 @@ end
 local function build_model(data)
   local pr = vim.tbl_get(data, "data", "repository", "pullRequest")
   if type(pr) ~= "table" then
-    return { header = { "  no PR data" }, blocks = {}, reactions = {} }
+    return { header = { "  no PR data" }, blocks = {}, reactions = {}, subjects = {} }
   end
   local function who(n)
     return vim.tbl_get(n, "author", "login") or "?"
@@ -233,10 +261,29 @@ local function build_model(data)
 
   header[#header + 1] = ""
 
+  -- reactions maps a block/kid id to the reactable node ids behind it (each
+  -- item { id, prefix? }, prefix labelling thread replies), for the K hover's
+  -- lazy reactor fetch; subjects maps it to the node the `a` picker reacts to
+  -- (a thread reacts to its root comment) plus the viewer's own reactions.
+  -- Keys match rows_by_id, so the cursor row resolves straight to an entry.
+  -- The K-fetched lines memoize onto the reactions entry.
+  local reactions, subjects = {}, {}
+
   -- the PR description is its own collapsible block, shown above the checks.
+  local pr_header = ("@%s · opened · %s"):format(who(pr), reltime(pr.createdAt or ""))
+  local pr_rx = reaction_line(pr)
+  if pr_rx then
+    pr_header = pr_header .. " · " .. pr_rx
+  end
+  if nilable(pr.id) then
+    subjects.pr = { id = pr.id, mine = my_reactions(pr) }
+    if pr_rx then
+      reactions.pr = { items = { { id = pr.id } } }
+    end
+  end
   local pr_block = {
     id = "pr",
-    header = ("@%s · opened · %s"):format(who(pr), reltime(pr.createdAt or "")),
+    header = pr_header,
     body = split(pr.body),
     kids = {},
   }
@@ -276,12 +323,6 @@ local function build_model(data)
       kids = {},
     }
   end
-
-  -- reactions maps a block/kid id to the reactable node ids behind it (each
-  -- item { id, prefix? }, prefix labelling thread replies), for the K hover's
-  -- lazy reactor fetch; keys match rows_by_id, so the cursor row resolves
-  -- straight to an entry. The fetched lines memoize onto the entry.
-  local reactions = {}
 
   -- group inline threads under the review that opened them.
   local by_review, orphans = {}, {}
@@ -338,6 +379,9 @@ local function build_model(data)
     if #items > 0 then
       reactions[t.id or loc] = { items = items }
     end
+    if root and nilable(root.id) then
+      subjects[t.id or loc] = { id = root.id, mine = my_reactions(root) }
+    end
     return { id = t.id or loc, header = header, lines = lines }
   end
 
@@ -347,11 +391,14 @@ local function build_model(data)
     local header = ("@%s · %s"):format(who(c), reltime(c.createdAt or ""))
     local id = "c" .. tostring(c.createdAt) .. who(c)
     local rx = reaction_line(c)
-    if rx then
-      header = header .. " · " .. rx
-      if nilable(c.id) then
+    if nilable(c.id) then
+      subjects[id] = { id = c.id, mine = my_reactions(c) }
+      if rx then
         reactions[id] = { items = { { id = c.id } } }
       end
+    end
+    if rx then
+      header = header .. " · " .. rx
     end
     blocks[#blocks + 1] = {
       at = c.createdAt or "",
@@ -374,11 +421,14 @@ local function build_model(data)
       local header = ("@%s · %s · %s"):format(who(r), tostring(r.state or ""):lower(), reltime(r.createdAt or ""))
       local id = r.id or ("r" .. tostring(r.createdAt))
       local rx = reaction_line(r)
-      if rx then
-        header = header .. " · " .. rx
-        if nilable(r.id) then
+      if nilable(r.id) then
+        subjects[id] = { id = r.id, mine = my_reactions(r) }
+        if rx then
           reactions[id] = { items = { { id = r.id } } }
         end
+      end
+      if rx then
+        header = header .. " · " .. rx
       end
       blocks[#blocks + 1] = {
         at = r.createdAt or "",
@@ -405,6 +455,7 @@ local function build_model(data)
     checks = checks_block,
     blocks = blocks,
     reactions = reactions,
+    subjects = subjects,
   }
 end
 
@@ -871,6 +922,62 @@ function M.view()
             end)
           end, { buffer = buf, nowait = true, desc = "who reacted" })
 
+          -- + reacts to the description/comment/review/thread under the
+          -- cursor (a thread reacts to its root comment), via the emoji
+          -- picker — which marks the ones already yours, since every
+          -- reaction is a toggle: picking it again removes it, like GitHub's
+          -- own buttons. Refreshes on success so the header counts update.
+          -- `+` echoes GitHub's smiley-plus react button, and its default
+          -- motion loses nothing here.
+          local function subject_under_cursor()
+            local w = vim.api.nvim_get_current_win()
+            if vim.api.nvim_win_get_buf(w) ~= buf then
+              return nil
+            end
+            local id = id_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
+            return id and model.subjects[id] or nil
+          end
+          local function toggle_reaction(subject, content)
+            local mine = subject.mine[content] or false
+            local stop = spin(mine and "removing reaction…" or "reacting…")
+            gh.graphql(
+              mine and REMOVE_REACTION or ADD_REACTION,
+              { subject = subject.id, content = content },
+              function(rdata, rerr)
+                if not rdata then
+                  stop()
+                  vim.notify("react: " .. (rerr or ""), vim.log.levels.ERROR)
+                  return
+                end
+                fetch_and_render(stop)
+              end
+            )
+          end
+          vim.keymap.set("n", "+", function()
+            local subject = subject_under_cursor()
+            if not subject then
+              return
+            end
+            local choices = {}
+            for _, content in ipairs(REACTION_ORDER) do
+              choices[#choices + 1] = { content = content, mine = subject.mine[content] or false }
+            end
+            vim.ui.select(choices, {
+              prompt = "react",
+              format_item = function(it)
+                local label = ("%s %s"):format(REACTIONS[it.content], it.content:lower():gsub("_", " "))
+                return it.mine and (label .. " · remove") or label
+              end,
+            }, function(choice)
+              if choice then
+                toggle_reaction(subject, choice.content)
+              end
+            end)
+          end, { buffer = buf, nowait = true, desc = "react" })
+
+          -- go opens the PR on github.com, for everything pv doesn't render.
+          vim.keymap.set("n", "go", M.browser, { buffer = buf, nowait = true, desc = "open in browser" })
+
           -- R requests a reviewer: pick from the repo's assignable users, skipping
           -- the author and anyone already requested, then refresh so the new
           -- "awaiting" line shows. gh rejects the request if you lack permission.
@@ -958,6 +1065,7 @@ function M.view()
             ui.key_hint("<C-r>", "refresh"),
             ui.key_hint("R", "request"),
             ui.key_hint("r", "reply"),
+            ui.key_hint("+", "react"),
             ui.key_hint("K", "reactions"),
           }
           if mine then
