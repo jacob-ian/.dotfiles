@@ -15,8 +15,10 @@ local reltime = util.reltime
 local M = {}
 
 -- pv_tab is the `pv` view tab, tracked so re-invoking focuses the open tab
--- instead of stacking a duplicate.
+-- instead of stacking a duplicate. pv_refresh refetches into that tab, for
+-- callers whose action just changed the conversation (e.g. a submitted review).
 local pv_tab
+local pv_refresh
 
 -- VIEW_QUERY pulls the whole conversation for the bespoke `pv`: body, timeline
 -- comments, reviews (with bodies), inline review threads, and the latest commit's
@@ -636,9 +638,12 @@ end
 -- view renders the full PR conversation — body, comments, reviews, inline review
 -- threads, and checks — into a markdown tab. Fetched async (a "Loading…" stub
 -- shows first) so opening is instant; q closes it.
-function M.view()
+function M.view(opts)
   if pv_tab and vim.api.nvim_tabpage_is_valid(pv_tab) then
     vim.api.nvim_set_current_tabpage(pv_tab)
+    if opts and opts.refresh and pv_refresh then
+      pv_refresh()
+    end
     return
   end
   -- Open the tab and paint the loader first; resolving the PR and fetching the
@@ -675,6 +680,7 @@ function M.view()
     callback = function()
       restore()
       pv_tab = nil
+      pv_refresh = nil
     end,
   })
   vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = buf, nowait = true, desc = "close" })
@@ -861,9 +867,10 @@ function M.view()
             end
           end
 
-          vim.keymap.set("n", "<C-r>", function()
+          pv_refresh = function()
             fetch_and_render(title_spinner "refreshing…")
-          end, { buffer = buf, nowait = true, desc = "refresh" })
+          end
+          vim.keymap.set("n", "<C-r>", pv_refresh, { buffer = buf, nowait = true, desc = "refresh" })
 
           -- K peeks at who reacted to the comment/review/thread under the
           -- cursor. Reactor logins aren't in the main query (they'd blow the
@@ -1115,8 +1122,11 @@ function M.view()
                         vim.notify("merge failed:\n" .. vim.trim(res.stderr or ""), vim.log.levels.ERROR)
                       else
                         vim.notify(("merged #%d (%s)"):format(pr.number, label))
-                        -- keep the spinner up until the refreshed view renders.
-                        fetch_and_render(stop_spin2)
+                        stop_spin2()
+                        set_hints(hints)
+                        util.prompt_remove_workspace(function()
+                          fetch_and_render(title_spinner "refreshing…")
+                        end)
                       end
                     end)
                   end)

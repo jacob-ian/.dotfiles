@@ -145,9 +145,9 @@ func resolveHeadRef(sel, slug string, num int) (string, error) {
 	return ref, nil
 }
 
-// prEditorCmd opens nvim with the PR diff (`pd`) shown: a once-only VimEnter
+// prEditorCmd opens nvim with the PR conversation view (`pv`) shown: a once-only VimEnter
 // hook fires after startup, so the lazy plugin is loaded by the time it runs.
-const prEditorCmd = `nvim -c "autocmd VimEnter * ++once lua require('jmux').pr.diff()"`
+const prEditorCmd = `nvim -c "autocmd VimEnter * ++once lua require('jmux').pr.view()"`
 
 // review checks the PR out into a worktree and opens its session (nvim with the
 // diff, a paired claude window, the install window), showing setup progress in

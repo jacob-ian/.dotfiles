@@ -404,10 +404,20 @@ function M.review()
         end
         state.discard()
         -- the submitted review changes the conversation, so drop the pv cache;
-        -- the next `pv` refetches rather than painting a copy without this review.
+        -- the reopened view refetches rather than painting a copy without it.
         state.clear_view_cache()
         vim.notify(string.format("submitted %s with %d comment(s)", event, n))
-        close()
+        -- the diff stays open behind the remove prompt; it only closes once
+        -- the workspace is kept (a removal takes the whole nvim down anyway).
+        if event == "APPROVE" then
+          util.prompt_remove_workspace(function()
+            close()
+            require("jmux.pr.view").view { refresh = true }
+          end)
+        else
+          close()
+          require("jmux.pr.view").view { refresh = true }
+        end
       end)
     end)
   end

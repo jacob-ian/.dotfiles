@@ -32,6 +32,28 @@ function M.git_dir()
   return git_dir or nil
 end
 
+-- prompt_remove_workspace offers to remove the current workspace (worktree +
+-- tmux session) via a detached `jmux workspace remove` — the session kill takes
+-- this nvim down with it, so on "yes" nothing after the call runs. on_keep runs
+-- when the user declines or cancels.
+function M.prompt_remove_workspace(on_keep)
+  local keep = on_keep or function() end
+  local root = M.sh { "git", "rev-parse", "--show-toplevel" }
+  if not root then
+    return keep()
+  end
+  local prompt = "remove this workspace?"
+  if (M.sh { "git", "status", "--porcelain" } or "") ~= "" then
+    prompt = "remove this workspace? (has uncommitted changes)"
+  end
+  vim.ui.select({ "no", "yes" }, { prompt = prompt }, function(choice)
+    if choice ~= "yes" then
+      return keep()
+    end
+    vim.system({ "jmux", "workspace", "remove", "--path", root, "--quiet" }, { detach = true })
+  end)
+end
+
 -- span_str renders a comment's line span as "12" or "12-15". Accepts both the
 -- stored comment shape (start_line nil for a single line) and the target shape
 -- (start_line always set, == line for a single line).
