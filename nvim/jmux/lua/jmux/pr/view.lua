@@ -20,10 +20,22 @@ local M = {}
 local pv_tab
 local pv_refresh
 
+-- Field lists shared by VIEW_QUERY and the per-connection page queries, so a
+-- paginated tail carries exactly what the first page did.
+local COMMENT_FIELDS = [[id author{login} body createdAt
+        reactionGroups{ content viewerHasReacted users{ totalCount } }]]
+local REVIEW_FIELDS = [[id author{login} body state createdAt
+        reactionGroups{ content viewerHasReacted users{ totalCount } }]]
+local THREAD_FIELDS = [[id isResolved isOutdated path line
+        comments(first:100){ nodes{ id author{login} body createdAt pullRequestReview{id}
+          reactionGroups{ content viewerHasReacted users{ totalCount } } } }]]
+
 -- VIEW_QUERY pulls the whole conversation for the bespoke `pv`: body, timeline
 -- comments, reviews (with bodies), inline review threads, and the latest commit's
 -- checks — `gh pr view --comments` omits the inline review comments entirely.
-local VIEW_QUERY = [[
+-- The three conversation connections page at GitHub's 100 cap; fetch_all chases
+-- their cursors so a busy PR renders whole.
+local VIEW_QUERY = ([[
 query($owner:String!,$repo:String!,$number:Int!){
   viewer{ login }
   repository(owner:$owner,name:$repo){
@@ -36,13 +48,9 @@ query($owner:String!,$repo:String!,$number:Int!){
         __typename ... on User{ login } ... on Team{ name slug } } } }
       isDraft mergeable reviewDecision mergeStateStatus
       latestOpinionatedReviews(first:50){ nodes{ state } }
-      comments(first:100){ nodes{ id author{login} body createdAt
-        reactionGroups{ content viewerHasReacted users{ totalCount } } } }
-      reviews(first:100){ nodes{ id author{login} body state createdAt
-        reactionGroups{ content viewerHasReacted users{ totalCount } } } }
-      reviewThreads(first:100){ nodes{ id isResolved isOutdated path line
-        comments(first:100){ nodes{ id author{login} body createdAt pullRequestReview{id}
-          reactionGroups{ content viewerHasReacted users{ totalCount } } } } } }
+      comments(first:100){ pageInfo{ hasNextPage endCursor } nodes{ %s } }
+      reviews(first:100){ pageInfo{ hasNextPage endCursor } nodes{ %s } }
+      reviewThreads(first:100){ pageInfo{ hasNextPage endCursor } nodes{ %s } }
       commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:100){ nodes{
         __typename
         ... on CheckRun{ name conclusion status startedAt completedAt }
@@ -50,7 +58,68 @@ query($owner:String!,$repo:String!,$number:Int!){
       } } } } } }
     }
   }
-}]]
+}]]):format(COMMENT_FIELDS, REVIEW_FIELDS, THREAD_FIELDS)
+
+-- page_query fetches one more page of a single conversation connection.
+local function page_query(key, fields)
+  return ([[
+query($owner:String!,$repo:String!,$number:Int!,$after:String!){
+  repository(owner:$owner,name:$repo){
+    pullRequest(number:$number){
+      %s(first:100,after:$after){ pageInfo{ hasNextPage endCursor } nodes{ %s } }
+    }
+  }
+}]]):format(key, fields)
+end
+
+local CONNECTIONS = {
+  { key = "comments", fields = COMMENT_FIELDS },
+  { key = "reviews", fields = REVIEW_FIELDS },
+  { key = "reviewThreads", fields = THREAD_FIELDS },
+}
+
+-- fetch_all runs VIEW_QUERY, then chases each conversation connection's
+-- cursors — connections in parallel, pages within one in sequence — merging
+-- every page's nodes before handing the whole response to cb. A failed tail
+-- page renders what was gathered rather than failing the view.
+local function fetch_all(vars, cb)
+  gh.graphql(VIEW_QUERY, vars, function(data, err)
+    local pr = data and vim.tbl_get(data, "data", "repository", "pullRequest")
+    if type(pr) ~= "table" then
+      cb(data, err)
+      return
+    end
+    local pending = 0
+    local function done()
+      if pending == 0 then
+        cb(data)
+      end
+    end
+    local function page(conn, cursor)
+      pending = pending + 1
+      local q = page_query(conn.key, conn.fields)
+      gh.graphql(q, vim.tbl_extend("force", vars, { after = cursor }), function(pd)
+        pending = pending - 1
+        local c = pd and vim.tbl_get(pd, "data", "repository", "pullRequest", conn.key)
+        if type(c) == "table" then
+          vim.list_extend(pr[conn.key].nodes, c.nodes or {})
+          local pi = c.pageInfo or {}
+          if pi.hasNextPage and nilable(pi.endCursor) then
+            page(conn, pi.endCursor)
+          end
+        end
+        done()
+      end)
+    end
+    for _, conn in ipairs(CONNECTIONS) do
+      local pi = vim.tbl_get(pr, conn.key, "pageInfo") or {}
+      if pi.hasNextPage and nilable(pi.endCursor) then
+        page(conn, pi.endCursor)
+      end
+    end
+    done()
+  end)
+end
 
 -- REACTORS_QUERY resolves who reacted, on demand for the K hover. VIEW_QUERY
 -- ships only counts: bare totalCounts cost nothing against GitHub's 500k
@@ -1151,9 +1220,7 @@ function M.view(opts)
       if cached then
         finish(cached.data, nil, cached.age)
       else
-        gh.graphql(VIEW_QUERY, { owner = owner, repo = repo, number = pr.number }, function(data, err2)
-          finish(data, err2)
-        end)
+        fetch_all({ owner = owner, repo = repo, number = pr.number }, finish)
       end
     end
 
