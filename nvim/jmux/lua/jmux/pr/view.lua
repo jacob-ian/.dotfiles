@@ -133,7 +133,7 @@ query($ids:[ID!]!){
 }]]
 
 -- ADD_REACTION / REMOVE_REACTION set and unset the viewer's reaction on any
--- Reactable node, for the `a` react picker.
+-- Reactable node, for the `+` react picker.
 local ADD_REACTION = [[
 mutation($subject:ID!,$content:ReactionContent!){
   addReaction(input:{subjectId:$subject,content:$content}){ clientMutationId }
@@ -332,13 +332,11 @@ local function build_model(data)
 
   header[#header + 1] = ""
 
-  -- reactions maps a block/kid id to the reactable node ids behind it (each
-  -- item { id, prefix? }, prefix labelling thread replies), for the K hover's
-  -- lazy reactor fetch; subjects maps it to the node the `a` picker reacts to
-  -- (a thread reacts to its root comment) plus the viewer's own reactions.
-  -- Keys match rows_by_id, so the cursor row resolves straight to an entry.
-  -- The K-fetched lines memoize onto the reactions entry.
-  local reactions, subjects = {}, {}
+  -- Row lookups for the keymaps, keyed like rows_by_id: reactions backs the K
+  -- hover (reactable node ids, fetched lines memoized on), subjects backs the
+  -- `+` picker (a thread reacts to its root comment), and jumps backs <CR>
+  -- (the code a thread comments on).
+  local reactions, subjects, jumps = {}, {}, {}
 
   -- the PR description is its own collapsible block, shown above the checks.
   local pr_header = ("@%s · opened · %s"):format(who(pr), reltime(pr.createdAt or ""))
@@ -419,17 +417,20 @@ local function build_model(data)
       status = status .. " · outdated"
     end
     local lines = { ("`%s`"):format(loc) }
+    -- the root's reactions ride on the kid's header; replies get a bold
+    -- author line (line_marks) carrying theirs the same way.
+    local line_marks = {}
     for i, c in ipairs(comments) do
-      -- the root's reactions ride on the kid's header; replies show theirs
-      -- inline, under the reply they belong to.
       if i > 1 then
-        lines[#lines + 1] = ("↳ @%s · %s"):format(who(c), reltime(c.createdAt or ""))
+        local hdr = ("↳ @%s · %s"):format(who(c), reltime(c.createdAt or ""))
+        line_marks[#line_marks + 1] = { rel = #lines, col = 0, col_end = #hdr, hl = "Title" }
+        local rx = reaction_line(c)
+        if rx then
+          hdr = hdr .. " · " .. rx
+        end
+        lines[#lines + 1] = hdr
       end
       vim.list_extend(lines, split(c.body))
-      local rx = i > 1 and reaction_line(c) or nil
-      if rx then
-        lines[#lines + 1] = rx
-      end
       lines[#lines + 1] = ""
     end
     local root = comments[1]
@@ -453,7 +454,10 @@ local function build_model(data)
     if root and nilable(root.id) then
       subjects[t.id or loc] = { id = root.id, mine = my_reactions(root) }
     end
-    return { id = t.id or loc, header = header, lines = lines }
+    if nilable(t.path) then
+      jumps[t.id or loc] = { path = t.path, line = nilable(t.line) }
+    end
+    return { id = t.id or loc, header = header, lines = lines, line_marks = line_marks }
   end
 
   -- time-ordered conversation (ISO-8601 sorts chronologically as a string).
@@ -516,7 +520,8 @@ local function build_model(data)
   -- threads not tied to a shown review become their own top-level blocks.
   for _, t in ipairs(orphans) do
     local k = thread_kid(t)
-    blocks[#blocks + 1] = { at = "", id = k.id, header = k.header, body = k.lines, kids = {} }
+    blocks[#blocks + 1] =
+      { at = "", id = k.id, header = k.header, body = k.lines, body_marks = k.line_marks, kids = {} }
   end
 
   return {
@@ -527,6 +532,7 @@ local function build_model(data)
     blocks = blocks,
     reactions = reactions,
     subjects = subjects,
+    jumps = jumps,
   }
 end
 
@@ -725,15 +731,22 @@ function M.view(opts)
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].filetype = "markdown"
-  vim.wo[win].wrap = true
-  vim.wo[win].linebreak = true
-  vim.wo[win].breakindent = true
-  vim.wo[win].conceallevel = 2
-  -- keep markdown concealed even on the cursor line; this is a read-only view, so
-  -- revealing raw syntax on hover just makes lines jump around.
-  vim.wo[win].concealcursor = "nvic"
-  vim.wo[win].number = false
-  vim.wo[win].relativenumber = false
+  -- scope=local: vim.wo[win] writes the option's global value too, which
+  -- would leak pv's cosmetics (numbers off, conceal on…) into every window
+  -- opened for the rest of the session.
+  for opt, val in pairs {
+    wrap = true,
+    linebreak = true,
+    breakindent = true,
+    conceallevel = 2,
+    -- concealed even on the cursor line: this is a read-only view, so
+    -- revealing raw syntax on hover just makes lines jump around.
+    concealcursor = "nvic",
+    number = false,
+    relativenumber = false,
+  } do
+    vim.api.nvim_set_option_value(opt, val, { scope = "local", win = win })
+  end
 
   local function fill(lines)
     vim.bo[buf].modifiable = true
@@ -821,11 +834,11 @@ function M.view(opts)
           -- repositioned since the description above them changes height.
           local model = build_model(data)
           local ns = vim.api.nvim_create_namespace "jmux_pr_view"
-          local rows_by_id, id_by_row = {}, {}
+          local rows_by_id, id_by_row, jump_by_row = {}, {}, {}
 
           local function render()
             local lines = vim.list_extend({}, model.header)
-            rows_by_id, id_by_row = {}, {}
+            rows_by_id, id_by_row, jump_by_row = {}, {}, {}
             local marks = {}
             -- indent body lines under their title (blank lines stay blank so markdown
             -- paragraph breaks survive); any body_marks shift with the indent.
@@ -854,13 +867,23 @@ function M.view(opts)
                 }
               end
               if expanded[b.id] then
+                -- an expanded thread's first body line is its `path:line`,
+                -- <CR>'s jump target.
+                if model.jumps[b.id] then
+                  jump_by_row[row + 1] = b.id
+                end
                 add_body(b.body, "  ", b.body_marks)
                 for _, k in ipairs(b.kids) do
                   local krow = #lines
                   rows_by_id[k.id], id_by_row[krow] = krow, k.id
                   lines[#lines + 1] = "  " .. (expanded[k.id] and "▾ " or "▸ ") .. k.header
                   if expanded[k.id] then
-                    add_body(k.lines, "    ")
+                    if model.jumps[k.id] then
+                      jump_by_row[krow + 1] = k.id
+                    end
+                    -- three spaces, not four — a 4-space indent after a blank
+                    -- line is an indented code block to markdown.
+                    add_body(k.lines, "   ", k.line_marks)
                   end
                 end
               end
@@ -910,9 +933,22 @@ function M.view(opts)
           end
 
           render()
-          for _, key in ipairs { "<Tab>", "<CR>" } do
-            vim.keymap.set("n", key, toggle, { buffer = buf, nowait = true, desc = "toggle thread" })
-          end
+          vim.keymap.set("n", "<Tab>", toggle, { buffer = buf, nowait = true, desc = "toggle thread" })
+          -- <CR> on a thread's `path:line` opens the diff there; elsewhere it
+          -- toggles like <Tab>.
+          vim.keymap.set("n", "<CR>", function()
+            local w = vim.api.nvim_get_current_win()
+            if vim.api.nvim_win_get_buf(w) ~= buf then
+              return
+            end
+            local id = jump_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
+            local j = id and model.jumps[id]
+            if j then
+              diff.open_at(j.path, j.line)
+              return
+            end
+            toggle()
+          end, { buffer = buf, nowait = true, desc = "toggle / open in diff" })
 
           -- title_spinner animates the tab title (scoped via set_hints) until the
           -- returned stop fn is called; shared by refresh and merge.
@@ -941,11 +977,9 @@ function M.view(opts)
           end
           vim.keymap.set("n", "<C-r>", pv_refresh, { buffer = buf, nowait = true, desc = "refresh" })
 
-          -- K peeks at who reacted to the comment/review/thread under the
-          -- cursor. Reactor logins aren't in the main query (they'd blow the
-          -- node limit), so they fetch on demand — memoized on the entry for
-          -- the render's lifetime — and the hover only pops if the cursor is
-          -- still on the same row when they land.
+          -- K shows who reacted. Logins aren't in the main query (node limit),
+          -- so they fetch on demand, memoized for the render's lifetime; the
+          -- hover only pops if the cursor hasn't moved on.
           vim.keymap.set("n", "K", function()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= buf then
@@ -998,13 +1032,9 @@ function M.view(opts)
             end)
           end, { buffer = buf, nowait = true, desc = "who reacted" })
 
-          -- + reacts to the description/comment/review/thread under the
-          -- cursor (a thread reacts to its root comment), via the emoji
-          -- picker — which marks the ones already yours, since every
-          -- reaction is a toggle: picking it again removes it, like GitHub's
-          -- own buttons. Refreshes on success so the header counts update.
-          -- `+` echoes GitHub's smiley-plus react button, and its default
-          -- motion loses nothing here.
+          -- + reacts via the emoji picker: every reaction is a toggle (the
+          -- picker marks the ones already yours). `+` echoes GitHub's
+          -- smiley-plus button.
           local function subject_under_cursor()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= buf then

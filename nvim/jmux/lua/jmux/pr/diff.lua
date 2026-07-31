@@ -534,7 +534,7 @@ end
 -- diff opens the PR's changes — base...HEAD, the merge-base range GitHub shows —
 -- in diffview, where pending comments appear as gutter signs. load() first so a
 -- restored review decorates on open.
-function M.diff()
+function M.diff(selected)
   if pd_tab and vim.api.nvim_tabpage_is_valid(pd_tab) then
     vim.api.nvim_set_current_tabpage(pd_tab)
     return
@@ -549,7 +549,11 @@ function M.diff()
     vim.notify("could not fetch PR base " .. pr.base:sub(1, 7) .. ": " .. (berr or ""), vim.log.levels.ERROR)
     return
   end
-  vim.cmd("DiffviewOpen " .. pr.base .. "...HEAD")
+  local cmd = "DiffviewOpen " .. pr.base .. "...HEAD"
+  if type(selected) == "string" and selected ~= "" then
+    cmd = cmd .. " --selected-file=" .. vim.fn.fnameescape(selected)
+  end
+  vim.cmd(cmd)
   -- :DiffviewOpen lands us in the new diff tab; remember it so only this view
   -- gets comment signs.
   pd_tab = vim.api.nvim_get_current_tabpage()
@@ -563,6 +567,66 @@ function M.diff()
   refresh_threads()
 end
 
+-- jump_to_line places the cursor on line in path's head-side diff window.
+-- Diffview selects and loads entries asynchronously, so this polls briefly;
+-- of the windows showing path, the last is the head side (right of the base).
+local function jump_to_line(path, line, tries)
+  if not line then
+    return
+  end
+  local target
+  if pd_tab and vim.api.nvim_tabpage_is_valid(pd_tab) then
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(pd_tab)) do
+      local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))
+      if name ~= "" and (name == path or name:sub(-#("/" .. path)) == "/" .. path) then
+        target = w
+      end
+    end
+  end
+  if target then
+    pcall(vim.api.nvim_win_set_cursor, target, { line, 0 })
+    vim.api.nvim_win_call(target, function()
+      vim.cmd "normal! zz"
+    end)
+    return
+  end
+  tries = tries or 20
+  if tries > 0 then
+    vim.defer_fn(function()
+      jump_to_line(path, line, tries - 1)
+    end, 50)
+  end
+end
+
+-- open_at opens (or focuses) the PR diff with path selected and the cursor
+-- on line's head-side row — pv's jump from an inline thread to its code.
+function M.open_at(path, line)
+  if pd_tab and vim.api.nvim_tabpage_is_valid(pd_tab) then
+    vim.api.nvim_set_current_tabpage(pd_tab)
+    local view = require("diffview.lib").get_current_view()
+    if view and view.set_file_by_path then
+      view:set_file_by_path(path, true)
+    end
+  else
+    M.diff(path)
+  end
+  jump_to_line(path, line)
+end
+
+-- restore_numbers re-enables line numbers in the diff windows: pv turns them
+-- off in its window, and windows diffview splits from it inherit those local
+-- options. Restored from the global values so config stays the source of truth.
+local function restore_numbers()
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))
+    if not name:find("/panels/", 1, true) then
+      for _, opt in ipairs { "number", "relativenumber" } do
+        vim.wo[w][opt] = vim.api.nvim_get_option_value(opt, { scope = "global" })
+      end
+    end
+  end
+end
+
 -- Keep the diff gutter in sync with pending comments as the user navigates
 -- diffview files and re-enters the view. A cleared augroup keeps re-sourcing the
 -- module (dev reload) idempotent rather than stacking duplicate callbacks.
@@ -570,6 +634,7 @@ vim.api.nvim_create_autocmd("User", {
   group = vim.api.nvim_create_augroup("jmux_pr", { clear = true }),
   pattern = { "DiffviewDiffBufWinEnter", "DiffviewViewEnter" },
   callback = vim.schedule_wrap(function()
+    restore_numbers()
     decorate_diff()
   end),
 })
