@@ -140,33 +140,34 @@ local hover_win
 -- hover shows lines in a small unfocused float anchored below the cursor,
 -- closed by the first cursor movement or by leaving the source buffer.
 function M.hover(lines)
-  if hover_win and vim.api.nvim_win_is_valid(hover_win) then
-    vim.api.nvim_win_close(hover_win, true)
+  if hover_win then
+    hover_win:close()
   end
   local src = vim.api.nvim_get_current_buf()
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].bufhidden = "wipe"
   local width = 1
   for _, l in ipairs(lines) do
     width = math.max(width, vim.fn.strdisplaywidth(l))
   end
-  local win = vim.api.nvim_open_win(buf, false, {
+  hover_win = require("snacks").win {
     relative = "cursor",
     row = 1,
     col = 0,
     width = width,
     height = #lines,
-    style = "minimal",
     border = "rounded",
-  })
-  hover_win = win
+    enter = false,
+    focusable = false,
+    backdrop = false,
+    text = lines,
+    bo = { bufhidden = "wipe" },
+  }
   vim.api.nvim_create_autocmd({ "CursorMoved", "BufLeave" }, {
     buffer = src,
     once = true,
     callback = function()
-      if vim.api.nvim_win_is_valid(win) then
-        vim.api.nvim_win_close(win, true)
+      if hover_win then
+        hover_win:close()
+        hover_win = nil
       end
     end,
   })
