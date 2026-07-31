@@ -126,6 +126,12 @@ func FetchBranch(bareRoot, branch string) error {
 	return gitRun(bareRoot, "fetch", "origin", branch)
 }
 
+// FastForward fast-forwards the branch checked out in worktreeDir to ref,
+// erroring rather than merging when the branches have diverged.
+func FastForward(worktreeDir, ref string) error {
+	return gitRun(worktreeDir, "merge", "--ff-only", ref)
+}
+
 // WorktreeForBranch returns the path of the worktree that has branch checked
 // out, or "" if none does — so an existing checkout is reused rather than
 // failing a second `worktree add` (git forbids the same branch in two trees).

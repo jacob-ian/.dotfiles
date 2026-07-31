@@ -54,6 +54,12 @@ func AddWorktree(bareRoot string) error {
 			phase <- "fetching " + def + "…"
 			_ = gitctl.FetchBranch(bareRoot, def)
 			base = "origin/" + def
+			// The new branch bases on origin/<def> regardless; this only keeps the
+			// default-branch checkout itself fresh.
+			if mainWt := filepath.Join(bareRoot, def); repo.IsDir(mainWt) {
+				phase <- "updating " + def + "…"
+				_ = gitctl.FastForward(mainWt, base)
+			}
 		}
 		if err := gitctl.WorktreeAdd(bareRoot, worktreePath, branchName, base, createBranch); err != nil {
 			flag := ""
