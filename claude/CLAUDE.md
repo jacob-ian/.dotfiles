@@ -11,5 +11,10 @@
 # Commit rules
 
 - **Never commit unless explicitly asked.** Staging files is fine, but do not run `git commit` until asked.
+- **Do not create follow up commits until asked**. I need to first review your changes before it notifies an open PR.
 - Keep commit messages to a single line — short and imperative (e.g. `fix null check in session loader`).
 - Do not include ticket or issue references (Linear, GitHub, Jira) in commit messages.
+
+# PR rules
+
+- **Explain the why, not the what.** PR descriptions should explain why the change is needed, the diff explains what the change is.
