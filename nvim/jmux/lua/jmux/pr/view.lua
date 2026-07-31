@@ -1054,6 +1054,8 @@ function M.view(opts)
           -- go opens the PR on github.com, for everything pv doesn't render.
           vim.keymap.set("n", "go", M.browser, { buffer = buf, nowait = true, desc = "open in browser" })
 
+          vim.keymap.set("n", "d", diff.diff, { buffer = buf, nowait = true, desc = "open diff" })
+
           -- R requests a reviewer: pick from the repo's assignable users, skipping
           -- the author and anyone already requested, then refresh so the new
           -- "awaiting" line shows. gh rejects the request if you lack permission.
@@ -1141,6 +1143,7 @@ function M.view(opts)
             ui.key_hint("<C-r>", "refresh"),
             ui.key_hint("R", "request"),
             ui.key_hint("r", "reply"),
+            ui.key_hint("d", "diff"),
             ui.key_hint("+", "react"),
             ui.key_hint("K", "reactions"),
           }
