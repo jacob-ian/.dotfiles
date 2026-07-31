@@ -2,6 +2,7 @@
 package nvimctl
 
 import (
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -58,10 +59,14 @@ func Processes(roots []int) []int {
 	// Keep cores whose ancestry reaches an anchor (capped walk tolerates a shell
 	// between anchor and TUI), and with each core its descendant LSPs.
 	var reap []int
+	// Never reap our own subtree: a workspace remove spawned from inside the
+	// editor is a descendant of the very embed it's reaping, and killing it
+	// here would abort the teardown it's running.
+	self := os.Getpid()
 	seen := map[int]bool{}
 	var collect func(pid int)
 	collect = func(pid int) {
-		if seen[pid] {
+		if seen[pid] || pid == self {
 			return
 		}
 		seen[pid] = true
