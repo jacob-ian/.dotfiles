@@ -5,6 +5,7 @@
 
 local diff = require "jmux.pr.diff"
 local gh = require "jmux.pr.gh"
+local reviewers = require "jmux.pr.reviewers"
 local state = require "jmux.pr.state"
 local ui = require "jmux.pr.ui"
 local util = require "jmux.pr.util"
@@ -47,7 +48,7 @@ query($owner:String!,$repo:String!,$number:Int!){
       reviewRequests(first:50){ nodes{ requestedReviewer{
         __typename ... on User{ login } ... on Team{ name slug } } } }
       isDraft mergeable reviewDecision mergeStateStatus
-      latestOpinionatedReviews(first:50){ nodes{ state } }
+      latestOpinionatedReviews(first:50){ nodes{ state author{login} createdAt } }
       comments(first:100){ pageInfo{ hasNextPage endCursor } nodes{ %s } }
       reviews(first:100){ pageInfo{ hasNextPage endCursor } nodes{ %s } }
       reviewThreads(first:100){ pageInfo{ hasNextPage endCursor } nodes{ %s } }
@@ -233,14 +234,6 @@ local function merge_summary(pr)
   if tostring(pr.state or ""):upper() ~= "OPEN" then
     return nil
   end
-  -- latestOpinionatedReviews is the latest approve/request-changes per author
-  -- (ignoring later plain comments), matching how GitHub tallies approvals.
-  local approvals = 0
-  for _, r in ipairs(vim.tbl_get(pr, "latestOpinionatedReviews", "nodes") or {}) do
-    if tostring(r.state or ""):upper() == "APPROVED" then
-      approvals = approvals + 1
-    end
-  end
   -- unresolved threads block the merge when the branch requires resolution; that
   -- rule isn't readable without push access, so surface the count regardless.
   local unresolved = 0
@@ -272,7 +265,9 @@ local function merge_summary(pr)
   elseif decision == "APPROVED" then
     icon, hl, state_str = "✓", "DiagnosticOk", "approved"
   end
-  local parts = { approvals == 1 and "1 approval" or (approvals .. " approvals") }
+  -- approval counts live in the reviewers block, so the summary carries only
+  -- what that block can't: thread resolution and merge state.
+  local parts = {}
   if unresolved > 0 then
     parts[#parts + 1] = unresolved .. " unresolved"
   end
@@ -299,38 +294,19 @@ local function build_model(data)
     return vim.split(vim.trim((text or ""):gsub("\r", "")), "\n")
   end
 
-  local header = {
-    ("# %s  #%s"):format(pr.title or "", tostring(pr.number or "")),
-    ("`%s` · @%s · %s"):format(tostring(pr.state or ""):lower(), who(pr), reltime(pr.createdAt or "")),
-  }
+  local status = ("`%s` · @%s · %s"):format(tostring(pr.state or ""):lower(), who(pr), reltime(pr.createdAt or ""))
   local header_marks = {}
   local micon, mhl, mtext = merge_summary(pr)
   if micon then
-    header[#header + 1] = ("%s %s"):format(micon, mtext)
-    header_marks[#header_marks + 1] = { row = #header - 1, col = 0, col_end = #micon, hl = mhl }
+    local prefix = status .. " · "
+    status = ("%s%s %s"):format(prefix, micon, mtext)
+    header_marks[#header_marks + 1] = { row = 1, col = #prefix, col_end = #prefix + #micon, hl = mhl }
   end
-
-  -- requested reviewers the PR is still waiting on (GitHub drops a request from
-  -- this list once that reviewer submits). Users render as @login, teams as their
-  -- name. A muted hourglass keeps it distinct from the merge-summary line above.
-  local requested = {}
-  for _, rr in ipairs(vim.tbl_get(pr, "reviewRequests", "nodes") or {}) do
-    local r = rr.requestedReviewer
-    if type(r) == "table" then
-      if r.login then
-        requested[#requested + 1] = "@" .. r.login
-      elseif r.name then
-        requested[#requested + 1] = r.name
-      end
-    end
-  end
-  if #requested > 0 then
-    local icon = "◷"
-    header[#header + 1] = ("%s awaiting %s"):format(icon, table.concat(requested, ", "))
-    header_marks[#header_marks + 1] = { row = #header - 1, col = 0, col_end = #icon, hl = "DiagnosticWarn" }
-  end
-
-  header[#header + 1] = ""
+  local header = {
+    ("# %s  #%s"):format(pr.title or "", tostring(pr.number or "")),
+    status,
+    "",
+  }
 
   -- Row lookups for the keymaps, keyed like rows_by_id: reactions backs the K
   -- hover (reactable node ids, fetched lines memoized on), subjects backs the
@@ -356,6 +332,21 @@ local function build_model(data)
     body = split(pr.body),
     kids = {},
   }
+
+  -- reviewers are the first collapsible block, above the description; the
+  -- model lives in jmux.pr.reviewers so a future dashboard pane can reuse it.
+  local reviewers_block
+  local rmodel = reviewers.model(pr)
+  if rmodel then
+    reviewers_block = {
+      id = "reviewers",
+      header = rmodel.header,
+      header_mark = rmodel.header_mark,
+      body = rmodel.lines,
+      body_marks = rmodel.marks,
+      kids = {},
+    }
+  end
 
   -- checks are a collapsible block: a one-line summary ("1 failed" / "2 running"
   -- / "all passed") that expands to the per-check list. Icon colours are stored
@@ -528,6 +519,7 @@ local function build_model(data)
     header = header,
     header_marks = header_marks,
     pr = pr_block,
+    reviewers = reviewers_block,
     checks = checks_block,
     blocks = blocks,
     reactions = reactions,
@@ -890,6 +882,9 @@ function M.view(opts)
               lines[#lines + 1] = ""
             end
 
+            if model.reviewers then
+              emit(model.reviewers)
+            end
             if model.pr then
               emit(model.pr)
             end
