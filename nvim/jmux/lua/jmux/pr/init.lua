@@ -7,6 +7,7 @@
 -- The implementation is layered under pr/: util → gh → ui/state → diff →
 -- review/view. This facade re-exports the public surface the keymaps bind.
 
+local agent = require "jmux.pr.agent"
 local diff = require "jmux.pr.diff"
 local review = require "jmux.pr.review"
 local view = require "jmux.pr.view"
@@ -19,4 +20,6 @@ return {
   discard = review.discard,
   view = view.view,
   browser = view.browser,
+  agent_review = agent.review,
+  agent_send = agent.send,
 }

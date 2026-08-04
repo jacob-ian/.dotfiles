@@ -236,6 +236,8 @@ end
 -- comments on the right — then a/c/r choose a verdict (with an optional summary)
 -- and submit it; q cancels. Shown in a throwaway tab so the diffview stays put.
 function M.review()
+  -- this panel submits to GitHub, so it only ever reads the PR store.
+  state.use(state.PR_STORE)
   state.load()
   -- The preview is built entirely from local git: HEAD for RIGHT-side code, and
   -- base (one gh call) only when a LEFT-side comment actually needs it.

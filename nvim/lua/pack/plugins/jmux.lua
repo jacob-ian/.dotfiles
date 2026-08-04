@@ -23,5 +23,11 @@ return {
     vim.keymap.set("n", "<leader>po", function()
       require("jmux").pr.browser()
     end, { desc = "PR: open in browser" })
+    vim.keymap.set("n", "<leader>pa", function()
+      require("jmux").pr.agent_review()
+    end, { desc = "PR: review working tree for agent" })
+    vim.keymap.set("n", "<leader>pA", function()
+      require("jmux").pr.agent_send()
+    end, { desc = "PR: send review to agent" })
   end,
 }

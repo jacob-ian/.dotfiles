@@ -407,7 +407,10 @@ end
 -- pd_tab is the tabpage that `pd` opened the review diff in. Signs are scoped to
 -- it so PR comments don't bleed into unrelated diffviews (neogit, ad-hoc :Diff…).
 -- Tracked so re-invoking focuses the open tab instead of stacking a duplicate.
+-- pd_mode says which review the tab holds ("pr" or "agent") — the two share the
+-- slot, so opening one closes the other.
 local pd_tab
+local pd_mode
 
 -- decorate_one draws both your pending signs and the existing-thread signs for
 -- one diff window, and binds the thread keys on its buffer (K peek, ]t/[t
@@ -534,9 +537,24 @@ end
 -- diff opens the PR's changes — base...HEAD, the merge-base range GitHub shows —
 -- in diffview, where pending comments appear as gutter signs. load() first so a
 -- restored review decorates on open.
-function M.diff(selected)
+-- claim_tab switches the pending store and takes over the diff tab slot:
+-- focuses it when it already holds `mode`'s review (returning false), closes
+-- the other review's tab otherwise.
+local function claim_tab(mode, store)
+  state.use(store)
   if pd_tab and vim.api.nvim_tabpage_is_valid(pd_tab) then
     vim.api.nvim_set_current_tabpage(pd_tab)
+    if pd_mode == mode then
+      return false
+    end
+    vim.cmd "tabclose"
+  end
+  pd_mode = mode
+  return true
+end
+
+function M.diff(selected)
+  if not claim_tab("pr", state.PR_STORE) then
     return
   end
   local pr, err = gh.pr_info()
@@ -565,6 +583,28 @@ function M.diff(selected)
     decorate_diff()
   end)
   refresh_threads()
+end
+
+-- review_worktree opens the working tree's changes against HEAD with the same
+-- comment staging as a PR diff — the pre-PR agent review. No PR, so no threads.
+function M.review_worktree()
+  if not util.git_dir() then
+    vim.notify("not in a git repo — agent review needs a HEAD to diff against", vim.log.levels.WARN)
+    return
+  end
+  if not claim_tab("agent", state.AGENT_STORE) then
+    return
+  end
+  threads = {}
+  -- intent-to-add so untracked files show in the HEAD diff (paths only,
+  -- nothing becomes committable).
+  util.sh { "git", "add", "--intent-to-add", "--all" }
+  vim.cmd "DiffviewOpen HEAD"
+  pd_tab = vim.api.nvim_get_current_tabpage()
+  vim.schedule(function()
+    state.load()
+    decorate_diff()
+  end)
 end
 
 -- jump_to_line places the cursor on line in path's head-side diff window.
@@ -630,13 +670,29 @@ end
 -- Keep the diff gutter in sync with pending comments as the user navigates
 -- diffview files and re-enters the view. A cleared augroup keeps re-sourcing the
 -- module (dev reload) idempotent rather than stacking duplicate callbacks.
+local group = vim.api.nvim_create_augroup("jmux_pr", { clear = true })
 vim.api.nvim_create_autocmd("User", {
-  group = vim.api.nvim_create_augroup("jmux_pr", { clear = true }),
+  group = group,
   pattern = { "DiffviewDiffBufWinEnter", "DiffviewViewEnter" },
   callback = vim.schedule_wrap(function()
     restore_numbers()
     decorate_diff()
   end),
+})
+
+-- Signs land on real file buffers (a diff's RIGHT side is the buffer on
+-- disk), so without this sweep they'd outlive the view in normal windows.
+vim.api.nvim_create_autocmd("User", {
+  group = group,
+  pattern = "DiffviewViewClosed",
+  callback = function()
+    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_is_loaded(buf) then
+        vim.api.nvim_buf_clear_namespace(buf, SIGN_NS, 0, -1)
+        vim.api.nvim_buf_clear_namespace(buf, THREAD_NS, 0, -1)
+      end
+    end
+  end,
 })
 
 return M

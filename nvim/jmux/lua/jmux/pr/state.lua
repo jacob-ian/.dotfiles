@@ -11,9 +11,15 @@ local M = {}
 -- instance maps to one PR worktree, so module-level state is sufficient.
 M.pending = {}
 
+-- Two pending stores: the PR review (submitted to GitHub) and the agent
+-- review (sent to the paired claude). The open commands switch stores.
+M.PR_STORE = "jmux-review.json"
+M.AGENT_STORE = "jmux-agent-review.json"
+local store = M.PR_STORE
+
 local function state_file()
   local dir = util.git_dir()
-  return dir and (dir .. "/jmux-review.json") or nil
+  return dir and (dir .. "/" .. store) or nil
 end
 
 -- save writes M.pending through on every mutation (crash-safe; the payload is
@@ -30,11 +36,22 @@ function M.save()
   vim.fn.writefile({ vim.json.encode { sha = util.sh { "git", "rev-parse", "HEAD" }, comments = M.pending } }, f)
 end
 
+local loaded = false
+
+-- use switches the active pending store; the next load reads that store's file.
+function M.use(file)
+  if store == file then
+    return
+  end
+  store = file
+  M.pending = {}
+  loaded = false
+end
+
 -- load restores a persisted review the first time the module is touched in a
 -- session. The stored HEAD sha is compared against the current one: comments are
 -- anchored to line numbers on a specific commit, so a rebase/amend since the
 -- last session may have shifted them, which is worth a warning.
-local loaded = false
 function M.load()
   if loaded then
     return

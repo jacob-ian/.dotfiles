@@ -21,15 +21,16 @@ end
 
 -- git_dir resolves the worktree's absolute git dir once per session. One nvim
 -- instance maps to one PR worktree, so the path never changes under us — the same
--- invariant that lets gh cache the PR identity. Memoizing it (false sentinel
--- caches a miss too) keeps the per-PR state files off a blocking `git rev-parse`
--- spawn on every read/write/clear, including the view's instant-paint open path.
+-- invariant that lets gh cache the PR identity. Memoizing it keeps the per-PR
+-- state files off a blocking `git rev-parse` spawn on every read/write/clear,
+-- including the view's instant-paint open path. Only a hit is memoized: a miss
+-- can heal (git init, cd) within the session.
 local git_dir
 function M.git_dir()
-  if git_dir == nil then
-    git_dir = M.sh { "git", "rev-parse", "--absolute-git-dir" } or false
+  if not git_dir then
+    git_dir = M.sh { "git", "rev-parse", "--absolute-git-dir" }
   end
-  return git_dir or nil
+  return git_dir
 end
 
 -- prompt_remove_workspace offers to remove the current workspace (worktree +
