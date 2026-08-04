@@ -77,7 +77,7 @@ local KEYS = {
   },
   {
     mode = "n",
-    lhs = "S",
+    lhs = "<C-s>",
     panel = true,
     -- the mode's submit; lazy requires avoid module cycles.
     rhs = function()
