@@ -45,6 +45,17 @@ function M.bar(label, hints)
   return ("%%#Title# %s %%*%%=%s "):format(label, table.concat(hints, "  "))
 end
 
+-- bars maps a tabpage to its set_tab_title bar's spinner, so spin() routes
+-- through the current tab's bar automatically — no caller threads a spinner.
+local bars = {}
+local function prune_bars()
+  for t in pairs(bars) do
+    if not vim.api.nvim_tabpage_is_valid(t) then
+      bars[t] = nil
+    end
+  end
+end
+
 -- set_tab_title shows a full-width jmux bar (label + hints) in the tabline, but
 -- scoped to its own tabpage: the tabline is a global option, so without this it
 -- would bleed onto other tabs (e.g. pv left open while you switch to pd). A
@@ -66,24 +77,48 @@ function M.set_tab_title(buf, label, hints)
       restore()
     end
   end
-  -- set_hints rebuilds the bar (e.g. to reveal a key once data confirms it
-  -- applies) and re-applies it if this tab is current.
-  local function set_hints(new_hints)
-    title = M.bar(label, new_hints)
+  local function apply(hs)
+    title = M.bar(label, hs)
     refresh()
   end
+  -- set_hints rebuilds the bar (e.g. to reveal a key once data confirms it
+  -- applies) and re-applies it if this tab is current.
+  local current_hints = hints
+  local function set_hints(new_hints)
+    current_hints = new_hints
+    apply(new_hints)
+  end
+  -- spin animates a loader through the bar itself — tab-scoped, unlike the
+  -- global M.spin, so frames never bleed onto other tabs — and restores the
+  -- last-set hints on stop.
+  local function spin(spin_label)
+    local stop = M.spinner(function(frame)
+      apply { ("%%#Title#%s %s"):format(frame, spin_label) }
+    end)
+    return function()
+      stop()
+      apply(current_hints)
+    end
+  end
   refresh()
+  prune_bars()
+  bars[tab] = spin
   vim.api.nvim_create_autocmd("TabEnter", { group = group, callback = refresh })
   vim.api.nvim_create_autocmd("BufWipeout", {
     group = group,
     buffer = buf,
     once = true,
     callback = function()
+      -- only deregister our own spin: a replacement bar on the same tab
+      -- (title_slot re-set) may already own the slot.
+      if bars[tab] == spin then
+        bars[tab] = nil
+      end
       restore()
       pcall(vim.api.nvim_del_augroup_by_id, group)
     end,
   })
-  return title, restore, set_hints
+  return title, restore, set_hints, spin
 end
 
 -- prompt_multiline opens a floating scratch buffer for a multi-line body and
@@ -133,6 +168,88 @@ function M.prompt_multiline(title, on_save, initial, on_open, footer)
   end
 end
 
+-- keyspec declares a buffer's keys once: entries { mode?, lhs, rhs, desc?,
+-- hint?, lhs_hint?, when?, ... }. apply(buf, map) registers the active ones
+-- (map defaults to vim.keymap.set; pass lease.map for revocable buffers) and
+-- deletes entries whose `when` turned false, so re-applying tracks state.
+-- hints() renders the bar labels for the active hinted entries; hint may be a
+-- fn for state-dependent labels, lhs_hint overrides the shown key (e.g. ⇥).
+-- Extra entry fields pass through to callers iterating spec.entries.
+function M.keyspec(entries)
+  local ks = { entries = entries }
+  function ks.apply(buf, map)
+    map = map or vim.keymap.set
+    for _, k in ipairs(entries) do
+      local mode = k.mode or "n"
+      if not k.when or k.when() then
+        map(mode, k.lhs, k.rhs, { buffer = buf, nowait = true, desc = k.desc })
+      else
+        pcall(vim.keymap.del, mode, k.lhs, { buffer = buf })
+      end
+    end
+  end
+  function ks.hints()
+    local out = {}
+    for _, k in ipairs(entries) do
+      if k.hint and (not k.when or k.when()) then
+        out[#out + 1] = M.key_hint(k.lhs_hint or k.lhs, type(k.hint) == "function" and k.hint() or k.hint)
+      end
+    end
+    return out
+  end
+  return ks
+end
+
+-- spin is the loader for async ops: the current tab's title bar when it has
+-- one (tab-scoped, restores the bar's hints on stop), else a plain tab-title
+-- animation restoring the prior tabline.
+function M.spin(label)
+  prune_bars()
+  local bar = bars[vim.api.nvim_get_current_tabpage()]
+  if bar then
+    return bar(label)
+  end
+  local saved_tabline, saved_show = vim.o.tabline, vim.o.showtabline
+  local stop = M.spinner(function(frame)
+    vim.o.tabline = ("%%=%%#Title# %s %s %%*%%="):format(frame, label)
+    vim.o.showtabline = 2
+  end)
+  return function()
+    stop()
+    vim.o.tabline, vim.o.showtabline = saved_tabline, saved_show
+  end
+end
+
+-- act runs an async op behind the spin loader: op(done) does the work and
+-- reports via done(result, err) — nil result notifies the error under the
+-- label, anything else reaches on_ok.
+function M.act(label, op, on_ok)
+  local stop = M.spin(label)
+  op(function(result, err)
+    stop()
+    if result == nil then
+      vim.notify(("%s: %s"):format(label, err or ""), vim.log.levels.ERROR)
+      return
+    end
+    if on_ok then
+      on_ok(result)
+    end
+  end)
+end
+
+-- confirm asks a no/yes question (no first, so a reflexive <CR> is safe) via
+-- snacks' select: on_yes runs only on an explicit yes, on_no (optional) on
+-- decline or cancel.
+function M.confirm(prompt, on_yes, on_no)
+  require("snacks").picker.select({ "no", "yes" }, { prompt = prompt }, function(choice)
+    if choice == "yes" then
+      on_yes()
+    elseif on_no then
+      on_no()
+    end
+  end)
+end
+
 -- lease tracks temporary decorations applied to buffers we don't own —
 -- keymaps and extmark namespaces on real file buffers (e.g. diffview's diff
 -- windows) — so one revoke() returns every buffer to its prior state.
@@ -164,45 +281,57 @@ function M.lease()
   return l
 end
 
--- title_slot holds one transient tab-title bar: set() replaces the current
--- bar (restoring the previous first), clear() restores the original tabline.
--- For views whose lifecycle isn't an owned buffer's (e.g. the diff tab, whose
--- buffers are real files that outlive it).
-function M.title_slot()
-  local restore
-  local slot = {}
-  function slot.set(buf, label, hints)
-    if restore then
-      restore()
+-- slot holds one replaceable resource (a float, a title bar): set(v) closes
+-- the current occupant through `closer` before storing the next, clear()
+-- closes and empties. The occupant is readable (and, for setups that must
+-- tear down the old one before creating the new, writable) as slot.value.
+function M.slot(closer)
+  local s = {}
+  function s.clear()
+    if s.value ~= nil then
+      closer(s.value)
+      s.value = nil
     end
-    local _, r = M.set_tab_title(buf, label, hints)
-    restore = r
   end
-  function slot.clear()
-    if restore then
-      restore()
-      restore = nil
-    end
+  function s.set(v)
+    s.clear()
+    s.value = v
+  end
+  return s
+end
+
+-- title_slot holds one transient tab-title bar: set() replaces the current
+-- bar (restoring the previous first, so the new bar snapshots a clean
+-- tabline), clear() restores the original. For views whose lifecycle isn't an
+-- owned buffer's (e.g. the diff tab, whose buffers are real files).
+function M.title_slot()
+  local s = M.slot(function(restore)
+    restore()
+  end)
+  local slot = { clear = s.clear }
+  function slot.set(buf, label, hints)
+    s.clear()
+    local _, restore = M.set_tab_title(buf, label, hints)
+    s.value = restore
   end
   return slot
 end
 
--- hover_win tracks the open hover float, so re-invoking replaces it instead
+-- hover_win holds the open hover float, so re-invoking replaces it instead
 -- of stacking a second one.
-local hover_win
+local hover_win = M.slot(function(w)
+  w:close()
+end)
 
 -- hover shows lines in a small unfocused float anchored below the cursor,
 -- closed by the first cursor movement or by leaving the source buffer.
 function M.hover(lines)
-  if hover_win then
-    hover_win:close()
-  end
   local src = vim.api.nvim_get_current_buf()
   local width = 1
   for _, l in ipairs(lines) do
     width = math.max(width, vim.fn.strdisplaywidth(l))
   end
-  hover_win = require("snacks").win {
+  hover_win.set(require("snacks").win {
     relative = "cursor",
     row = 1,
     col = 0,
@@ -214,16 +343,11 @@ function M.hover(lines)
     backdrop = false,
     text = lines,
     bo = { bufhidden = "wipe" },
-  }
+  })
   vim.api.nvim_create_autocmd({ "CursorMoved", "BufLeave" }, {
     buffer = src,
     once = true,
-    callback = function()
-      if hover_win then
-        hover_win:close()
-        hover_win = nil
-      end
-    end,
+    callback = hover_win.clear,
   })
 end
 

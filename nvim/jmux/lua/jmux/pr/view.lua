@@ -3,6 +3,7 @@
 -- refresh, reply, reactions, reviewer requests, description editing, and
 -- merging.
 
+local checks = require "jmux.pr.checks"
 local diff = require "jmux.pr.diff"
 local gh = require "jmux.pr.gh"
 local reviewers = require "jmux.pr.reviewers"
@@ -209,24 +210,6 @@ local function reaction_who(n)
   end
 end
 
--- check_mark maps a status-check node to (icon, highlight): green tick passed,
--- red cross failed, yellow dot running, muted circle skipped/neutral.
-local function check_mark(node)
-  local state_str = nilable(node.conclusion) or nilable(node.state)
-  if not state_str then
-    return "●", "DiagnosticWarn"
-  end
-  state_str = tostring(state_str):upper()
-  if state_str == "SUCCESS" then
-    return "✓", "DiagnosticOk"
-  elseif state_str == "PENDING" or state_str == "EXPECTED" then
-    return "●", "DiagnosticWarn"
-  elseif state_str == "NEUTRAL" or state_str == "SKIPPED" or state_str == "CANCELLED" or state_str == "STALE" then
-    return "○", "Comment"
-  end
-  return "✗", "DiagnosticError"
-end
-
 -- merge_summary distils review + merge state into a one-line readiness summary
 -- (icon, highlight, text) for an open PR, or nil for merged/closed/draft-less
 -- cases where the status line already says it all.
@@ -348,38 +331,17 @@ local function build_model(data)
     }
   end
 
-  -- checks are a collapsible block: a one-line summary ("1 failed" / "2 running"
-  -- / "all passed") that expands to the per-check list. Icon colours are stored
-  -- relative to the body (body_marks) and positioned at render time.
+  -- checks are a collapsible block below the description; the model lives in
+  -- jmux.pr.checks so a future dashboard pane can reuse it.
   local checks_block
-  local checks = vim.tbl_get(pr, "commits", "nodes", 1, "commit", "statusCheckRollup", "contexts", "nodes")
-  if type(checks) == "table" and #checks > 0 then
-    local clines, cmarks, fail, run = {}, {}, 0, 0
-    for _, c in ipairs(checks) do
-      local icon, hl = check_mark(c)
-      local name = c.name or c.context or "?"
-      local dur = util.duration(c.startedAt, c.completedAt)
-      clines[#clines + 1] = dur ~= "" and ("%s %s · %s"):format(icon, name, dur) or ("%s %s"):format(icon, name)
-      cmarks[#cmarks + 1] = { rel = #clines - 1, col = 0, col_end = #icon, hl = hl }
-      if hl == "DiagnosticError" then
-        fail = fail + 1
-      elseif hl == "DiagnosticWarn" then
-        run = run + 1
-      end
-    end
-    local summary = (fail > 0 and fail .. " failed") or (run > 0 and run .. " running") or "all passed"
-    local icon, hl = "✓", "DiagnosticOk"
-    if fail > 0 then
-      icon, hl = "✗", "DiagnosticError"
-    elseif run > 0 then
-      icon, hl = "●", "DiagnosticWarn"
-    end
+  local cmodel = checks.model(pr)
+  if cmodel then
     checks_block = {
       id = "checks",
-      header = ("%s Checks · %s"):format(icon, summary),
-      header_mark = { col = 0, col_end = #icon, hl = hl },
-      body = clines,
-      body_marks = cmarks,
+      header = cmodel.header,
+      header_mark = cmodel.header_mark,
+      body = cmodel.lines,
+      body_marks = cmodel.marks,
       kids = {},
     }
   end
@@ -551,15 +513,10 @@ query($owner:String!){
 -- are filtered out (excluded by login, excludedTeams by slug). Uses snacks'
 -- picker directly rather than vim.ui.select so several reviewers can be
 -- Tab-marked and confirmed together (<CR> on an unmarked item still single-picks).
--- on_done runs after success so the caller can refresh. spin, when given, is a
--- fn(label)→stop animating a loader through the fetch and the edit; without it
--- a notify marks the start.
-local function request_review(pr, excluded, excludedTeams, on_done, spin)
+-- on_done runs after success so the caller can refresh.
+local function request_review(pr, excluded, excludedTeams, on_done)
   local owner = gh.owner_repo(pr.slug)
-  local stop = spin and spin "fetching reviewers…" or nil
-  if not stop then
-    vim.notify "fetching reviewers…"
-  end
+  local stop = ui.spin "fetching reviewers…"
 
   local function request(chosen)
     if #chosen == 0 then
@@ -571,28 +528,24 @@ local function request_review(pr, excluded, excludedTeams, on_done, spin)
       labels[#labels + 1] = it.label
     end
     local who = #labels > 3 and (#labels .. " reviewers") or table.concat(labels, ", ")
-    local stop2 = spin and spin("requesting " .. who .. "…") or nil
-    -- --add-reviewer takes a comma-separated list, so any number of picks is
-    -- still one gh call.
-    vim.system(
-      { "gh", "pr", "edit", tostring(pr.number), "--repo", pr.slug, "--add-reviewer", table.concat(values, ",") },
-      { text = true },
-      function(r2)
-        vim.schedule(function()
-          if stop2 then
-            stop2()
-          end
-          if r2.code ~= 0 then
-            vim.notify("request review: " .. vim.trim(r2.stderr or ""), vim.log.levels.ERROR)
-            return
-          end
-          vim.notify("requested review from " .. who)
-          if on_done then
-            on_done()
-          end
-        end)
+    ui.act("requesting " .. who .. "…", function(done)
+      -- --add-reviewer takes a comma-separated list, so any number of picks is
+      -- still one gh call.
+      vim.system(
+        { "gh", "pr", "edit", tostring(pr.number), "--repo", pr.slug, "--add-reviewer", table.concat(values, ",") },
+        { text = true },
+        function(r2)
+          vim.schedule(function()
+            done(r2.code == 0 or nil, vim.trim(r2.stderr or ""))
+          end)
+        end
+      )
+    end, function()
+      vim.notify("requested review from " .. who)
+      if on_done then
+        on_done()
       end
-    )
+    end)
   end
 
   local function pick(items)
@@ -623,9 +576,7 @@ local function request_review(pr, excluded, excludedTeams, on_done, spin)
     if not (users_r and teams_r) then
       return
     end
-    if stop then
-      stop()
-    end
+    stop()
     -- text is what the picker shows and matches on; label is the short name
     -- used in notifications.
     local items = {}
@@ -672,33 +623,28 @@ end
 -- current text) and writes it back with `gh pr edit` on :w. on_done runs after a
 -- successful save so the caller can refresh. gh rejects the edit if you lack
 -- permission. An empty buffer is a no-op (prompt_multiline won't save it), so the
--- description can't be cleared from here — edit on the web for that. spin, when
--- given, is a fn(label)→stop animating a loader while the save is in flight.
-local function edit_description(pr, body, on_done, spin)
+-- description can't be cleared from here — edit on the web for that.
+local function edit_description(pr, body, on_done)
   -- GitHub returns the body with CRLF endings; strip the \r so the edit buffer
   -- doesn't show a trailing ^M on every line.
   body = (body or ""):gsub("\r", "")
   ui.prompt_multiline(("edit #%d description"):format(pr.number), function(text)
-    local stop = spin and spin "saving description…" or nil
-    vim.system(
-      { "gh", "pr", "edit", tostring(pr.number), "--repo", pr.slug, "--body-file", "-" },
-      { stdin = text, text = true },
-      function(res)
-        vim.schedule(function()
-          if stop then
-            stop()
-          end
-          if res.code ~= 0 then
-            vim.notify("edit description: " .. vim.trim(res.stderr or ""), vim.log.levels.ERROR)
-            return
-          end
-          vim.notify(("updated #%d description"):format(pr.number))
-          if on_done then
-            on_done()
-          end
-        end)
+    ui.act("saving description…", function(done)
+      vim.system(
+        { "gh", "pr", "edit", tostring(pr.number), "--repo", pr.slug, "--body-file", "-" },
+        { stdin = text, text = true },
+        function(res)
+          vim.schedule(function()
+            done(res.code == 0 or nil, vim.trim(res.stderr or ""))
+          end)
+        end
+      )
+    end, function()
+      vim.notify(("updated #%d description"):format(pr.number))
+      if on_done then
+        on_done()
       end
-    )
+    end)
   end, body ~= "" and body or nil, nil, " :w save · :q close ")
 end
 
@@ -928,10 +874,10 @@ function M.view(opts)
           end
 
           render()
-          vim.keymap.set("n", "<Tab>", toggle, { buffer = buf, nowait = true, desc = "toggle thread" })
+
           -- <CR> on a thread's `path:line` opens the diff there; elsewhere it
           -- toggles like <Tab>.
-          vim.keymap.set("n", "<CR>", function()
+          local function toggle_or_jump()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= buf then
               return
@@ -943,39 +889,16 @@ function M.view(opts)
               return
             end
             toggle()
-          end, { buffer = buf, nowait = true, desc = "toggle / open in diff" })
-
-          -- title_spinner animates the tab title (scoped via set_hints) until the
-          -- returned stop fn is called; shared by refresh and merge.
-          local function title_spinner(label)
-            return ui.spinner(function(frame)
-              set_hints { ("%%#Title#%s %s"):format(frame, label) }
-            end)
-          end
-
-          -- hints is filled below (it depends on `mine`), but declared here so
-          -- spin's closure can capture it. spin is the loader for every
-          -- pv-triggered request: the title spinner while in flight, and the
-          -- hint bar restored on stop (a bare title_spinner stop would leave
-          -- the last frame frozen in the bar).
-          local hints = {}
-          local function spin(label)
-            local stop = title_spinner(label)
-            return function()
-              stop()
-              set_hints(hints)
-            end
           end
 
           pv_refresh = function()
-            fetch_and_render(title_spinner "refreshing…")
+            fetch_and_render(ui.spin "refreshing…")
           end
-          vim.keymap.set("n", "<C-r>", pv_refresh, { buffer = buf, nowait = true, desc = "refresh" })
 
-          -- K shows who reacted. Logins aren't in the main query (node limit),
-          -- so they fetch on demand, memoized for the render's lifetime; the
-          -- hover only pops if the cursor hasn't moved on.
-          vim.keymap.set("n", "K", function()
+          -- who_reacted shows the reactor hover. Logins aren't in the main
+          -- query (node limit), so they fetch on demand, memoized for the
+          -- render's lifetime; the hover only pops if the cursor hasn't moved.
+          local function who_reacted()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= buf then
               return
@@ -993,13 +916,9 @@ function M.view(opts)
             for _, it in ipairs(entry.items) do
               ids[#ids + 1] = it.id
             end
-            local stop = spin "fetching reactions…"
-            gh.graphql(REACTORS_QUERY, { ids = ids }, function(rdata, rerr)
-              stop()
-              if not rdata then
-                vim.notify("reactions: " .. (rerr or ""), vim.log.levels.ERROR)
-                return
-              end
+            ui.act("fetching reactions…", function(done)
+              gh.graphql(REACTORS_QUERY, { ids = ids }, done)
+            end, function(rdata)
               local by_id = {}
               for _, n in ipairs(vim.tbl_get(rdata, "data", "nodes") or {}) do
                 if type(n) == "table" and n.id then
@@ -1025,7 +944,7 @@ function M.view(opts)
                 ui.hover(entry.lines)
               end
             end)
-          end, { buffer = buf, nowait = true, desc = "who reacted" })
+          end
 
           -- + reacts via the emoji picker: every reaction is a toggle (the
           -- picker marks the ones already yours). `+` echoes GitHub's
@@ -1039,22 +958,14 @@ function M.view(opts)
             return id and model.subjects[id] or nil
           end
           local function toggle_reaction(subject, content)
-            local mine = subject.mine[content] or false
-            local stop = spin(mine and "removing reaction…" or "reacting…")
-            gh.graphql(
-              mine and REMOVE_REACTION or ADD_REACTION,
-              { subject = subject.id, content = content },
-              function(rdata, rerr)
-                if not rdata then
-                  stop()
-                  vim.notify("react: " .. (rerr or ""), vim.log.levels.ERROR)
-                  return
-                end
-                fetch_and_render(stop)
-              end
-            )
+            local given = subject.mine[content] or false
+            ui.act(given and "removing reaction…" or "reacting…", function(done)
+              gh.graphql(given and REMOVE_REACTION or ADD_REACTION, { subject = subject.id, content = content }, done)
+            end, function()
+              fetch_and_render(ui.spin "refreshing…")
+            end)
           end
-          vim.keymap.set("n", "+", function()
+          local function react_pick()
             local subject = subject_under_cursor()
             if not subject then
               return
@@ -1074,12 +985,7 @@ function M.view(opts)
                 toggle_reaction(subject, choice.content)
               end
             end)
-          end, { buffer = buf, nowait = true, desc = "react" })
-
-          -- go opens the PR on github.com, for everything pv doesn't render.
-          vim.keymap.set("n", "go", M.browser, { buffer = buf, nowait = true, desc = "open in browser" })
-
-          vim.keymap.set("n", "d", diff.diff, { buffer = buf, nowait = true, desc = "open diff" })
+          end
 
           -- R requests a reviewer: pick from the repo's assignable users, skipping
           -- the author and anyone already requested, then refresh so the new
@@ -1102,16 +1008,10 @@ function M.view(opts)
               end
             end
           end
-          vim.keymap.set("n", "R", function()
-            request_review(pr, excluded, excludedTeams, function()
-              fetch_and_render(title_spinner "refreshing…")
-            end, spin)
-          end, { buffer = buf, nowait = true, desc = "request review" })
-
-          -- r replies to the thread whose header row the cursor is on (threads
-          -- are the kids whose id is the GraphQL thread id; other rows no-op).
-          -- Replies post immediately, then the view refreshes to show them.
-          vim.keymap.set("n", "r", function()
+          -- reply targets the thread whose header row the cursor is on
+          -- (threads are the kids whose id is the GraphQL thread id; other
+          -- rows no-op). Replies post immediately, then the view refreshes.
+          local function reply()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= buf then
               return
@@ -1129,12 +1029,12 @@ function M.view(opts)
                   line = nilable(t.line),
                   comments = { { login = vim.tbl_get(root, "author", "login") or "?" } },
                 }, function()
-                  fetch_and_render(title_spinner "refreshing…")
-                end, spin)
+                  fetch_and_render(ui.spin "refreshing…")
+                end)
                 return
               end
             end
-          end, { buffer = buf, nowait = true, desc = "reply to thread" })
+          end
 
           -- mine: the PR is yours to act on — you authored it or are assigned. Gates
           -- editing the description (E) and merging (m/M) so they only show when
@@ -1149,95 +1049,103 @@ function M.view(opts)
             end
           end
 
-          -- E edits the PR description in the multiline editor, then refreshes so the
-          -- updated body shows. Dropped then re-added only while mine, like m/M, so a
-          -- stale binding can't linger if the PR stops being yours.
-          pcall(vim.keymap.del, "n", "E", { buffer = buf })
-          if mine then
-            vim.keymap.set("n", "E", function()
-              edit_description(pr, nilable(prnode and prnode.body) or "", function()
-                fetch_and_render(title_spinner "refreshing…")
-              end, spin)
-            end, { buffer = buf, nowait = true, desc = "edit description" })
-          end
-
-          -- m merges — only on open PRs you authored or are assigned to, using the
-          -- repo's default merge method. Hints are rebuilt here every render, so the
-          -- merge spinner is cleanly replaced once it resolves.
-          hints = {
-            ui.key_hint("<C-r>", "refresh"),
-            ui.key_hint("R", "request"),
-            ui.key_hint("r", "reply"),
-            ui.key_hint("d", "diff"),
-            ui.key_hint("+", "react"),
-            ui.key_hint("K", "reactions"),
-          }
-          if mine then
-            hints[#hints + 1] = ui.key_hint("E", "edit")
-          end
-          hints[#hints + 1] = ui.key_hint("⇥", "expand")
-          hints[#hints + 1] = ui.key_hint("q", "close")
-          -- a cached paint flags its age so it's clear the data may be stale and
-          -- <C-r> will refetch; a live fetch (age nil) shows no such marker.
-          if age then
-            hints[#hints + 1] = ("%%#Comment#cached %s ago"):format(util.short_age(age))
-          end
-          -- drop any merge bindings from a prior render; re-added below only while
-          -- still eligible, so a stale m/M can't merge an already-merged PR.
-          pcall(vim.keymap.del, "n", "m", { buffer = buf })
-          pcall(vim.keymap.del, "n", "M", { buffer = buf })
+          -- merging needs an open PR that's yours, and the repo's default merge
+          -- method allowlisted to a literal flag — so crafted API data can
+          -- never inject an arbitrary `gh` argument.
           local method = nilable(vim.tbl_get(data, "data", "repository", "viewerDefaultMergeMethod"))
-          -- allowlist the method to a literal flag instead of interpolating it into
-          -- argv, so crafted API data can never inject an arbitrary `gh` flag.
           local how = method and tostring(method):lower()
           local flag = how and ({ merge = "--merge", squash = "--squash", rebase = "--rebase" })[how]
-          if mine and flag and tostring(nilable(prnode.state) or ""):upper() == "OPEN" then
-            -- admin bypasses branch protection (failing checks, unresolved threads).
-            local function do_merge(admin)
-              local label = admin and (how .. ", admin") or how
-              vim.ui.select(
-                { "no", "yes" },
-                { prompt = ("merge #%d via %s?"):format(pr.number, label) },
-                function(choice)
-                  if choice ~= "yes" then
-                    return
-                  end
-                  -- animate the tab title while merging; it keeps spinning through the
-                  -- refresh that follows a successful merge.
-                  local stop_spin2 = title_spinner(("merging #%d…"):format(pr.number))
-                  local cmd = { "gh", "pr", "merge", "--repo", pr.slug, flag }
-                  if admin then
-                    cmd[#cmd + 1] = "--admin"
-                  end
-                  cmd[#cmd + 1] = "--"
-                  cmd[#cmd + 1] = tostring(pr.number)
-                  vim.system(cmd, { text = true }, function(res)
-                    vim.schedule(function()
-                      if res.code ~= 0 then
-                        stop_spin2()
-                        set_hints(hints)
-                        vim.notify("merge failed:\n" .. vim.trim(res.stderr or ""), vim.log.levels.ERROR)
-                      else
-                        vim.notify(("merged #%d (%s)"):format(pr.number, label))
-                        stop_spin2()
-                        set_hints(hints)
-                        util.prompt_remove_workspace(function()
-                          fetch_and_render(title_spinner "refreshing…")
-                        end)
-                      end
-                    end)
-                  end)
+          local mergeable = mine and flag and tostring(nilable(prnode.state) or ""):upper() == "OPEN"
+
+          -- admin bypasses branch protection (failing checks, unresolved threads).
+          local function do_merge(admin)
+            local label = admin and (how .. ", admin") or how
+            ui.confirm(("merge #%d via %s?"):format(pr.number, label), function()
+              ui.act(("merging #%d…"):format(pr.number), function(done)
+                local cmd = { "gh", "pr", "merge", "--repo", pr.slug, flag }
+                if admin then
+                  cmd[#cmd + 1] = "--admin"
                 end
-              )
-            end
-            vim.keymap.set("n", "m", function()
-              do_merge(false)
-            end, { buffer = buf, nowait = true, desc = "merge" })
-            vim.keymap.set("n", "M", function()
-              do_merge(true)
-            end, { buffer = buf, nowait = true, desc = "merge (admin)" })
-            table.insert(hints, 1, ui.key_hint("M", "merge (admin)"))
-            table.insert(hints, 1, ui.key_hint("m", "merge"))
+                cmd[#cmd + 1] = "--"
+                cmd[#cmd + 1] = tostring(pr.number)
+                vim.system(cmd, { text = true }, function(res)
+                  vim.schedule(function()
+                    done(res.code == 0 or nil, vim.trim(res.stderr or ""))
+                  end)
+                end)
+              end, function()
+                vim.notify(("merged #%d (%s)"):format(pr.number, label))
+                util.prompt_remove_workspace(function()
+                  fetch_and_render(ui.spin "refreshing…")
+                end)
+              end)
+            end)
+          end
+
+          -- the view's keys: spec order is bar order, `when` gates the ones
+          -- that need the PR to be yours (and open, for merging).
+          local keys = ui.keyspec {
+            {
+              lhs = "m",
+              rhs = function()
+                do_merge(false)
+              end,
+              hint = "merge",
+              when = function()
+                return mergeable
+              end,
+              desc = "merge",
+            },
+            {
+              lhs = "M",
+              rhs = function()
+                do_merge(true)
+              end,
+              hint = "merge (admin)",
+              when = function()
+                return mergeable
+              end,
+              desc = "merge (admin)",
+            },
+            { lhs = "<C-r>", rhs = pv_refresh, hint = "refresh", desc = "refresh" },
+            {
+              lhs = "R",
+              rhs = function()
+                request_review(pr, excluded, excludedTeams, function()
+                  fetch_and_render(ui.spin "refreshing…")
+                end)
+              end,
+              hint = "request",
+              desc = "request review",
+            },
+            { lhs = "r", rhs = reply, hint = "reply", desc = "reply to thread" },
+            { lhs = "d", rhs = diff.diff, hint = "diff", desc = "open diff" },
+            { lhs = "+", rhs = react_pick, hint = "react", desc = "react" },
+            { lhs = "K", rhs = who_reacted, hint = "reactions", desc = "who reacted" },
+            {
+              lhs = "E",
+              rhs = function()
+                edit_description(pr, nilable(prnode and prnode.body) or "", function()
+                  fetch_and_render(ui.spin "refreshing…")
+                end)
+              end,
+              hint = "edit",
+              when = function()
+                return mine
+              end,
+              desc = "edit description",
+            },
+            { lhs = "<Tab>", rhs = toggle, lhs_hint = "⇥", hint = "expand", desc = "toggle thread" },
+            { lhs = "<CR>", rhs = toggle_or_jump, desc = "toggle / open in diff" },
+            { lhs = "go", rhs = M.browser, desc = "open in browser" },
+            { lhs = "q", rhs = "<cmd>tabclose<cr>", hint = "close", desc = "close" },
+          }
+          keys.apply(buf)
+          local hints = keys.hints()
+          -- a cached paint flags its age so it's clear the data may be stale
+          -- and <C-r> will refetch; a live fetch (age nil) shows no marker.
+          if age then
+            hints[#hints + 1] = ("%%#Comment#cached %s ago"):format(util.short_age(age))
           end
           set_hints(hints)
 

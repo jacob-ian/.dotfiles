@@ -47,12 +47,9 @@ function M.prompt_remove_workspace(on_keep)
   if (M.sh { "git", "status", "--porcelain" } or "") ~= "" then
     prompt = "remove this workspace? (has uncommitted changes)"
   end
-  vim.ui.select({ "no", "yes" }, { prompt = prompt }, function(choice)
-    if choice ~= "yes" then
-      return keep()
-    end
+  require("jmux.pr.ui").confirm(prompt, function()
     vim.system({ "jmux", "workspace", "remove", "--path", root, "--quiet" }, { detach = true })
-  end)
+  end, keep)
 end
 
 -- span_str renders a comment's line span as "12" or "12-15". Accepts both the

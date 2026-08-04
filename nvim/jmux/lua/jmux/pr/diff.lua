@@ -35,9 +35,9 @@ local function refresh()
 end
 
 -- KEYS is the single spec for the diff windows' review keys: decorate_one
--- registers them through the lease, and entries with a hint (a string, or a
--- fn for mode-dependent labels) compose the tab title's bar via key_hints.
-local KEYS = {
+-- applies it through the lease, and its hints compose the tab title's bar.
+-- panel = true entries also bind in the file panel.
+local KEYS = ui.keyspec {
   {
     mode = "n",
     lhs = "K",
@@ -94,16 +94,6 @@ local KEYS = {
   { mode = "n", lhs = "<C-r>", rhs = refresh, hint = "refresh", panel = true },
   { mode = "n", lhs = "q", rhs = "<cmd>DiffviewClose<cr>", hint = "close", panel = true },
 }
-
-local function key_hints()
-  local out = {}
-  for _, k in ipairs(KEYS) do
-    if k.hint then
-      out[#out + 1] = ui.key_hint(k.lhs, type(k.hint) == "function" and k.hint() or k.hint)
-    end
-  end
-  return out
-end
 
 -- diff_view returns the active diffview's { entry, layout }, or nil + reason when
 -- diffview isn't loaded or no diff is open. Shared by everything that needs to map
@@ -225,7 +215,11 @@ local THREAD_SIGN = vim.fn.nr2char(0xf086)
 local RESOLVED_SIGN = vim.fn.nr2char(0xf00c)
 local threads = {}
 local FLOAT_NS = vim.api.nvim_create_namespace "jmux_pr_thread_float"
-local thread_float
+local thread_float = ui.slot(function(w)
+  if vim.api.nvim_win_is_valid(w) then
+    vim.api.nvim_win_close(w, true)
+  end
+end)
 
 -- THREADS_QUERY pulls review threads via GraphQL — REST's pulls/comments carries
 -- no resolution state. reviewThreads are already grouped and flag isResolved; a
@@ -317,10 +311,8 @@ mutation($thread:ID!,$body:String!){
 -- Unlike comments, replies don't stage: they're conversational, so they go up
 -- immediately. The prompt closes itself on success and stays open on failure so
 -- the text survives a retry; on_done runs after success so callers refresh what
--- they show. spin, when given, is a fn(label)→stop that animates a loader while
--- the post is in flight (pv passes its title spinner); without it a notify marks
--- the start.
-function M.reply_to_thread(t, on_done, spin)
+-- they show. ui.spin animates the loader while the post is in flight.
+function M.reply_to_thread(t, on_done)
   if not t.id then
     vim.notify("thread has no id to reply to", vim.log.levels.WARN)
     return
@@ -336,14 +328,9 @@ function M.reply_to_thread(t, on_done, spin)
         return
       end
       posting = true
-      local stop = spin and spin "posting reply…" or nil
-      if not stop then
-        vim.notify "posting reply…"
-      end
+      local stop = ui.spin "posting reply…"
       gh.graphql(REPLY_MUTATION, { thread = t.id, body = body }, function(data, err)
-        if stop then
-          stop()
-        end
+        stop()
         if not data then
           posting = false
           vim.notify("reply failed:\n" .. (err or ""), vim.log.levels.ERROR)
@@ -373,19 +360,10 @@ function M.reply_to_thread(t, on_done, spin)
   )
 end
 
--- close_float dismisses the open thread peek, if any.
-local function close_float()
-  if thread_float and vim.api.nvim_win_is_valid(thread_float) then
-    vim.api.nvim_win_close(thread_float, true)
-  end
-  thread_float = nil
-end
-
 -- open_thread_float pops a bordered peek of the thread near the cursor: a header
 -- per comment (author · age, replies marked ↳) over its markdown body. Focused so
 -- a long thread scrolls; q/<Esc> or moving away closes it, r replies.
 local function open_thread_float(t)
-  close_float()
   local lines, headers = {}, {}
   for i, c in ipairs(t.comments) do
     lines[#lines + 1] = (i == 1 and "" or "↳ ") .. c.login .. " · " .. util.reltime(c.created_at or "")
@@ -412,7 +390,7 @@ local function open_thread_float(t)
   for _, l in ipairs(lines) do
     rows = rows + math.max(1, math.ceil(vim.fn.strdisplaywidth(l) / width))
   end
-  thread_float = vim.api.nvim_open_win(buf, true, {
+  local win = vim.api.nvim_open_win(buf, true, {
     relative = "cursor",
     row = 1,
     col = 0,
@@ -423,15 +401,16 @@ local function open_thread_float(t)
     title = (t.resolved and " resolved" or " thread") .. " · r reply ",
     title_pos = "right",
   })
-  vim.wo[thread_float].wrap = true
-  vim.wo[thread_float].linebreak = true
-  vim.keymap.set("n", "q", close_float, { buffer = buf, nowait = true })
-  vim.keymap.set("n", "<Esc>", close_float, { buffer = buf, nowait = true })
+  thread_float.set(win)
+  vim.wo[win].wrap = true
+  vim.wo[win].linebreak = true
+  vim.keymap.set("n", "q", thread_float.clear, { buffer = buf, nowait = true })
+  vim.keymap.set("n", "<Esc>", thread_float.clear, { buffer = buf, nowait = true })
   vim.keymap.set("n", "r", function()
-    close_float()
+    thread_float.clear()
     M.reply_to_thread(t, refresh_threads)
   end, { buffer = buf, nowait = true })
-  vim.api.nvim_create_autocmd("WinLeave", { buffer = buf, once = true, callback = close_float })
+  vim.api.nvim_create_autocmd("WinLeave", { buffer = buf, once = true, callback = thread_float.clear })
 end
 
 -- place_threads (re)draws this buffer's thread gutter signs; K on one opens the
@@ -515,10 +494,7 @@ local function decorate_one(win, path, side)
   local buf = vim.api.nvim_win_get_buf(win)
   place_signs(buf, path, side)
   place_threads(buf, path, side)
-  local opt = { buffer = buf, nowait = true }
-  for _, k in ipairs(KEYS) do
-    lease.map(k.mode, k.lhs, k.rhs, opt)
-  end
+  KEYS.apply(buf, lease.map)
 end
 
 -- decorate_diff signs the current diffview file's two windows (RIGHT = new/main,
@@ -535,9 +511,9 @@ decorate_diff = function()
   local view = ok and lib.get_current_view() or nil
   local pbuf = view and view.panel and view.panel.bufid
   if pbuf and vim.api.nvim_buf_is_valid(pbuf) then
-    for _, k in ipairs(KEYS) do
+    for _, k in ipairs(KEYS.entries) do
       if k.panel then
-        lease.map(k.mode, k.lhs, k.rhs, { buffer = pbuf, nowait = true })
+        lease.map(k.mode or "n", k.lhs, k.rhs, { buffer = pbuf, nowait = true })
       end
     end
   end
@@ -693,7 +669,7 @@ function M.diff(selected)
   -- :DiffviewOpen lands us in the new diff tab; remember it so only this view
   -- gets comment signs.
   pd_tab = vim.api.nvim_get_current_tabpage()
-  title.set(vim.api.nvim_get_current_buf(), "jmux pr diff", key_hints())
+  title.set(vim.api.nvim_get_current_buf(), "jmux pr diff", KEYS.hints())
   -- Defer restoring the saved review (its git calls) off the open path, then
   -- draw signs. place_signs is idempotent, so any event-driven decorate that
   -- raced ahead with an empty review is simply corrected here.
@@ -721,7 +697,7 @@ function M.review_worktree()
   util.sh { "git", "add", "--intent-to-add", "--all" }
   vim.cmd "DiffviewOpen HEAD"
   pd_tab = vim.api.nvim_get_current_tabpage()
-  title.set(vim.api.nvim_get_current_buf(), "jmux agent review", key_hints())
+  title.set(vim.api.nvim_get_current_buf(), "jmux agent review", KEYS.hints())
   vim.schedule(function()
     state.load()
     decorate_diff()
