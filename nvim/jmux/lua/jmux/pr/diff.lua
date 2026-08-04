@@ -78,6 +78,7 @@ local KEYS = {
   {
     mode = "n",
     lhs = "S",
+    panel = true,
     -- the mode's submit; lazy requires avoid module cycles.
     rhs = function()
       if pd_mode == "agent" then
@@ -90,8 +91,8 @@ local KEYS = {
       return pd_mode == "agent" and "send to claude" or "submit review"
     end,
   },
-  { mode = "n", lhs = "<C-r>", rhs = refresh, hint = "refresh" },
-  { mode = "n", lhs = "q", rhs = "<cmd>DiffviewClose<cr>", hint = "close" },
+  { mode = "n", lhs = "<C-r>", rhs = refresh, hint = "refresh", panel = true },
+  { mode = "n", lhs = "q", rhs = "<cmd>DiffviewClose<cr>", hint = "close", panel = true },
 }
 
 local function key_hints()
@@ -528,6 +529,18 @@ decorate_diff = function()
   if not pd_tab or vim.api.nvim_get_current_tabpage() ~= pd_tab then
     return
   end
+  -- tab-wide keys (panel = true) also bind in the file panel, so e.g. <C-r>
+  -- there doesn't fall through to redo.
+  local ok, lib = pcall(require, "diffview.lib")
+  local view = ok and lib.get_current_view() or nil
+  local pbuf = view and view.panel and view.panel.bufid
+  if pbuf and vim.api.nvim_buf_is_valid(pbuf) then
+    for _, k in ipairs(KEYS) do
+      if k.panel then
+        lease.map(k.mode, k.lhs, k.rhs, { buffer = pbuf, nowait = true })
+      end
+    end
+  end
   local v = diff_view()
   if not v then
     return
@@ -625,6 +638,23 @@ end
 -- diff opens the PR's changes — base...HEAD, the merge-base range GitHub shows —
 -- in diffview, where pending comments appear as gutter signs. load() first so a
 -- restored review decorates on open.
+-- focus_main puts the cursor in the head-side diff window, polling briefly
+-- since diffview loads entries async.
+local function focus_main(tries)
+  local v = diff_view()
+  local main = v and v.layout:get_main_win()
+  if main and vim.api.nvim_win_is_valid(main.id) then
+    vim.api.nvim_set_current_win(main.id)
+    return
+  end
+  tries = tries or 20
+  if tries > 0 then
+    vim.defer_fn(function()
+      focus_main(tries - 1)
+    end, 50)
+  end
+end
+
 -- claim_tab switches the pending store and takes over the diff tab slot:
 -- focuses it when it already holds `mode`'s review (returning false), closes
 -- the other review's tab otherwise.
@@ -672,6 +702,7 @@ function M.diff(selected)
     decorate_diff()
   end)
   refresh_threads()
+  focus_main()
 end
 
 -- review_worktree opens the working tree's changes against HEAD with the same
@@ -695,6 +726,7 @@ function M.review_worktree()
     state.load()
     decorate_diff()
   end)
+  focus_main()
 end
 
 -- jump_to_line places the cursor on line in path's head-side diff window.
