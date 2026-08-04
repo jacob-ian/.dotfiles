@@ -133,6 +133,60 @@ function M.prompt_multiline(title, on_save, initial, on_open, footer)
   end
 end
 
+-- lease tracks temporary decorations applied to buffers we don't own —
+-- keymaps and extmark namespaces on real file buffers (e.g. diffview's diff
+-- windows) — so one revoke() returns every buffer to its prior state.
+-- Registrations are idempotent and revoke empties the lease for reuse.
+function M.lease()
+  local keys, spaces = {}, {}
+  local l = {}
+  -- map sets a keymap and records it for revocation. opts.buffer scopes it.
+  function l.map(mode, lhs, rhs, opts)
+    vim.keymap.set(mode, lhs, rhs, opts)
+    keys[tostring(opts.buffer) .. "\0" .. lhs] = { mode = mode, lhs = lhs, buf = opts.buffer }
+  end
+  -- ns registers a namespace as leased on buf; the marks themselves are
+  -- placed by the caller.
+  function l.ns(buf, ns)
+    spaces[buf .. "\0" .. ns] = { buf = buf, ns = ns }
+  end
+  function l.revoke()
+    for _, k in pairs(keys) do
+      pcall(vim.keymap.del, k.mode, k.lhs, { buffer = k.buf })
+    end
+    for _, s in pairs(spaces) do
+      if vim.api.nvim_buf_is_valid(s.buf) then
+        vim.api.nvim_buf_clear_namespace(s.buf, s.ns, 0, -1)
+      end
+    end
+    keys, spaces = {}, {}
+  end
+  return l
+end
+
+-- title_slot holds one transient tab-title bar: set() replaces the current
+-- bar (restoring the previous first), clear() restores the original tabline.
+-- For views whose lifecycle isn't an owned buffer's (e.g. the diff tab, whose
+-- buffers are real files that outlive it).
+function M.title_slot()
+  local restore
+  local slot = {}
+  function slot.set(buf, label, hints)
+    if restore then
+      restore()
+    end
+    local _, r = M.set_tab_title(buf, label, hints)
+    restore = r
+  end
+  function slot.clear()
+    if restore then
+      restore()
+      restore = nil
+    end
+  end
+  return slot
+end
+
 -- hover_win tracks the open hover float, so re-invoking replaces it instead
 -- of stacking a second one.
 local hover_win

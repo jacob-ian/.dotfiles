@@ -1,5 +1,6 @@
 -- The pre-PR agent review: stage comments on the working tree's uncommitted
--- changes, then hand the batch to the connected claude as a markdown brief.
+-- changes, then hand the batch to the connected claude as a markdown brief,
+-- typed and submitted into its tmux pane.
 
 local state = require "jmux.pr.state"
 local util = require "jmux.pr.util"
@@ -105,40 +106,34 @@ local function claude_pane()
 end
 
 -- submit types the run instruction + Enter into the connected claude's pane
--- (the claudecode protocol can attach mentions but never submit), deferred
--- past the mention's delivery debounce. Any failure degrades to pressing
--- Enter yourself.
+-- (the claudecode protocol can't submit). Any failure degrades to sending
+-- the brief yourself.
 local function submit(file, n)
-  local sent_msg = ("sent %d comment(s) to claude"):format(n)
-  local manual = sent_msg .. " — press enter in the claude pane to run"
-  if not vim.env.TMUX then
-    return vim.notify(manual)
+  -- the trailing space dismisses the file picker that typing @ opens, so
+  -- Enter submits instead of selecting from the popup.
+  local instruction = ("Resolve each review comment in @%s "):format(file)
+  local function manual()
+    vim.fn.setreg("+", instruction)
+    vim.notify("couldn't reach claude's pane — prompt copied, paste it there", vim.log.levels.WARN)
   end
-  vim.defer_fn(function()
-    local pane = claude_pane()
-    if not pane then
-      return vim.notify(manual)
+  local pane = vim.env.TMUX and claude_pane() or nil
+  if not pane then
+    return manual()
+  end
+  vim.system({ "tmux", "send-keys", "-t", pane, "-l", instruction }, { text = true }, function(res)
+    if res.code ~= 0 then
+      return vim.schedule(manual)
     end
-    -- the trailing space dismisses the file picker that typing @ opens, so
-    -- Enter submits instead of selecting from the popup.
-    local instruction = ("Resolve each review comment in @%s "):format(file)
-    vim.system({ "tmux", "send-keys", "-t", pane, "-l", instruction }, { text = true }, function(res)
-      if res.code ~= 0 then
-        return vim.schedule(function()
-          vim.notify(manual)
-        end)
-      end
-      vim.system({ "tmux", "send-keys", "-t", pane, "Enter" }, {}, function()
-        vim.schedule(function()
-          vim.notify(sent_msg .. " — running")
-        end)
+    vim.system({ "tmux", "send-keys", "-t", pane, "Enter" }, {}, function()
+      vim.schedule(function()
+        vim.notify(("sent %d comment(s) to claude"):format(n))
       end)
     end)
-  end, 800)
+  end)
 end
 
--- send writes the brief to the git dir and @-mentions it to the connected
--- claude; the staged review only clears on an accepted send, so failures retry.
+-- send writes the brief to the git dir and submits it to the connected
+-- claude; the staged review only clears with a claude connected, so failures retry.
 function M.send()
   state.use(state.AGENT_STORE)
   state.load()
@@ -164,17 +159,11 @@ function M.send()
   if not ok then
     return vim.notify("claudecode.nvim not available — review written to " .. file, vim.log.levels.ERROR)
   end
-  -- send_at_mention "succeeds" by queueing when nothing is connected, which
-  -- may never deliver — require a live connection.
+  -- the typed instruction's @path is the only file reference (a protocol
+  -- mention on top would tag it twice); the connection check still gates
+  -- clearing, and doubles as "the pane submit will reach a live claude".
   if not claudecode.is_claude_connected() then
     return vim.notify("no claude connected — staged review kept; review file at " .. file, vim.log.levels.WARN)
-  end
-  local sent, err = claudecode.send_at_mention(file, nil, nil, "jmux agent review")
-  if not sent then
-    return vim.notify(
-      ("send to claude failed: %s\nstaged review kept; review file at %s"):format(err or "?", file),
-      vim.log.levels.ERROR
-    )
   end
   local n = #state.pending
   state.discard()
