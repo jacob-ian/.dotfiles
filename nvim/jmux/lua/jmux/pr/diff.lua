@@ -307,6 +307,28 @@ mutation($thread:ID!,$body:String!){
   }
 }]]
 
+local RESOLVE_MUTATION = [[
+mutation($thread:ID!){
+  resolveReviewThread(input:{threadId:$thread}){ thread{ isResolved } }
+}]]
+local UNRESOLVE_MUTATION = [[
+mutation($thread:ID!){
+  unresolveReviewThread(input:{threadId:$thread}){ thread{ isResolved } }
+}]]
+
+-- resolve_thread toggles t's resolved state ({ id, resolved }) and runs
+-- on_done on success. The stale pv cache drops like after a reply.
+function M.resolve_thread(t, on_done)
+  ui.act(t.resolved and "unresolving…" or "resolving…", function(done)
+    gh.graphql(t.resolved and UNRESOLVE_MUTATION or RESOLVE_MUTATION, { thread = t.id }, done)
+  end, function()
+    state.clear_view_cache()
+    if on_done then
+      on_done()
+    end
+  end)
+end
+
 -- reply_to_thread opens the editor for a reply to thread t and posts it on :w.
 -- Unlike comments, replies don't stage: they're conversational, so they go up
 -- immediately. The prompt closes itself on success and stays open on failure so
@@ -398,7 +420,9 @@ local function open_thread_float(t)
     height = math.min(rows, math.floor(vim.o.lines * 0.4)),
     border = "rounded",
     style = "minimal",
-    title = (t.resolved and " resolved" or " thread") .. " · r reply ",
+    title = (t.resolved and " resolved" or " thread")
+      .. " · r reply · x "
+      .. (t.resolved and "unresolve " or "resolve "),
     title_pos = "right",
   })
   thread_float.set(win)
@@ -409,6 +433,10 @@ local function open_thread_float(t)
   vim.keymap.set("n", "r", function()
     thread_float.clear()
     M.reply_to_thread(t, refresh_threads)
+  end, { buffer = buf, nowait = true })
+  vim.keymap.set("n", "x", function()
+    thread_float.clear()
+    M.resolve_thread(t, refresh_threads)
   end, { buffer = buf, nowait = true })
   vim.api.nvim_create_autocmd("WinLeave", { buffer = buf, once = true, callback = thread_float.clear })
 end

@@ -1008,32 +1008,51 @@ function M.view(opts)
               end
             end
           end
-          -- reply targets the thread whose header row the cursor is on
-          -- (threads are the kids whose id is the GraphQL thread id; other
-          -- rows no-op). Replies post immediately, then the view refreshes.
-          local function reply()
+          -- thread_under_cursor resolves the cursor row to its reviewThreads
+          -- node (threads are the kids whose id is the GraphQL thread id;
+          -- other rows return nil).
+          local function thread_under_cursor()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= buf then
-              return
+              return nil
             end
             local id = id_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
             if not id then
-              return
+              return nil
             end
             for _, t in ipairs(vim.tbl_get(prnode or {}, "reviewThreads", "nodes") or {}) do
               if t.id == id then
-                local root = vim.tbl_get(t, "comments", "nodes", 1) or {}
-                diff.reply_to_thread({
-                  id = t.id,
-                  path = t.path,
-                  line = nilable(t.line),
-                  comments = { { login = vim.tbl_get(root, "author", "login") or "?" } },
-                }, function()
-                  fetch_and_render(ui.spin "refreshing…")
-                end)
-                return
+                return t
               end
             end
+          end
+
+          -- replies post immediately, then the view refreshes.
+          local function reply()
+            local t = thread_under_cursor()
+            if not t then
+              return
+            end
+            local root = vim.tbl_get(t, "comments", "nodes", 1) or {}
+            diff.reply_to_thread({
+              id = t.id,
+              path = t.path,
+              line = nilable(t.line),
+              comments = { { login = vim.tbl_get(root, "author", "login") or "?" } },
+            }, function()
+              fetch_and_render(ui.spin "refreshing…")
+            end)
+          end
+
+          -- x toggles the thread's resolved state.
+          local function resolve()
+            local t = thread_under_cursor()
+            if not t then
+              return
+            end
+            diff.resolve_thread({ id = t.id, resolved = t.isResolved == true }, function()
+              fetch_and_render(ui.spin "refreshing…")
+            end)
           end
 
           -- mine: the PR is yours to act on — you authored it or are assigned. Gates
@@ -1119,6 +1138,7 @@ function M.view(opts)
               desc = "request review",
             },
             { lhs = "r", rhs = reply, hint = "reply", desc = "reply to thread" },
+            { lhs = "x", rhs = resolve, hint = "resolve", desc = "resolve/unresolve thread" },
             { lhs = "d", rhs = diff.diff, hint = "diff", desc = "open diff" },
             { lhs = "+", rhs = react_pick, hint = "react", desc = "react" },
             { lhs = "K", rhs = who_reacted, hint = "reactions", desc = "who reacted" },
