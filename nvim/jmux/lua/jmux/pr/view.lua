@@ -327,6 +327,9 @@ local function build_model(data)
       header_mark = rmodel.header_mark,
       body = rmodel.lines,
       body_marks = rmodel.marks,
+      -- entries[i] describes body line i's reviewer; render records their
+      -- rows so R on one re-requests directly.
+      reviewers = rmodel.entries,
       kids = {},
     }
   end
@@ -772,11 +775,11 @@ function M.view(opts)
           -- repositioned since the description above them changes height.
           local model = build_model(data)
           local ns = vim.api.nvim_create_namespace "jmux_pr_view"
-          local rows_by_id, id_by_row, jump_by_row = {}, {}, {}
+          local rows_by_id, id_by_row, jump_by_row, reviewer_by_row = {}, {}, {}, {}
 
           local function render()
             local lines = vim.list_extend({}, model.header)
-            rows_by_id, id_by_row, jump_by_row = {}, {}, {}
+            rows_by_id, id_by_row, jump_by_row, reviewer_by_row = {}, {}, {}, {}
             local marks = {}
             -- indent body lines under their title (blank lines stay blank so markdown
             -- paragraph breaks survive); any body_marks shift with the indent.
@@ -809,6 +812,10 @@ function M.view(opts)
                 -- <CR>'s jump target.
                 if model.jumps[b.id] then
                   jump_by_row[row + 1] = b.id
+                end
+                -- reviewer rows map to their entries, R's re-request target.
+                for i, e in ipairs(b.reviewers or {}) do
+                  reviewer_by_row[row + i] = e
                 end
                 add_body(b.body, "  ", b.body_marks)
                 for _, k in ipairs(b.kids) do
@@ -1044,6 +1051,42 @@ function M.view(opts)
             end)
           end
 
+          -- R on a reviewer's line re-requests that reviewer directly;
+          -- anywhere else it opens the request picker. Awaiting rows no-op —
+          -- GitHub already lists them as requested.
+          local function request()
+            local w = vim.api.nvim_get_current_win()
+            local e = vim.api.nvim_win_get_buf(w) == buf and reviewer_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
+            if not e then
+              request_review(pr, excluded, excludedTeams, function()
+                fetch_and_render(ui.spin "refreshing…")
+              end)
+              return
+            end
+            if e.state == "AWAITING" then
+              return vim.notify(e.name .. " is already awaiting review")
+            end
+            local owner = gh.owner_repo(pr.slug)
+            local value = e.login or (e.slug and owner .. "/" .. e.slug)
+            if not value then
+              return
+            end
+            ui.act("re-requesting " .. e.name .. "…", function(done)
+              vim.system(
+                { "gh", "pr", "edit", tostring(pr.number), "--repo", pr.slug, "--add-reviewer", value },
+                { text = true },
+                function(res)
+                  vim.schedule(function()
+                    done(res.code == 0 or nil, vim.trim(res.stderr or ""))
+                  end)
+                end
+              )
+            end, function()
+              vim.notify("re-requested review from " .. e.name)
+              fetch_and_render(ui.spin "refreshing…")
+            end)
+          end
+
           -- x toggles the thread's resolved state.
           local function resolve()
             local t = thread_under_cursor()
@@ -1127,16 +1170,7 @@ function M.view(opts)
               desc = "merge (admin)",
             },
             { lhs = "<C-r>", rhs = pv_refresh, hint = "refresh", desc = "refresh" },
-            {
-              lhs = "R",
-              rhs = function()
-                request_review(pr, excluded, excludedTeams, function()
-                  fetch_and_render(ui.spin "refreshing…")
-                end)
-              end,
-              hint = "request",
-              desc = "request review",
-            },
+            { lhs = "R", rhs = request, hint = "request", desc = "request / re-request review" },
             { lhs = "r", rhs = reply, hint = "reply", desc = "reply to thread" },
             { lhs = "x", rhs = resolve, hint = "resolve", desc = "resolve/unresolve thread" },
             { lhs = "d", rhs = diff.diff, hint = "diff", desc = "open diff" },

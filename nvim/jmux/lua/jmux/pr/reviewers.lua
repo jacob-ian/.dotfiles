@@ -21,12 +21,39 @@ local STATES = {
 }
 local ORDERED = { "CHANGES_REQUESTED", "APPROVED", "COMMENTED", "AWAITING" }
 
--- model distils the PR node into { header, header_mark, lines, marks }, or nil
--- when the PR has no reviewers in any state. lines/marks use the body_marks
--- shape ({ rel, col, col_end, hl }) so any renderer can indent and place them.
+-- model distils the PR node into { header, header_mark, lines, marks,
+-- entries }, or nil when the PR has no reviewers in any state. lines/marks
+-- use the body_marks shape ({ rel, col, col_end, hl }) so any renderer can
+-- indent and place them; entries[i] describes lines[i]'s reviewer (state,
+-- login/slug) for renderers that act on a reviewer row.
 function M.model(pr)
   local author = nilable(vim.tbl_get(pr, "author", "login"))
   local entries, seen = {}, {}
+
+  -- one entry per reviewer, first writer wins — so each add_* below
+  -- supersedes the ones after it.
+  local function add(login, entry)
+    if login then
+      if seen[login] then
+        return
+      end
+      seen[login] = true
+    end
+    entries[#entries + 1] = entry
+  end
+
+  -- Requests supersede verdicts: GitHub keeps a re-requested reviewer's old
+  -- reviews, and their actionable state is the new ask. Teams render by name
+  -- and never have verdicts.
+  for _, rr in ipairs(vim.tbl_get(pr, "reviewRequests", "nodes") or {}) do
+    local r = rr.requestedReviewer
+    if type(r) == "table" then
+      local name = r.login and ("@" .. r.login) or nilable(r.name) or nilable(r.slug)
+      if name then
+        add(nilable(r.login), { name = name, state = "AWAITING", login = nilable(r.login), slug = nilable(r.slug) })
+      end
+    end
+  end
 
   -- latestOpinionatedReviews is the current approve/request-changes per
   -- author, matching how GitHub tallies verdicts.
@@ -34,35 +61,22 @@ function M.model(pr)
     local login = nilable(vim.tbl_get(r, "author", "login"))
     local state = tostring(r.state or ""):upper()
     if login and STATES[state] then
-      seen[login] = true
-      entries[#entries + 1] = { name = "@" .. login, state = state, at = nilable(r.createdAt) }
+      add(login, { name = "@" .. login, state = state, at = nilable(r.createdAt), login = login })
     end
   end
 
   -- reviewers whose latest word was only a comment: any review author with no
   -- opinionated verdict (skipping the PR author's own review comments).
-  local commented = {}
+  local newest = {}
   for _, r in ipairs(vim.tbl_get(pr, "reviews", "nodes") or {}) do
     local login = nilable(vim.tbl_get(r, "author", "login"))
-    if login and not seen[login] and login ~= author then
-      -- keep the newest timestamp per author (reviews arrive time-ordered).
-      commented[login] = nilable(r.createdAt) or commented[login]
+    if login and login ~= author then
+      -- reviews arrive time-ordered, so the last write is the newest.
+      newest[login] = nilable(r.createdAt) or newest[login]
     end
   end
-  for login, at in pairs(commented) do
-    entries[#entries + 1] = { name = "@" .. login, state = "COMMENTED", at = at }
-  end
-
-  -- GitHub drops a request once that reviewer submits, so requests are the
-  -- awaited set by definition. Teams render by name and never have verdicts.
-  for _, rr in ipairs(vim.tbl_get(pr, "reviewRequests", "nodes") or {}) do
-    local r = rr.requestedReviewer
-    if type(r) == "table" then
-      local name = r.login and ("@" .. r.login) or nilable(r.name) or nilable(r.slug)
-      if name then
-        entries[#entries + 1] = { name = name, state = "AWAITING" }
-      end
-    end
+  for login, at in pairs(newest) do
+    add(login, { name = "@" .. login, state = "COMMENTED", at = at, login = login })
   end
 
   if #entries == 0 then
@@ -106,6 +120,7 @@ function M.model(pr)
     header_mark = { col = 0, col_end = #hs.icon, hl = hs.hl },
     lines = lines,
     marks = marks,
+    entries = entries,
   }
 end
 
