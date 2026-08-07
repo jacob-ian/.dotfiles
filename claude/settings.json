@@ -128,16 +128,7 @@
   "enabledPlugins": {
     "gopls-lsp@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
-    "lua-lsp@claude-plugins-official": true,
-    "avo@avo-mcp": true
-  },
-  "extraKnownMarketplaces": {
-    "avo-mcp": {
-      "source": {
-        "source": "github",
-        "repo": "avohq/avo-mcp"
-      }
-    }
+    "lua-lsp@claude-plugins-official": true
   },
   "tui": "fullscreen",
   "skipAutoPermissionPrompt": true,
