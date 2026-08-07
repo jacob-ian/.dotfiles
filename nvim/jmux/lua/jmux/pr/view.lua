@@ -1,11 +1,15 @@
--- The pv conversation view: the whole PR — description, checks, comments,
--- reviews, inline threads — rendered as a collapsible markdown tab, with
--- refresh, reply, reactions, reviewer requests, description editing, and
--- merging.
+-- The pv view: a tab of three panes — the conversation (description,
+-- comments, reviews, inline threads) beside reviewers and checks panes fed
+-- by their pure models — with refresh, reply, reactions, reviewer requests,
+-- description editing, and merging. Panes are plain windows: <C-w> motions
+-- move between them.
 
 local checks = require "jmux.pr.checks"
+local conversation = require "jmux.pr.conversation"
 local diff = require "jmux.pr.diff"
 local gh = require "jmux.pr.gh"
+local merge = require "jmux.pr.merge"
+local reactions = require "jmux.pr.reactions"
 local reviewers = require "jmux.pr.reviewers"
 local state = require "jmux.pr.state"
 local ui = require "jmux.pr.ui"
@@ -32,46 +36,37 @@ local watch = ui.slot(function(t)
   t:close()
 end)
 
--- Field lists shared by VIEW_QUERY and the per-connection page queries, so a
--- paginated tail carries exactly what the first page did.
-local COMMENT_FIELDS = [[id author{login} body createdAt
-        reactionGroups{ content viewerHasReacted users{ totalCount } }]]
-local REVIEW_FIELDS = [[id author{login} body state createdAt
-        reactionGroups{ content viewerHasReacted users{ totalCount } }]]
-local THREAD_FIELDS = [[id isResolved isOutdated path line
-        comments(first:100){ nodes{ id author{login} body createdAt pullRequestReview{id}
-          reactionGroups{ content viewerHasReacted users{ totalCount } } } }]]
-
--- VIEW_QUERY pulls the whole conversation for the bespoke `pv`: body, timeline
--- comments, reviews (with bodies), inline review threads, and the latest commit's
--- checks — `gh pr view --comments` omits the inline review comments entirely.
--- The three conversation connections page at GitHub's 100 cap; fetch_all chases
--- their cursors so a busy PR renders whole.
+-- VIEW_QUERY stitches the models' field fragments into one request: each
+-- model owns the selection it reads (conversation also lends its connection
+-- field lists to the pagination below); view owns only the wiring — viewer,
+-- repo scalars, mine/assignee bits, and the pageInfo plumbing. The three
+-- conversation connections page at GitHub's 100 cap; fetch_all chases their
+-- cursors so a busy PR renders whole.
 local VIEW_QUERY = ([[
 query($owner:String!,$repo:String!,$number:Int!){
   viewer{ login }
   repository(owner:$owner,name:$repo){
     viewerDefaultMergeMethod
     pullRequest(number:$number){
-      id title number state createdAt author{login} body
-      reactionGroups{ content viewerHasReacted users{ totalCount } }
+      %s
       viewerDidAuthor assignees(first:20){ nodes{ login } }
-      reviewRequests(first:50){ nodes{ requestedReviewer{
-        __typename ... on User{ login } ... on Team{ name slug } } } }
-      isDraft mergeable reviewDecision mergeStateStatus
-      autoMergeRequest{ enabledAt }
-      latestOpinionatedReviews(first:50){ nodes{ state author{login} createdAt } }
+      %s
+      %s
       comments(first:100){ pageInfo{ hasNextPage endCursor } nodes{ %s } }
       reviews(first:100){ pageInfo{ hasNextPage endCursor } nodes{ %s } }
       reviewThreads(first:100){ pageInfo{ hasNextPage endCursor } nodes{ %s } }
-      commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:100){ nodes{
-        __typename
-        ... on CheckRun{ name conclusion status startedAt completedAt }
-        ... on StatusContext{ context state }
-      } } } } } }
+      %s
     }
   }
-}]]):format(COMMENT_FIELDS, REVIEW_FIELDS, THREAD_FIELDS)
+}]]):format(
+  conversation.PR_FIELDS,
+  merge.FIELDS,
+  reviewers.FIELDS,
+  conversation.COMMENT_FIELDS,
+  conversation.REVIEW_FIELDS,
+  conversation.THREAD_FIELDS,
+  checks.FIELDS
+)
 
 -- page_query fetches one more page of a single conversation connection.
 local function page_query(key, fields)
@@ -86,9 +81,9 @@ query($owner:String!,$repo:String!,$number:Int!,$after:String!){
 end
 
 local CONNECTIONS = {
-  { key = "comments", fields = COMMENT_FIELDS },
-  { key = "reviews", fields = REVIEW_FIELDS },
-  { key = "reviewThreads", fields = THREAD_FIELDS },
+  { key = "comments", fields = conversation.COMMENT_FIELDS },
+  { key = "reviews", fields = conversation.REVIEW_FIELDS },
+  { key = "reviewThreads", fields = conversation.THREAD_FIELDS },
 }
 
 -- fetch_all runs VIEW_QUERY, then chases each conversation connection's
@@ -134,400 +129,18 @@ local function fetch_all(vars, cb)
   end)
 end
 
--- REACTORS_QUERY resolves who reacted, on demand for the K hover. VIEW_QUERY
--- ships only counts: bare totalCounts cost nothing against GitHub's 500k
--- node limit, while logins under threads × comments × users multiply past it.
-local REACTORS_QUERY = [[
-query($ids:[ID!]!){
-  nodes(ids:$ids){
-    id
-    ... on Reactable{ reactionGroups{ content users(first:100){ totalCount nodes{ login } } } }
-  }
-}]]
-
--- ADD_REACTION / REMOVE_REACTION set and unset the viewer's reaction on any
--- Reactable node, for the `+` react picker.
-local ADD_REACTION = [[
-mutation($subject:ID!,$content:ReactionContent!){
-  addReaction(input:{subjectId:$subject,content:$content}){ clientMutationId }
-}]]
-local REMOVE_REACTION = [[
-mutation($subject:ID!,$content:ReactionContent!){
-  removeReaction(input:{subjectId:$subject,content:$content}){ clientMutationId }
-}]]
-
--- REACTIONS maps GitHub's ReactionContent enum to the emoji GitHub renders.
-local REACTIONS = {
-  THUMBS_UP = "👍",
-  THUMBS_DOWN = "👎",
-  LAUGH = "😄",
-  HOORAY = "🎉",
-  CONFUSED = "😕",
-  HEART = "❤️",
-  ROCKET = "🚀",
-  EYES = "👀",
-}
-
--- REACTION_ORDER fixes the react picker's emoji order to GitHub's own.
-local REACTION_ORDER = { "THUMBS_UP", "THUMBS_DOWN", "LAUGH", "HOORAY", "CONFUSED", "HEART", "ROCKET", "EYES" }
-
--- my_reactions collects the reaction contents the viewer has already given a
--- node, so the react picker offers those as removals.
-local function my_reactions(n)
-  local mine = {}
-  for _, g in ipairs(nilable(n.reactionGroups) or {}) do
-    if g.viewerHasReacted then
-      mine[g.content] = true
-    end
-  end
-  return mine
-end
-
--- reaction_line renders a node's reactions as "👍 2 · 🎉 1", or nil when
--- nothing has reacted (including nodes fetched before reactions were queried).
-local function reaction_line(n)
-  local parts = {}
-  for _, g in ipairs(nilable(n.reactionGroups) or {}) do
-    local count = vim.tbl_get(g, "users", "totalCount") or 0
-    if count > 0 then
-      parts[#parts + 1] = ("%s %d"):format(REACTIONS[g.content] or g.content, count)
-    end
-  end
-  if #parts > 0 then
-    return table.concat(parts, " · ")
-  end
-end
-
--- reaction_who lists a REACTORS_QUERY node's reactions with their reactors,
--- one line per emoji ("👍 @alice @bob"), or nil when nothing has reacted.
--- Reactors beyond the query's first:100 collapse to "+n more".
-local function reaction_who(n)
-  local out = {}
-  for _, g in ipairs(nilable(n.reactionGroups) or {}) do
-    local total = vim.tbl_get(g, "users", "totalCount") or 0
-    if total > 0 then
-      local names = {}
-      for _, u in ipairs(vim.tbl_get(g, "users", "nodes") or {}) do
-        names[#names + 1] = "@" .. (u.login or "?")
-      end
-      if total > #names then
-        names[#names + 1] = ("+%d more"):format(total - #names)
-      end
-      out[#out + 1] = ("%s %s"):format(REACTIONS[g.content] or g.content, table.concat(names, " "))
-    end
-  end
-  if #out > 0 then
-    return out
-  end
-end
-
--- merge_summary distils review + merge state into a one-line readiness summary
--- (icon, highlight, text) for an open PR, or nil for merged/closed/draft-less
--- cases where the status line already says it all.
-local function merge_summary(pr)
-  if tostring(pr.state or ""):upper() ~= "OPEN" then
-    return nil
-  end
-  -- unresolved threads block the merge when the branch requires resolution; that
-  -- rule isn't readable without push access, so surface the count regardless.
-  local unresolved = 0
-  for _, t in ipairs(vim.tbl_get(pr, "reviewThreads", "nodes") or {}) do
-    if not t.isResolved then
-      unresolved = unresolved + 1
-    end
-  end
-  local mss = tostring(nilable(pr.mergeStateStatus) or ""):upper()
-  local decision = tostring(nilable(pr.reviewDecision) or ""):upper()
-  local mergeable = tostring(nilable(pr.mergeable) or ""):upper()
-  local icon, hl, state_str = "●", "DiagnosticWarn", "pending"
-  if pr.isDraft then
-    icon, hl, state_str = "○", "Comment", "draft"
-  elseif mergeable == "CONFLICTING" or mss == "DIRTY" then
-    icon, hl, state_str = "✗", "DiagnosticError", "conflicts"
-  elseif decision == "CHANGES_REQUESTED" then
-    icon, hl, state_str = "✗", "DiagnosticError", "changes requested"
-  elseif mss == "CLEAN" then
-    icon, hl, state_str = "✓", "DiagnosticOk", "ready to merge"
-  elseif mss == "BEHIND" then
-    icon, hl, state_str = "●", "DiagnosticWarn", "behind base"
-  elseif mss == "UNSTABLE" then
-    icon, hl, state_str = "●", "DiagnosticWarn", "checks failing"
-  elseif decision == "REVIEW_REQUIRED" then
-    icon, hl, state_str = "●", "DiagnosticWarn", "review required"
-  elseif mss == "BLOCKED" then
-    icon, hl, state_str = "●", "DiagnosticWarn", "blocked"
-  elseif decision == "APPROVED" then
-    icon, hl, state_str = "✓", "DiagnosticOk", "approved"
-  end
-  -- approval counts live in the reviewers block, so the summary carries only
-  -- what that block can't: thread resolution and merge state.
-  local parts = {}
-  if unresolved > 0 then
-    parts[#parts + 1] = unresolved .. " unresolved"
-  end
-  parts[#parts + 1] = state_str
-  if nilable(pr.autoMergeRequest) then
-    parts[#parts + 1] = "auto-merge armed"
-  end
-  return icon, hl, table.concat(parts, " · ")
-end
-
--- build_model turns the VIEW_QUERY response into { header, pr, checks, blocks }:
--- the static title/status header, then collapsible blocks — the PR description,
--- the checks summary, and the time-ordered conversation. Each block is
--- { id, header, body, kids, body_marks? }; a review's inline threads are its kids
--- (each kid { id, header, lines }); body_marks colour the check icons.
+-- build_model composes the three pure models from the VIEW_QUERY response:
+-- the conversation (header, description, time-ordered blocks + row-intent
+-- maps) and the side panes' reviewers/checks (nil when the PR has neither).
 local function build_model(data)
   local pr = vim.tbl_get(data, "data", "repository", "pullRequest")
   if type(pr) ~= "table" then
-    return { header = { "  no PR data" }, blocks = {}, reactions = {}, subjects = {} }
+    return { header = { "  no PR data" }, blocks = {}, reactions = {}, subjects = {}, jumps = {} }
   end
-  local function who(n)
-    return vim.tbl_get(n, "author", "login") or "?"
-  end
-  -- GitHub returns bodies with CRLF endings; strip the \r so it doesn't render
-  -- as a trailing ^M on every line.
-  local function split(text)
-    return vim.split(vim.trim((text or ""):gsub("\r", "")), "\n")
-  end
-
-  local status = ("`%s` · @%s · %s"):format(tostring(pr.state or ""):lower(), who(pr), reltime(pr.createdAt or ""))
-  local header_marks = {}
-  local micon, mhl, mtext = merge_summary(pr)
-  if micon then
-    local prefix = status .. " · "
-    status = ("%s%s %s"):format(prefix, micon, mtext)
-    header_marks[#header_marks + 1] = { row = 1, col = #prefix, col_end = #prefix + #micon, hl = mhl }
-  end
-  local header = {
-    ("# %s  #%s"):format(pr.title or "", tostring(pr.number or "")),
-    status,
-    "",
-  }
-
-  -- Row lookups for the keymaps, keyed like rows_by_id: reactions backs the K
-  -- hover (reactable node ids, fetched lines memoized on), subjects backs the
-  -- `+` picker (a thread reacts to its root comment), and jumps backs <CR>
-  -- (the code a thread comments on).
-  local reactions, subjects, jumps = {}, {}, {}
-
-  -- the PR description is its own collapsible block, shown above the checks.
-  local pr_header = ("@%s · opened · %s"):format(who(pr), reltime(pr.createdAt or ""))
-  local pr_rx = reaction_line(pr)
-  if pr_rx then
-    pr_header = pr_header .. " · " .. pr_rx
-  end
-  if nilable(pr.id) then
-    subjects.pr = { id = pr.id, mine = my_reactions(pr) }
-    if pr_rx then
-      reactions.pr = { items = { { id = pr.id } } }
-    end
-  end
-  local pr_block = {
-    id = "pr",
-    header = pr_header,
-    body = split(pr.body),
-    kids = {},
-  }
-
-  -- reviewers are the first collapsible block, above the description; the
-  -- model lives in jmux.pr.reviewers so a future dashboard pane can reuse it.
-  local reviewers_block
-  local rmodel = reviewers.model(pr)
-  if rmodel then
-    reviewers_block = {
-      id = "reviewers",
-      header = rmodel.header,
-      header_mark = rmodel.header_mark,
-      body = rmodel.lines,
-      body_marks = rmodel.marks,
-      -- entries[i] describes body line i's reviewer; render records their
-      -- rows so R on one re-requests directly.
-      reviewers = rmodel.entries,
-      kids = {},
-    }
-  end
-
-  -- checks are a collapsible block below the description; the model lives in
-  -- jmux.pr.checks so a future dashboard pane can reuse it.
-  local checks_block
-  local cmodel = checks.model(pr)
-  if cmodel then
-    checks_block = {
-      id = "checks",
-      header = cmodel.header,
-      header_mark = cmodel.header_mark,
-      body = cmodel.lines,
-      body_marks = cmodel.marks,
-      kids = {},
-    }
-  end
-
-  -- group inline threads under the review that opened them.
-  local by_review, orphans = {}, {}
-  for _, t in ipairs(vim.tbl_get(pr, "reviewThreads", "nodes") or {}) do
-    local rid = vim.tbl_get(t, "comments", "nodes", 1, "pullRequestReview", "id")
-    if rid then
-      by_review[rid] = by_review[rid] or {}
-      table.insert(by_review[rid], t)
-    else
-      orphans[#orphans + 1] = t
-    end
-  end
-  local function thread_kid(t)
-    local loc = t.path or "?"
-    if nilable(t.line) then
-      loc = loc .. ":" .. tostring(t.line)
-    end
-    local comments = vim.tbl_get(t, "comments", "nodes") or {}
-    -- header: author/time · status; the location sits beneath it, then the body
-    -- (replies marked ↳).
-    local status = t.isResolved and "✓ resolved" or "● open"
-    if t.isOutdated then
-      status = status .. " · outdated"
-    end
-    local lines = { ("`%s`"):format(loc) }
-    -- the root's reactions ride on the kid's header; replies get a bold
-    -- author line (line_marks) carrying theirs the same way. line_subjects
-    -- maps each line to its comment, so + reacts to the message under the
-    -- cursor rather than always the root.
-    local line_marks, line_subjects = {}, {}
-    for i, c in ipairs(comments) do
-      local first = #lines + 1
-      if i > 1 then
-        local hdr = ("↳ @%s · %s"):format(who(c), reltime(c.createdAt or ""))
-        line_marks[#line_marks + 1] = { rel = #lines, col = 0, col_end = #hdr, hl = "Title" }
-        local rx = reaction_line(c)
-        if rx then
-          hdr = hdr .. " · " .. rx
-        end
-        lines[#lines + 1] = hdr
-      end
-      vim.list_extend(lines, split(c.body))
-      lines[#lines + 1] = ""
-      if nilable(c.id) then
-        local subj = { id = c.id, mine = my_reactions(c) }
-        -- excluding the trailing blank keeps the separator neutral ground.
-        for l = first, #lines - 1 do
-          line_subjects[l] = subj
-        end
-        -- reacted messages are K-hoverable individually, keyed by comment id
-        -- (the thread's own id keys the aggregated hover).
-        if reaction_line(c) then
-          reactions[c.id] = { items = { { id = c.id } } }
-        end
-      end
-    end
-    local root = comments[1]
-    local header = root and ("@%s · %s · %s"):format(who(root), reltime(root.createdAt or ""), status)
-      or (loc .. " · " .. status)
-    local rx = root and reaction_line(root)
-    if rx then
-      header = header .. " · " .. rx
-    end
-    -- the whole thread's reactors hover on the kid's row, replies labelled by
-    -- author so their reactions stay attributable.
-    local items = {}
-    for i, c in ipairs(comments) do
-      if reaction_line(c) and nilable(c.id) then
-        items[#items + 1] = { id = c.id, prefix = i > 1 and ("↳ @%s"):format(who(c)) or nil }
-      end
-    end
-    if #items > 0 then
-      reactions[t.id or loc] = { items = items }
-    end
-    if root and nilable(root.id) then
-      subjects[t.id or loc] = { id = root.id, mine = my_reactions(root) }
-    end
-    if nilable(t.path) then
-      jumps[t.id or loc] = { path = t.path, line = nilable(t.line) }
-    end
-    return { id = t.id or loc, header = header, lines = lines, line_marks = line_marks, line_subjects = line_subjects }
-  end
-
-  -- time-ordered conversation (ISO-8601 sorts chronologically as a string).
-  local blocks = {}
-  for _, c in ipairs(vim.tbl_get(pr, "comments", "nodes") or {}) do
-    local header = ("@%s · %s"):format(who(c), reltime(c.createdAt or ""))
-    local id = "c" .. tostring(c.createdAt) .. who(c)
-    local rx = reaction_line(c)
-    if nilable(c.id) then
-      subjects[id] = { id = c.id, mine = my_reactions(c) }
-      if rx then
-        reactions[id] = { items = { { id = c.id } } }
-      end
-    end
-    if rx then
-      header = header .. " · " .. rx
-    end
-    blocks[#blocks + 1] = {
-      at = c.createdAt or "",
-      id = id,
-      header = header,
-      body = split(c.body),
-      kids = {},
-    }
-  end
-  for _, r in ipairs(vim.tbl_get(pr, "reviews", "nodes") or {}) do
-    local rt = (r.id and by_review[r.id]) or {}
-    local verdict = tostring(r.state or ""):upper()
-    -- show a review when it carries a body, inline threads, or a verdict — the
-    -- last so a bare "Approve" / "Request changes" still shows who weighed in.
-    if vim.trim(r.body or "") ~= "" or #rt > 0 or verdict == "APPROVED" or verdict == "CHANGES_REQUESTED" then
-      local kids = {}
-      for _, t in ipairs(rt) do
-        kids[#kids + 1] = thread_kid(t)
-      end
-      local header = ("@%s · %s · %s"):format(who(r), tostring(r.state or ""):lower(), reltime(r.createdAt or ""))
-      local id = r.id or ("r" .. tostring(r.createdAt))
-      local rx = reaction_line(r)
-      if nilable(r.id) then
-        subjects[id] = { id = r.id, mine = my_reactions(r) }
-        if rx then
-          reactions[id] = { items = { { id = r.id } } }
-        end
-      end
-      if rx then
-        header = header .. " · " .. rx
-      end
-      blocks[#blocks + 1] = {
-        at = r.createdAt or "",
-        id = id,
-        header = header,
-        body = vim.trim(r.body or "") ~= "" and split(r.body) or {},
-        kids = kids,
-      }
-    end
-  end
-  table.sort(blocks, function(a, b)
-    return a.at < b.at
-  end)
-  -- threads not tied to a shown review become their own top-level blocks.
-  for _, t in ipairs(orphans) do
-    local k = thread_kid(t)
-    blocks[#blocks + 1] = {
-      at = "",
-      id = k.id,
-      header = k.header,
-      body = k.lines,
-      body_marks = k.line_marks,
-      line_subjects = k.line_subjects,
-      kids = {},
-    }
-  end
-
-  return {
-    header = header,
-    header_marks = header_marks,
-    pr = pr_block,
-    reviewers = reviewers_block,
-    checks = checks_block,
-    checks_state = cmodel,
-    blocks = blocks,
-    reactions = reactions,
-    subjects = subjects,
-    jumps = jumps,
-  }
+  local m = conversation.model(pr)
+  m.reviewers = reviewers.model(pr)
+  m.checks = checks.model(pr)
+  return m
 end
 
 -- REVIEWERS_QUERY lists the repo's assignable users — the set that can be
@@ -709,10 +322,16 @@ function M.view(opts)
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].filetype = "markdown"
+
   -- scope=local: vim.wo[win] writes the option's global value too, which
   -- would leak pv's cosmetics (numbers off, conceal on…) into every window
   -- opened for the rest of the session.
-  for opt, val in pairs {
+  local function scratch_opts(w, opts_tbl)
+    for opt, val in pairs(opts_tbl) do
+      vim.api.nvim_set_option_value(opt, val, { scope = "local", win = w })
+    end
+  end
+  scratch_opts(win, {
     wrap = true,
     linebreak = true,
     breakindent = true,
@@ -722,14 +341,67 @@ function M.view(opts)
     concealcursor = "nvic",
     number = false,
     relativenumber = false,
-  } do
-    vim.api.nvim_set_option_value(opt, val, { scope = "local", win = win })
+  })
+
+  -- The side column: reviewers over checks, plain splits so every native
+  -- window motion (<C-w>hjkl, resize, close) just works. Each pane is a
+  -- scratch buffer titled by its winbar and re-filled on every render.
+  local function side_pane(label, cmd, width)
+    vim.cmd(cmd)
+    local w = vim.api.nvim_get_current_win()
+    if width then
+      vim.api.nvim_win_set_width(w, width)
+    end
+    local b = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_win_set_buf(w, b)
+    vim.bo[b].bufhidden = "wipe"
+    scratch_opts(w, { number = false, relativenumber = false, wrap = false, winfixwidth = true })
+    vim.api.nvim_set_option_value("winbar", ui.bar(label, {}), { scope = "local", win = w })
+    -- q works even before the first render binds the full spec.
+    vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = b, nowait = true, desc = "close" })
+    return { win = w, buf = b }
   end
+  local panes = {
+    reviewers = side_pane("reviewers", "botright vsplit", 36),
+  }
+  panes.checks = side_pane("checks", "belowright split")
+  vim.api.nvim_set_current_win(win)
 
   local function fill(lines)
     vim.bo[buf].modifiable = true
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
     vim.bo[buf].modifiable = false
+  end
+
+  -- fill_pane paints a side pane from a pure model ({header, header_mark,
+  -- lines, marks}), header first; nil models empty the pane. Row maps stay
+  -- with the caller (reviewers' R needs one).
+  local pane_ns = vim.api.nvim_create_namespace "jmux_pv_panes"
+  local function fill_pane(pane, pmodel)
+    if not (pane.buf and vim.api.nvim_buf_is_valid(pane.buf)) then
+      return
+    end
+    local lines = {}
+    if pmodel then
+      lines[1] = pmodel.header
+      vim.list_extend(lines, pmodel.lines)
+    end
+    vim.bo[pane.buf].modifiable = true
+    vim.api.nvim_buf_set_lines(pane.buf, 0, -1, false, lines)
+    vim.bo[pane.buf].modifiable = false
+    vim.api.nvim_buf_clear_namespace(pane.buf, pane_ns, 0, -1)
+    if not pmodel then
+      return
+    end
+    local marks = { { rel = -1, col = 0, col_end = pmodel.header_mark.col_end, hl = pmodel.header_mark.hl } }
+    vim.list_extend(marks, pmodel.marks)
+    for _, m in ipairs(marks) do
+      pcall(vim.api.nvim_buf_set_extmark, pane.buf, pane_ns, m.rel + 1, m.col, {
+        end_col = m.col_end,
+        hl_group = m.hl,
+        priority = 200,
+      })
+    end
   end
 
   local _, restore, set_hints =
@@ -855,10 +527,6 @@ function M.view(opts)
                 if model.jumps[b.id] then
                   jump_by_row[row + 1] = b.id
                 end
-                -- reviewer rows map to their entries, R's re-request target.
-                for i, e in ipairs(b.reviewers or {}) do
-                  reviewer_by_row[row + i] = e
-                end
                 -- body rows react to their own message: a thread's per-line
                 -- subjects (replies differ from the root), else the block's.
                 local bsubj = model.subjects[b.id]
@@ -892,14 +560,8 @@ function M.view(opts)
               lines[#lines + 1] = ""
             end
 
-            if model.reviewers then
-              emit(model.reviewers)
-            end
             if model.pr then
               emit(model.pr)
-            end
-            if model.checks then
-              emit(model.checks)
             end
             for _, b in ipairs(model.blocks) do
               emit(b)
@@ -917,6 +579,15 @@ function M.view(opts)
                 hl_group = m.hl,
                 priority = 200,
               })
+            end
+
+            -- the side panes re-fill from their models on every render, and
+            -- the reviewers rows map for R (header on row 0, entry i on row i).
+            fill_pane(panes.reviewers, model.reviewers)
+            fill_pane(panes.checks, model.checks)
+            reviewer_by_row = {}
+            for i, e in ipairs(model.reviewers and model.reviewers.entries or {}) do
+              reviewer_by_row[i] = e
             end
           end
 
@@ -984,12 +655,12 @@ function M.view(opts)
               ids[#ids + 1] = it.id
             end
             ui.act("fetching reactions…", function(done)
-              gh.graphql(REACTORS_QUERY, { ids = ids }, done)
+              gh.graphql(reactions.REACTORS_QUERY, { ids = ids }, done)
             end, function(rdata)
               local by_id = {}
               for _, n in ipairs(vim.tbl_get(rdata, "data", "nodes") or {}) do
                 if type(n) == "table" and n.id then
-                  by_id[n.id] = reaction_who(n)
+                  by_id[n.id] = reactions.who(n)
                 end
               end
               local lines = {}
@@ -1033,7 +704,11 @@ function M.view(opts)
           local function toggle_reaction(subject, content)
             local given = subject.mine[content] or false
             ui.act(given and "removing reaction…" or "reacting…", function(done)
-              gh.graphql(given and REMOVE_REACTION or ADD_REACTION, { subject = subject.id, content = content }, done)
+              gh.graphql(
+                given and reactions.REMOVE_MUTATION or reactions.ADD_MUTATION,
+                { subject = subject.id, content = content },
+                done
+              )
             end, function()
               fetch_and_render(ui.spin "refreshing…")
             end)
@@ -1044,13 +719,13 @@ function M.view(opts)
               return
             end
             local choices = {}
-            for _, content in ipairs(REACTION_ORDER) do
+            for _, content in ipairs(reactions.ORDER) do
               choices[#choices + 1] = { content = content, mine = subject.mine[content] or false }
             end
             vim.ui.select(choices, {
               prompt = "react",
               format_item = function(it)
-                local label = ("%s %s"):format(REACTIONS[it.content], it.content:lower():gsub("_", " "))
+                local label = ("%s %s"):format(reactions.EMOJI[it.content], it.content:lower():gsub("_", " "))
                 return it.mine and (label .. " · remove") or label
               end,
             }, function(choice)
@@ -1125,12 +800,21 @@ function M.view(opts)
             end)
           end
 
+          -- reviewer_under_cursor resolves a reviewers-pane row to its entry
+          -- (row 0 is the pane's summary header).
+          local function reviewer_under_cursor()
+            local w = vim.api.nvim_get_current_win()
+            if vim.api.nvim_win_get_buf(w) ~= panes.reviewers.buf then
+              return nil
+            end
+            return reviewer_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
+          end
+
           -- R on a reviewer's line re-requests that reviewer directly;
           -- anywhere else it opens the request picker. Awaiting rows no-op —
           -- GitHub already lists them as requested.
           local function request()
-            local w = vim.api.nvim_get_current_win()
-            local e = vim.api.nvim_win_get_buf(w) == buf and reviewer_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
+            local e = reviewer_under_cursor()
             if not e then
               request_review(pr, excluded, excludedTeams, function()
                 fetch_and_render(ui.spin "refreshing…")
@@ -1185,18 +869,12 @@ function M.view(opts)
             end
           end
 
-          -- merging needs an open PR that's yours, and the repo's default merge
-          -- method allowlisted to a literal flag — so crafted API data can
-          -- never inject an arbitrary `gh` argument.
-          local method = nilable(vim.tbl_get(data, "data", "repository", "viewerDefaultMergeMethod"))
-          local how = method and tostring(method):lower()
-          local flag = how and ({ merge = "--merge", squash = "--squash", rebase = "--rebase" })[how]
+          -- merging needs an open PR that's yours and a merge model with a safe
+          -- gh flag; ready merges now, anything else arms auto-merge.
+          local mst = merge.model(prnode, nilable(vim.tbl_get(data, "data", "repository", "viewerDefaultMergeMethod")))
+          local how, flag, ready, armed = mst.how, mst.flag, mst.ready, mst.armed
           local pr_state = tostring(nilable(prnode.state) or ""):upper()
           local mergeable = mine and flag and pr_state == "OPEN"
-          -- ready: GitHub reports nothing left to wait for; otherwise m arms
-          -- auto-merge instead of merging.
-          local ready = tostring(nilable(prnode.mergeStateStatus) or ""):upper() == "CLEAN"
-          local armed = nilable(prnode.autoMergeRequest) ~= nil
 
           -- gh_merge runs `gh pr merge` with extra flags, confirming first.
           local function gh_merge(prompt, label, extra, on_ok)
@@ -1247,8 +925,8 @@ function M.view(opts)
           -- merge (armed or manual elsewhere) fires the same prompt as m; a
           -- watch without auto-merge stops when the checks settle.
           if watch.value then
-            local running = model.checks_state and model.checks_state.running or 0
-            local failed = model.checks_state and model.checks_state.failed or 0
+            local running = model.checks and model.checks.running or 0
+            local failed = model.checks and model.checks.failed or 0
             if pr_state == "MERGED" then
               watch.clear()
               vim.notify(("merged #%d"):format(pr.number))
@@ -1311,14 +989,14 @@ function M.view(opts)
               hint = "request",
               desc = "request / re-request review",
               ctx = function()
-                local row = cursor_row()
-                local e = row and reviewer_by_row[row]
+                local e = reviewer_under_cursor()
                 return e and e.state ~= "AWAITING" and "re-request"
               end,
             },
             {
               lhs = "r",
               rhs = reply,
+              pane = "conversation",
               hint = "reply",
               desc = "reply to thread",
               ctx = function()
@@ -1328,6 +1006,7 @@ function M.view(opts)
             {
               lhs = "x",
               rhs = resolve,
+              pane = "conversation",
               hint = "resolve",
               desc = "resolve/unresolve thread",
               ctx = function()
@@ -1338,6 +1017,7 @@ function M.view(opts)
             {
               lhs = "+",
               rhs = react_pick,
+              pane = "conversation",
               hint = "react",
               desc = "react",
               ctx = function()
@@ -1347,6 +1027,7 @@ function M.view(opts)
             {
               lhs = "K",
               rhs = who_reacted,
+              pane = "conversation",
               hint = "reactions",
               desc = "who reacted",
               ctx = function()
@@ -1377,6 +1058,7 @@ function M.view(opts)
               lhs_hint = "⇥",
               hint = "expand",
               desc = "toggle thread",
+              pane = "conversation",
               ctx = function()
                 local row = cursor_row()
                 return (row and id_by_row[row]) ~= nil
@@ -1387,6 +1069,7 @@ function M.view(opts)
               rhs = toggle_or_jump,
               lhs_hint = "⏎",
               desc = "toggle / open in diff",
+              pane = "conversation",
               ctx = function()
                 local row = cursor_row()
                 return (row and jump_by_row[row]) and "diff"
@@ -1406,7 +1089,18 @@ function M.view(opts)
               return age and { ("%%#Comment#cached %s ago"):format(util.short_age(age)) } or {}
             end,
           }
+          -- conversation gets the full spec; side panes only the global keys
+          -- (pane = nil). The bar tracks the cursor in all three.
           keys.apply(buf)
+          local function global_only(k)
+            return k.pane == nil
+          end
+          for _, pane in pairs(panes) do
+            if vim.api.nvim_buf_is_valid(pane.buf) then
+              keys.apply(pane.buf, nil, global_only)
+              bar.attach(pane.buf)
+            end
+          end
           bar.attach(buf)
           bar.refresh()
 

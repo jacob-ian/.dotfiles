@@ -10,6 +10,12 @@ local reltime = util.reltime
 
 local M = {}
 
+-- FIELDS is the PR selection this model reads (view's request picker also
+-- reads reviewRequests for its exclusions).
+M.FIELDS = [[reviewRequests(first:50){ nodes{ requestedReviewer{
+        __typename ... on User{ login } ... on Team{ name slug } } } }
+      latestOpinionatedReviews(first:50){ nodes{ state author{login} createdAt } }]]
+
 -- Display order: blocking verdicts first, then approvals, comment-only
 -- reviewers, and the still-awaited last. signal ranks what the collapsed
 -- header's icon should convey — blocked, then still-waiting, then done.

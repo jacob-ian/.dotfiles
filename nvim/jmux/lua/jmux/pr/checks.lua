@@ -8,6 +8,13 @@ local nilable = util.nilable
 
 local M = {}
 
+-- FIELDS is the PR selection this model reads: the latest commit's rollup.
+M.FIELDS = [[commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:100){ nodes{
+        __typename
+        ... on CheckRun{ name conclusion status startedAt completedAt }
+        ... on StatusContext{ context state }
+      } } } } } }]]
+
 -- check_mark maps a status-check node to (icon, highlight): green tick passed,
 -- red cross failed, yellow dot running, muted circle skipped/neutral.
 local function check_mark(node)

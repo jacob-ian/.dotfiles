@@ -190,14 +190,18 @@ end
 -- Extra entry fields pass through to callers iterating spec.entries.
 function M.keyspec(entries)
   local ks = { entries = entries }
-  function ks.apply(buf, map)
+  -- filter, when given, limits which entries bind — e.g. a multi-pane view
+  -- applying only its global entries to a side pane's buffer.
+  function ks.apply(buf, map, filter)
     map = map or vim.keymap.set
     for _, k in ipairs(entries) do
-      local mode = k.mode or "n"
-      if not k.when or k.when() then
-        map(mode, k.lhs, k.rhs, { buffer = buf, nowait = true, desc = k.desc })
-      else
-        pcall(vim.keymap.del, mode, k.lhs, { buffer = buf })
+      if not filter or filter(k) then
+        local mode = k.mode or "n"
+        if not k.when or k.when() then
+          map(mode, k.lhs, k.rhs, { buffer = buf, nowait = true, desc = k.desc })
+        else
+          pcall(vim.keymap.del, mode, k.lhs, { buffer = buf })
+        end
       end
     end
   end
