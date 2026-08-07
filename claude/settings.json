@@ -1,4 +1,8 @@
 {
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
   "permissions": {
     "allow": [
       "mcp__claude_ai_Linear__get_attachment",
@@ -132,8 +136,5 @@
   },
   "tui": "fullscreen",
   "skipAutoPermissionPrompt": true,
-  "attribution": {
-    "commit": "",
-    "pr": ""
-  }
+  "model": "claude-fable-5[1m]"
 }
