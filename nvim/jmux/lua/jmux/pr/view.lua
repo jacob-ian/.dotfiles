@@ -359,7 +359,7 @@ function M.view(opts)
     vim.api.nvim_set_option_value("winbar", ui.bar(label, {}), { scope = "local", win = w })
     -- q works even before the first render binds the full spec.
     vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = b, nowait = true, desc = "close" })
-    return { win = w, buf = b }
+    return { win = w, buf = b, label = label }
   end
   local panes = {
     reviewers = side_pane("reviewers", "botright vsplit", 36),
@@ -374,34 +374,40 @@ function M.view(opts)
   end
 
   -- fill_pane paints a side pane from a pure model ({header, header_mark,
-  -- lines, marks}), header first; nil models empty the pane. Row maps stay
-  -- with the caller (reviewers' R needs one).
+  -- lines, marks}): the summary header becomes the pane's winbar title (the
+  -- icon coloured with statusline highlights), the lines the body. nil
+  -- models empty the pane. Row maps stay with the caller (reviewers' R).
   local pane_ns = vim.api.nvim_create_namespace "jmux_pv_panes"
   local function fill_pane(pane, pmodel)
     if not (pane.buf and vim.api.nvim_buf_is_valid(pane.buf)) then
       return
     end
-    local lines = {}
-    if pmodel then
-      lines[1] = pmodel.header
-      vim.list_extend(lines, pmodel.lines)
-    end
+    local lines = pmodel and pmodel.lines or {}
     vim.bo[pane.buf].modifiable = true
     vim.api.nvim_buf_set_lines(pane.buf, 0, -1, false, lines)
     vim.bo[pane.buf].modifiable = false
     vim.api.nvim_buf_clear_namespace(pane.buf, pane_ns, 0, -1)
-    if not pmodel then
-      return
-    end
-    local marks = { { rel = -1, col = 0, col_end = pmodel.header_mark.col_end, hl = pmodel.header_mark.hl } }
-    vim.list_extend(marks, pmodel.marks)
-    for _, m in ipairs(marks) do
-      pcall(vim.api.nvim_buf_set_extmark, pane.buf, pane_ns, m.rel + 1, m.col, {
+    for _, m in ipairs(pmodel and pmodel.marks or {}) do
+      pcall(vim.api.nvim_buf_set_extmark, pane.buf, pane_ns, m.rel, m.col, {
         end_col = m.col_end,
         hl_group = m.hl,
         priority = 200,
       })
     end
+    if not (pane.win and vim.api.nvim_win_is_valid(pane.win)) then
+      return
+    end
+    local wb = ui.bar(pane.label, {})
+    if pmodel then
+      -- % escaped so header text can never expand as statusline items.
+      local function esc(s)
+        return (s:gsub("%%", "%%%%"))
+      end
+      local icon = pmodel.header:sub(1, pmodel.header_mark.col_end)
+      local rest = pmodel.header:sub(pmodel.header_mark.col_end + 1)
+      wb = ("%%#%s# %s%%* %s "):format(pmodel.header_mark.hl, esc(icon), esc(vim.trim(rest)))
+    end
+    vim.api.nvim_set_option_value("winbar", wb, { scope = "local", win = pane.win })
   end
 
   local _, restore, set_hints =
@@ -582,12 +588,12 @@ function M.view(opts)
             end
 
             -- the side panes re-fill from their models on every render, and
-            -- the reviewers rows map for R (header on row 0, entry i on row i).
+            -- the reviewers rows map for R (entry i on 0-indexed row i - 1).
             fill_pane(panes.reviewers, model.reviewers)
             fill_pane(panes.checks, model.checks)
             reviewer_by_row = {}
             for i, e in ipairs(model.reviewers and model.reviewers.entries or {}) do
-              reviewer_by_row[i] = e
+              reviewer_by_row[i - 1] = e
             end
           end
 
