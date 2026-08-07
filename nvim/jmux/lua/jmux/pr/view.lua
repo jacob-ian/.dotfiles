@@ -361,8 +361,11 @@ function M.view(opts)
     vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = b, nowait = true, desc = "close" })
     return { win = w, buf = b, label = label }
   end
+  -- wide enough that a typical "◷ Reviewers · 1 approved · 1 awaiting" title
+  -- survives whole, but never more than a third of a narrow screen.
+  local side_width = math.min(42, math.floor(vim.o.columns / 3))
   local panes = {
-    reviewers = side_pane("reviewers", "botright vsplit", 36),
+    reviewers = side_pane("reviewers", "botright vsplit", side_width),
   }
   panes.checks = side_pane("checks", "belowright split")
   vim.api.nvim_set_current_win(win)
