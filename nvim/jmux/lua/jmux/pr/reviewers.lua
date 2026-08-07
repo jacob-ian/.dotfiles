@@ -108,21 +108,18 @@ function M.model(pr)
     marks[#marks + 1] = { rel = #lines - 1, col = 0, col_end = #s.icon, hl = s.hl }
   end
 
-  -- summary mirrors the display order; the header icon carries the highest
-  -- signal present, so a collapsed block still says where review stands.
-  local summary, head = {}, nil
+  -- the header icon carries the highest signal present — the rows themselves
+  -- say who's where, so no counts summary (it outgrows a pane title anyway).
+  local head
   for _, state in ipairs(ORDERED) do
-    if counts[state] then
-      summary[#summary + 1] = ("%d %s"):format(counts[state], STATES[state].label)
-      if not head or STATES[state].signal < STATES[head].signal then
-        head = state
-      end
+    if counts[state] and (not head or STATES[state].signal < STATES[head].signal) then
+      head = state
     end
   end
 
   local hs = STATES[head]
   return {
-    header = ("%s Reviewers · %s"):format(hs.icon, table.concat(summary, " · ")),
+    header = ("%s Reviewers"):format(hs.icon),
     header_mark = { col = 0, col_end = #hs.icon, hl = hs.hl },
     lines = lines,
     marks = marks,
