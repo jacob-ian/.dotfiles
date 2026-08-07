@@ -238,6 +238,24 @@ function M.keyspec(entries)
   return ks
 end
 
+-- disposer collects cleanup functions at the sites that create things and
+-- runs them once, in reverse order, when the owner closes — so a view's
+-- teardown never has to know what its parts set up.
+function M.disposer()
+  local fns = {}
+  local d = {}
+  function d.add(fn)
+    fns[#fns + 1] = fn
+  end
+  function d.run()
+    for i = #fns, 1, -1 do
+      pcall(fns[i])
+    end
+    fns = {}
+  end
+  return d
+end
+
 -- hintbar drives a set_hints bar from a keyspec: collapsed shows a `? keys`
 -- reminder plus the entries whose ctx applies at the cursor; ? flips to the
 -- full hint list. state = { hidden = bool } is caller-owned so the

@@ -343,14 +343,34 @@ function M.view(opts)
     relativenumber = false,
   })
 
+  -- on_close collects each part's cleanup as it's created; the WinClosed
+  -- teardown just runs the stack.
+  local on_close = ui.disposer()
+
   -- The side column: reviewers over checks, plain splits so every native
   -- window motion (<C-w>hjkl, resize, close) just works. Each pane is a
-  -- scratch buffer titled by its winbar and re-filled on every render.
+  -- scratch buffer titled by its winbar and re-filled on every render. A
+  -- pane given a width fn owns that width for its lifetime: applied now and
+  -- re-clamped when the screen size changes — including the UI attaching
+  -- after `jmux pr` opens pv mid-startup, when columns is still the 80
+  -- default and a one-shot width would lock in skinny (winfixwidth).
   local function side_pane(label, cmd, width)
     vim.cmd(cmd)
     local w = vim.api.nvim_get_current_win()
     if width then
-      vim.api.nvim_win_set_width(w, width)
+      vim.api.nvim_win_set_width(w, width())
+      local group = vim.api.nvim_create_augroup("jmux_pv_width_" .. w, { clear = true })
+      vim.api.nvim_create_autocmd({ "UIEnter", "VimResized" }, {
+        group = group,
+        callback = function()
+          if vim.api.nvim_win_is_valid(w) then
+            vim.api.nvim_win_set_width(w, width())
+          end
+        end,
+      })
+      on_close.add(function()
+        vim.api.nvim_clear_autocmds { group = group }
+      end)
     end
     local b = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_win_set_buf(w, b)
@@ -363,7 +383,9 @@ function M.view(opts)
   end
   -- wide enough that a typical "◷ Reviewers · 1 approved · 1 awaiting" title
   -- survives whole, but never more than a third of a narrow screen.
-  local side_width = math.min(42, math.floor(vim.o.columns / 3))
+  local function side_width()
+    return math.min(42, math.floor(vim.o.columns / 3))
+  end
   local panes = {
     reviewers = side_pane("reviewers", "botright vsplit", side_width),
   }
@@ -415,12 +437,13 @@ function M.view(opts)
 
   local _, restore, set_hints =
     ui.set_tab_title(buf, "jmux pr view", { ui.key_hint("⇥", "expand"), ui.key_hint("q", "close") })
+  on_close.add(restore)
+  on_close.add(watch.clear)
   vim.api.nvim_create_autocmd("WinClosed", {
     pattern = tostring(win),
     once = true,
     callback = function()
-      restore()
-      watch.clear()
+      on_close.run()
       pv_tab = nil
       pv_refresh = nil
     end,
