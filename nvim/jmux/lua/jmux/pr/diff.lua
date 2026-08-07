@@ -649,6 +649,10 @@ end
 -- focus_main puts the cursor in the head-side diff window, polling briefly
 -- since diffview loads entries async.
 local function focus_main(tries)
+  -- polling, so the user may have tabbed away — never steal focus back.
+  if not pd_tab or vim.api.nvim_get_current_tabpage() ~= pd_tab then
+    return
+  end
   local v = diff_view()
   local main = v and v.layout:get_main_win()
   if main and vim.api.nvim_win_is_valid(main.id) then

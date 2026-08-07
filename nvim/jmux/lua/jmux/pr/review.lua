@@ -280,8 +280,9 @@ function M.review()
   vim.wo[rwin].linebreak = true
 
   -- Row 1 (tabline, full width): title + the review-level commands that work
-  -- from either pane.
-  local review_tabline = ui.set_tab_title(lbuf, "jmux review", {
+  -- from either pane. The bar's own spin animates the submit loader —
+  -- tab-scoped, so frames never paint over other tabs.
+  local _, _, _, bar_spin = ui.set_tab_title(lbuf, "jmux review", {
     ui.key_hint("a", "approve"),
     ui.key_hint("c", "comment"),
     ui.key_hint("r", "request"),
@@ -375,33 +376,21 @@ function M.review()
       local n = #state.pending
       vim.notify(("submitting %s…"):format(event))
 
-      -- Animate a loader in the tabline while the submit is in flight (the call
-      -- is async, so the editor stays responsive). stop_spin tears it down and is
-      -- also the busy flag the guard above checks.
-      local spin_stop
+      -- Animate the bar's loader while the submit is in flight (the call is
+      -- async, so the editor stays responsive). stop_spin tears it down —
+      -- restoring the command bar for a retry — and doubles as the busy flag
+      -- the guard above checks.
+      local spin_stop = bar_spin(("submitting %s…"):format(event))
       stop_spin = function()
         stop_spin = nil
-        if spin_stop then
-          spin_stop()
-        end
+        spin_stop()
       end
-      spin_stop = ui.spinner(function(frame)
-        if closed or not stop_spin then
-          return
-        end
-        vim.o.tabline = ("%%=%%#Title# %s submitting %s… %%*%%="):format(frame, event)
-      end)
 
       post_review({ id = pr.id, sha = sha }, event, body, function(ok)
-        local was_open = not closed
         if stop_spin then
           stop_spin()
         end
         if not ok then
-          -- restore the command bar so the user can retry (unless they bailed).
-          if was_open then
-            vim.o.tabline = review_tabline
-          end
           return
         end
         state.discard()
