@@ -16,7 +16,7 @@ local M = {}
 -- The conversation's selections in the main query. PR_FIELDS covers the node
 -- scalars and description; the three connection field lists are also what
 -- view's pagination re-requests per page.
-M.PR_FIELDS = ("id title number state createdAt author{login} body %s"):format(reactions.FIELDS)
+M.PR_FIELDS = ("id title number state createdAt author{login} body url %s"):format(reactions.FIELDS)
 M.COMMENT_FIELDS = ("id author{login} body createdAt %s"):format(reactions.FIELDS)
 M.REVIEW_FIELDS = ("id author{login} body state createdAt %s"):format(reactions.FIELDS)
 M.THREAD_FIELDS = ("id isResolved isOutdated path line comments(first:100){ nodes{ id author{login} body createdAt pullRequestReview{id} %s } }"):format(

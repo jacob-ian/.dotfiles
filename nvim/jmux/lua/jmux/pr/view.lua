@@ -498,11 +498,12 @@ function M.view(opts)
           -- repositioned since the description above them changes height.
           local model = build_model(data)
           local ns = vim.api.nvim_create_namespace "jmux_pr_view"
-          local rows_by_id, id_by_row, jump_by_row, reviewer_by_row, subject_by_row = {}, {}, {}, {}, {}
+          local rows_by_id, id_by_row, jump_by_row, reviewer_by_row, check_by_row, subject_by_row =
+            {}, {}, {}, {}, {}, {}
 
           local function render()
             local lines = vim.list_extend({}, model.header)
-            rows_by_id, id_by_row, jump_by_row, reviewer_by_row, subject_by_row = {}, {}, {}, {}, {}
+            rows_by_id, id_by_row, jump_by_row, reviewer_by_row, check_by_row, subject_by_row = {}, {}, {}, {}, {}, {}
             local marks = {}
             -- indent body lines under their title (blank lines stay blank so markdown
             -- paragraph breaks survive); any body_marks shift with the indent.
@@ -594,9 +595,12 @@ function M.view(opts)
             -- the reviewers rows map for R (entry i on 0-indexed row i - 1).
             fill_pane(panes.reviewers, model.reviewers)
             fill_pane(panes.checks, model.checks)
-            reviewer_by_row = {}
+            reviewer_by_row, check_by_row = {}, {}
             for i, e in ipairs(model.reviewers and model.reviewers.entries or {}) do
               reviewer_by_row[i - 1] = e
+            end
+            for i, e in ipairs(model.checks and model.checks.entries or {}) do
+              check_by_row[i - 1] = e
             end
           end
 
@@ -809,8 +813,18 @@ function M.view(opts)
             end)
           end
 
-          -- reviewer_under_cursor resolves a reviewers-pane row to its entry
-          -- (row 0 is the pane's summary header).
+          -- check_under_cursor resolves a checks-pane row to its entry, when
+          -- that check has a details page to open.
+          local function check_under_cursor()
+            local w = vim.api.nvim_get_current_win()
+            if vim.api.nvim_win_get_buf(w) ~= panes.checks.buf then
+              return nil
+            end
+            local e = check_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
+            return e and e.url and e or nil
+          end
+
+          -- reviewer_under_cursor resolves a reviewers-pane row to its entry.
           local function reviewer_under_cursor()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= panes.reviewers.buf then
@@ -1084,7 +1098,33 @@ function M.view(opts)
                 return (row and jump_by_row[row]) and "diff"
               end,
             },
+            {
+              lhs = "<CR>",
+              rhs = function()
+                local e = check_under_cursor()
+                if e then
+                  vim.ui.open(e.url)
+                end
+              end,
+              lhs_hint = "⏎",
+              desc = "open check in browser",
+              pane = "checks",
+              ctx = function()
+                return check_under_cursor() ~= nil and "open"
+              end,
+            },
             { lhs = "go", rhs = M.browser, desc = "open in browser" },
+            {
+              lhs = "gy",
+              rhs = function()
+                local url = nilable(prnode.url)
+                  or ("https://github.com/%s/pull/%s"):format(pr.slug, tostring(pr.number))
+                vim.fn.setreg("+", url)
+                vim.notify("copied " .. url)
+              end,
+              hint = "copy url",
+              desc = "copy PR url",
+            },
             { lhs = "q", rhs = "<cmd>tabclose<cr>", hint = "close", desc = "close" },
           }
 
@@ -1098,15 +1138,17 @@ function M.view(opts)
               return age and { ("%%#Comment#cached %s ago"):format(util.short_age(age)) } or {}
             end,
           }
-          -- conversation gets the full spec; side panes only the global keys
-          -- (pane = nil). The bar tracks the cursor in all three.
-          keys.apply(buf)
-          local function global_only(k)
-            return k.pane == nil
+          -- each buffer gets the global keys (pane = nil) plus its own pane's.
+          -- The bar tracks the cursor in all three.
+          local function for_pane(name)
+            return function(k)
+              return k.pane == nil or k.pane == name
+            end
           end
-          for _, pane in pairs(panes) do
+          keys.apply(buf, nil, for_pane "conversation")
+          for name, pane in pairs(panes) do
             if vim.api.nvim_buf_is_valid(pane.buf) then
-              keys.apply(pane.buf, nil, global_only)
+              keys.apply(pane.buf, nil, for_pane(name))
               bar.attach(pane.buf)
             end
           end
