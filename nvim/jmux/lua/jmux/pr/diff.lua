@@ -521,6 +521,11 @@ local function decorate_one(win, path, side)
   local buf = vim.api.nvim_win_get_buf(win)
   place_signs(buf, path, side)
   place_threads(buf, path, side)
+  -- diff windows split from pv inherit its local number settings; put the
+  -- globals back. Windows die with the view, so nothing to revoke.
+  for _, opt in ipairs { "number", "relativenumber" } do
+    vim.api.nvim_set_option_value(opt, vim.api.nvim_get_option_value(opt, { scope = "global" }), { win = win })
+  end
   KEYS.apply(buf, lease.map)
 end
 
@@ -778,20 +783,6 @@ function M.open_at(path, line)
   jump_to_line(path, line)
 end
 
--- restore_numbers re-enables line numbers in the diff windows: pv turns them
--- off in its window, and windows diffview splits from it inherit those local
--- options. Restored from the global values so config stays the source of truth.
-local function restore_numbers()
-  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))
-    if not name:find("/panels/", 1, true) then
-      for _, opt in ipairs { "number", "relativenumber" } do
-        vim.wo[w][opt] = vim.api.nvim_get_option_value(opt, { scope = "global" })
-      end
-    end
-  end
-end
-
 -- Keep the diff gutter in sync with pending comments as the user navigates
 -- diffview files and re-enters the view. A cleared augroup keeps re-sourcing the
 -- module (dev reload) idempotent rather than stacking duplicate callbacks.
@@ -799,10 +790,7 @@ local group = vim.api.nvim_create_augroup("jmux_pr", { clear = true })
 vim.api.nvim_create_autocmd("User", {
   group = group,
   pattern = { "DiffviewDiffBufWinEnter", "DiffviewViewEnter" },
-  callback = vim.schedule_wrap(function()
-    restore_numbers()
-    decorate_diff()
-  end),
+  callback = vim.schedule_wrap(decorate_diff),
 })
 
 -- The lease holds everything applied to real file buffers (a diff's RIGHT
