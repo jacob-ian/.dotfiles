@@ -59,6 +59,8 @@ function M.model(pr)
     header_mark = { col = 0, col_end = #icon, hl = hl },
     lines = lines,
     marks = marks,
+    running = run,
+    failed = fail,
   }
 end
 

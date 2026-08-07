@@ -22,6 +22,13 @@ local M = {}
 local pv_tab
 local pv_refresh
 
+-- watch holds the poll timer that keeps pv fresh while checks run or an
+-- auto-merge is armed; it dies with the tab or the state it waited for.
+local watch = ui.slot(function(t)
+  t:stop()
+  t:close()
+end)
+
 -- Field lists shared by VIEW_QUERY and the per-connection page queries, so a
 -- paginated tail carries exactly what the first page did.
 local COMMENT_FIELDS = [[id author{login} body createdAt
@@ -49,6 +56,7 @@ query($owner:String!,$repo:String!,$number:Int!){
       reviewRequests(first:50){ nodes{ requestedReviewer{
         __typename ... on User{ login } ... on Team{ name slug } } } }
       isDraft mergeable reviewDecision mergeStateStatus
+      autoMergeRequest{ enabledAt }
       latestOpinionatedReviews(first:50){ nodes{ state author{login} createdAt } }
       comments(first:100){ pageInfo{ hasNextPage endCursor } nodes{ %s } }
       reviews(first:100){ pageInfo{ hasNextPage endCursor } nodes{ %s } }
@@ -255,6 +263,9 @@ local function merge_summary(pr)
     parts[#parts + 1] = unresolved .. " unresolved"
   end
   parts[#parts + 1] = state_str
+  if nilable(pr.autoMergeRequest) then
+    parts[#parts + 1] = "auto-merge armed"
+  end
   return icon, hl, table.concat(parts, " · ")
 end
 
@@ -486,6 +497,7 @@ local function build_model(data)
     pr = pr_block,
     reviewers = reviewers_block,
     checks = checks_block,
+    checks_state = cmodel,
     blocks = blocks,
     reactions = reactions,
     subjects = subjects,
@@ -702,6 +714,7 @@ function M.view(opts)
     once = true,
     callback = function()
       restore()
+      watch.clear()
       pv_tab = nil
       pv_refresh = nil
     end,
@@ -738,6 +751,10 @@ function M.view(opts)
     -- the PR description starts open; everything else collapsed. Hoisted above
     -- fetch_and_render so expand/collapse state survives a merge-triggered refresh.
     local expanded = { pr = true }
+
+    -- start_watch is defined after fetch_and_render (its tick refetches) but
+    -- wired into the keys below, hence the forward declaration.
+    local start_watch
 
     -- re-runnable so a successful merge can refresh the view in place. stop_spin,
     -- when passed, halts a merge spinner the instant the refreshed data arrives.
@@ -1117,17 +1134,19 @@ function M.view(opts)
           local method = nilable(vim.tbl_get(data, "data", "repository", "viewerDefaultMergeMethod"))
           local how = method and tostring(method):lower()
           local flag = how and ({ merge = "--merge", squash = "--squash", rebase = "--rebase" })[how]
-          local mergeable = mine and flag and tostring(nilable(prnode.state) or ""):upper() == "OPEN"
+          local pr_state = tostring(nilable(prnode.state) or ""):upper()
+          local mergeable = mine and flag and pr_state == "OPEN"
+          -- ready: GitHub reports nothing left to wait for; otherwise m arms
+          -- auto-merge instead of merging.
+          local ready = tostring(nilable(prnode.mergeStateStatus) or ""):upper() == "CLEAN"
+          local armed = nilable(prnode.autoMergeRequest) ~= nil
 
-          -- admin bypasses branch protection (failing checks, unresolved threads).
-          local function do_merge(admin)
-            local label = admin and (how .. ", admin") or how
-            ui.confirm(("merge #%d via %s?"):format(pr.number, label), function()
-              ui.act(("merging #%d…"):format(pr.number), function(done)
+          -- gh_merge runs `gh pr merge` with extra flags, confirming first.
+          local function gh_merge(prompt, label, extra, on_ok)
+            ui.confirm(prompt, function()
+              ui.act(label, function(done)
                 local cmd = { "gh", "pr", "merge", "--repo", pr.slug, flag }
-                if admin then
-                  cmd[#cmd + 1] = "--admin"
-                end
+                vim.list_extend(cmd, extra)
                 cmd[#cmd + 1] = "--"
                 cmd[#cmd + 1] = tostring(pr.number)
                 vim.system(cmd, { text = true }, function(res)
@@ -1135,13 +1154,62 @@ function M.view(opts)
                     done(res.code == 0 or nil, vim.trim(res.stderr or ""))
                   end)
                 end)
-              end, function()
-                vim.notify(("merged #%d (%s)"):format(pr.number, label))
-                util.prompt_remove_workspace(function()
-                  fetch_and_render(ui.spin "refreshing…")
-                end)
+              end, on_ok)
+            end)
+          end
+
+          -- admin bypasses branch protection (failing checks, unresolved threads).
+          local function do_merge(admin)
+            local label = admin and (how .. ", admin") or how
+            gh_merge(("merge #%d via %s?"):format(pr.number, label), ("merging #%d…"):format(pr.number), {
+              admin and "--admin" or nil,
+            }, function()
+              vim.notify(("merged #%d (%s)"):format(pr.number, label))
+              util.prompt_remove_workspace(function()
+                fetch_and_render(ui.spin "refreshing…")
               end)
             end)
+          end
+
+          -- arm_auto enables GitHub's server-side auto-merge, then watches so
+          -- the merge is noticed and the workspace prompt still fires.
+          local function arm_auto()
+            gh_merge(
+              ("auto-merge #%d via %s when ready?"):format(pr.number, how),
+              ("arming auto-merge #%d…"):format(pr.number),
+              { "--auto" },
+              function()
+                vim.notify(("auto-merge armed for #%d"):format(pr.number))
+                start_watch()
+                fetch_and_render(ui.spin "refreshing…")
+              end
+            )
+          end
+
+          -- What the watcher was waiting for, evaluated on every render: a
+          -- merge (armed or manual elsewhere) fires the same prompt as m; a
+          -- watch without auto-merge stops when the checks settle.
+          if watch.value then
+            local running = model.checks_state and model.checks_state.running or 0
+            local failed = model.checks_state and model.checks_state.failed or 0
+            if pr_state == "MERGED" then
+              watch.clear()
+              vim.notify(("merged #%d"):format(pr.number))
+              util.prompt_remove_workspace(function() end)
+            elseif pr_state ~= "OPEN" then
+              watch.clear()
+            elseif not armed and running == 0 then
+              watch.clear()
+              if failed > 0 then
+                vim.notify(("checks failed (%d)"):format(failed), vim.log.levels.ERROR)
+              else
+                vim.notify "checks passed"
+              end
+            end
+          elseif armed and pr_state == "OPEN" then
+            -- an armed PR (from a previous session or the web) is worth
+            -- watching as soon as pv sees it.
+            start_watch()
           end
 
           -- the view's keys: spec order is bar order, `when` gates the ones
@@ -1149,14 +1217,23 @@ function M.view(opts)
           local keys = ui.keyspec {
             {
               lhs = "m",
+              -- merge when GitHub says ready, otherwise arm auto-merge.
               rhs = function()
-                do_merge(false)
+                if ready then
+                  do_merge(false)
+                elseif armed then
+                  vim.notify "auto-merge is already armed"
+                else
+                  arm_auto()
+                end
               end,
-              hint = "merge",
+              hint = function()
+                return ready and "merge" or "auto-merge"
+              end,
               when = function()
                 return mergeable
               end,
-              desc = "merge",
+              desc = "merge / arm auto-merge",
             },
             {
               lhs = "M",
@@ -1173,6 +1250,20 @@ function M.view(opts)
             { lhs = "R", rhs = request, hint = "request", desc = "request / re-request review" },
             { lhs = "r", rhs = reply, hint = "reply", desc = "reply to thread" },
             { lhs = "x", rhs = resolve, hint = "resolve", desc = "resolve/unresolve thread" },
+            {
+              lhs = "w",
+              rhs = function()
+                if watch.value then
+                  watch.clear()
+                  vim.notify "stopped watching"
+                else
+                  start_watch()
+                  vim.notify "watching — refreshing every 15s"
+                end
+              end,
+              hint = "watch",
+              desc = "watch checks",
+            },
             { lhs = "d", rhs = diff.diff, hint = "diff", desc = "open diff" },
             { lhs = "+", rhs = react_pick, hint = "react", desc = "react" },
             { lhs = "K", rhs = who_reacted, hint = "reactions", desc = "who reacted" },
@@ -1212,6 +1303,28 @@ function M.view(opts)
       else
         fetch_all({ owner = owner, repo = repo, number = pr.number }, finish)
       end
+    end
+
+    -- The watcher refetches every 15s while the tab lives; each render then
+    -- decides whether the awaited state arrived (see finish). Silent — no
+    -- spinner per tick, the bar would flicker.
+    start_watch = function()
+      if watch.value then
+        return
+      end
+      local t = vim.uv.new_timer()
+      t:start(
+        15000,
+        15000,
+        vim.schedule_wrap(function()
+          if pv_tab and vim.api.nvim_tabpage_is_valid(pv_tab) then
+            fetch_and_render()
+          else
+            watch.clear()
+          end
+        end)
+      )
+      watch.set(t)
     end
 
     -- Paint from the on-disk cache when present so the view opens with no network
