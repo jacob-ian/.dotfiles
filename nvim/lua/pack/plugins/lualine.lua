@@ -3,7 +3,9 @@ return {
   config = function()
     require("lualine").setup {
       options = {
-        globalstatus = false,
+        -- one statusline for the focused window (laststatus=3): splits and
+        -- plugin panes carry no per-window mode/filename bars.
+        globalstatus = true,
         theme = "auto",
       },
       sections = {
