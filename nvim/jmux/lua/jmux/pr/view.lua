@@ -21,6 +21,9 @@ local M = {}
 -- callers whose action just changed the conversation (e.g. a submitted review).
 local pv_tab
 local pv_refresh
+-- The hint bar starts collapsed (contextual hints only); ? expands the full
+-- key list. Module-owned so the preference outlives each render.
+local hint_state = { hidden = true }
 
 -- watch holds the poll timer that keeps pv fresh while checks run or an
 -- auto-merge is armed; it dies with the tab or the state it waited for.
@@ -385,9 +388,12 @@ local function build_model(data)
     end
     local lines = { ("`%s`"):format(loc) }
     -- the root's reactions ride on the kid's header; replies get a bold
-    -- author line (line_marks) carrying theirs the same way.
-    local line_marks = {}
+    -- author line (line_marks) carrying theirs the same way. line_subjects
+    -- maps each line to its comment, so + reacts to the message under the
+    -- cursor rather than always the root.
+    local line_marks, line_subjects = {}, {}
     for i, c in ipairs(comments) do
+      local first = #lines + 1
       if i > 1 then
         local hdr = ("↳ @%s · %s"):format(who(c), reltime(c.createdAt or ""))
         line_marks[#line_marks + 1] = { rel = #lines, col = 0, col_end = #hdr, hl = "Title" }
@@ -399,6 +405,18 @@ local function build_model(data)
       end
       vim.list_extend(lines, split(c.body))
       lines[#lines + 1] = ""
+      if nilable(c.id) then
+        local subj = { id = c.id, mine = my_reactions(c) }
+        -- excluding the trailing blank keeps the separator neutral ground.
+        for l = first, #lines - 1 do
+          line_subjects[l] = subj
+        end
+        -- reacted messages are K-hoverable individually, keyed by comment id
+        -- (the thread's own id keys the aggregated hover).
+        if reaction_line(c) then
+          reactions[c.id] = { items = { { id = c.id } } }
+        end
+      end
     end
     local root = comments[1]
     local header = root and ("@%s · %s · %s"):format(who(root), reltime(root.createdAt or ""), status)
@@ -424,7 +442,7 @@ local function build_model(data)
     if nilable(t.path) then
       jumps[t.id or loc] = { path = t.path, line = nilable(t.line) }
     end
-    return { id = t.id or loc, header = header, lines = lines, line_marks = line_marks }
+    return { id = t.id or loc, header = header, lines = lines, line_marks = line_marks, line_subjects = line_subjects }
   end
 
   -- time-ordered conversation (ISO-8601 sorts chronologically as a string).
@@ -487,8 +505,15 @@ local function build_model(data)
   -- threads not tied to a shown review become their own top-level blocks.
   for _, t in ipairs(orphans) do
     local k = thread_kid(t)
-    blocks[#blocks + 1] =
-      { at = "", id = k.id, header = k.header, body = k.lines, body_marks = k.line_marks, kids = {} }
+    blocks[#blocks + 1] = {
+      at = "",
+      id = k.id,
+      header = k.header,
+      body = k.lines,
+      body_marks = k.line_marks,
+      line_subjects = k.line_subjects,
+      kids = {},
+    }
   end
 
   return {
@@ -792,11 +817,11 @@ function M.view(opts)
           -- repositioned since the description above them changes height.
           local model = build_model(data)
           local ns = vim.api.nvim_create_namespace "jmux_pr_view"
-          local rows_by_id, id_by_row, jump_by_row, reviewer_by_row = {}, {}, {}, {}
+          local rows_by_id, id_by_row, jump_by_row, reviewer_by_row, subject_by_row = {}, {}, {}, {}, {}
 
           local function render()
             local lines = vim.list_extend({}, model.header)
-            rows_by_id, id_by_row, jump_by_row, reviewer_by_row = {}, {}, {}, {}
+            rows_by_id, id_by_row, jump_by_row, reviewer_by_row, subject_by_row = {}, {}, {}, {}, {}
             local marks = {}
             -- indent body lines under their title (blank lines stay blank so markdown
             -- paragraph breaks survive); any body_marks shift with the indent.
@@ -834,6 +859,15 @@ function M.view(opts)
                 for i, e in ipairs(b.reviewers or {}) do
                   reviewer_by_row[row + i] = e
                 end
+                -- body rows react to their own message: a thread's per-line
+                -- subjects (replies differ from the root), else the block's.
+                local bsubj = model.subjects[b.id]
+                for i = 1, #b.body do
+                  local s = (b.line_subjects and b.line_subjects[i]) or bsubj
+                  if s then
+                    subject_by_row[row + i] = s
+                  end
+                end
                 add_body(b.body, "  ", b.body_marks)
                 for _, k in ipairs(b.kids) do
                   local krow = #lines
@@ -842,6 +876,12 @@ function M.view(opts)
                   if expanded[k.id] then
                     if model.jumps[k.id] then
                       jump_by_row[krow + 1] = k.id
+                    end
+                    for i = 1, #k.lines do
+                      local s = k.line_subjects and k.line_subjects[i]
+                      if s then
+                        subject_by_row[krow + i] = s
+                      end
                     end
                     -- three spaces, not four — a 4-space indent after a blank
                     -- line is an indented code block to markdown.
@@ -927,13 +967,16 @@ function M.view(opts)
             if vim.api.nvim_win_get_buf(w) ~= buf then
               return
             end
-            local id = id_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
-            local entry = id and model.reactions[id]
+            local row = vim.api.nvim_win_get_cursor(w)[1] - 1
+            -- a message row hovers that message's reactors; a header row the
+            -- block's (a thread header aggregates the whole thread).
+            local subj, id = subject_by_row[row], id_by_row[row]
+            local entry = (subj and model.reactions[subj.id]) or (id and model.reactions[id])
             if not entry then
               return
             end
             if entry.lines then
-              ui.hover(entry.lines)
+              ui.hover(entry.lines, "reactions")
               return
             end
             local ids = {}
@@ -964,8 +1007,8 @@ function M.view(opts)
               end
               entry.lines = lines
               local w2 = vim.api.nvim_get_current_win()
-              if vim.api.nvim_win_get_buf(w2) == buf and id_by_row[vim.api.nvim_win_get_cursor(w2)[1] - 1] == id then
-                ui.hover(entry.lines)
+              if vim.api.nvim_win_get_buf(w2) == buf and vim.api.nvim_win_get_cursor(w2)[1] - 1 == row then
+                ui.hover(entry.lines, "reactions")
               end
             end)
           end
@@ -973,12 +1016,18 @@ function M.view(opts)
           -- + reacts via the emoji picker: every reaction is a toggle (the
           -- picker marks the ones already yours). `+` echoes GitHub's
           -- smiley-plus button.
+          -- body rows resolve to their own message's subject; header rows to
+          -- the block/thread's (a thread header reacts to its root comment).
           local function subject_under_cursor()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= buf then
               return nil
             end
-            local id = id_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
+            local row = vim.api.nvim_win_get_cursor(w)[1] - 1
+            if subject_by_row[row] then
+              return subject_by_row[row]
+            end
+            local id = id_by_row[row]
             return id and model.subjects[id] or nil
           end
           local function toggle_reaction(subject, content)
@@ -1032,23 +1081,31 @@ function M.view(opts)
               end
             end
           end
-          -- thread_under_cursor resolves the cursor row to its reviewThreads
-          -- node (threads are the kids whose id is the GraphQL thread id;
-          -- other rows return nil).
-          local function thread_under_cursor()
+          -- threads keyed by id: the row resolvers run per cursor move for
+          -- the contextual hints, so no linear scans there.
+          local thread_by_id = {}
+          for _, t in ipairs(vim.tbl_get(prnode or {}, "reviewThreads", "nodes") or {}) do
+            if t.id then
+              thread_by_id[t.id] = t
+            end
+          end
+
+          -- cursor_row is the 0-indexed buffer row under the cursor, nil when
+          -- focus is elsewhere; the row resolvers below key off it.
+          local function cursor_row()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= buf then
               return nil
             end
-            local id = id_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
-            if not id then
-              return nil
-            end
-            for _, t in ipairs(vim.tbl_get(prnode or {}, "reviewThreads", "nodes") or {}) do
-              if t.id == id then
-                return t
-              end
-            end
+            return vim.api.nvim_win_get_cursor(w)[1] - 1
+          end
+
+          -- thread_under_cursor resolves the cursor row to its reviewThreads
+          -- node (threads are the kids whose id is the GraphQL thread id).
+          local function thread_under_cursor()
+            local row = cursor_row()
+            local id = row and id_by_row[row]
+            return id and thread_by_id[id] or nil
           end
 
           -- replies post immediately, then the view refreshes.
@@ -1213,7 +1270,8 @@ function M.view(opts)
           end
 
           -- the view's keys: spec order is bar order, `when` gates the ones
-          -- that need the PR to be yours (and open, for merging).
+          -- that need the PR to be yours (and open, for merging), and `ctx`
+          -- marks the ones the collapsed bar shows for the cursor's row.
           local keys = ui.keyspec {
             {
               lhs = "m",
@@ -1247,26 +1305,59 @@ function M.view(opts)
               desc = "merge (admin)",
             },
             { lhs = "<C-r>", rhs = pv_refresh, hint = "refresh", desc = "refresh" },
-            { lhs = "R", rhs = request, hint = "request", desc = "request / re-request review" },
-            { lhs = "r", rhs = reply, hint = "reply", desc = "reply to thread" },
-            { lhs = "x", rhs = resolve, hint = "resolve", desc = "resolve/unresolve thread" },
             {
-              lhs = "w",
-              rhs = function()
-                if watch.value then
-                  watch.clear()
-                  vim.notify "stopped watching"
-                else
-                  start_watch()
-                  vim.notify "watching — refreshing every 15s"
-                end
+              lhs = "R",
+              rhs = request,
+              hint = "request",
+              desc = "request / re-request review",
+              ctx = function()
+                local row = cursor_row()
+                local e = row and reviewer_by_row[row]
+                return e and e.state ~= "AWAITING" and "re-request"
               end,
-              hint = "watch",
-              desc = "watch checks",
+            },
+            {
+              lhs = "r",
+              rhs = reply,
+              hint = "reply",
+              desc = "reply to thread",
+              ctx = function()
+                return thread_under_cursor() ~= nil
+              end,
+            },
+            {
+              lhs = "x",
+              rhs = resolve,
+              hint = "resolve",
+              desc = "resolve/unresolve thread",
+              ctx = function()
+                return thread_under_cursor() ~= nil
+              end,
             },
             { lhs = "d", rhs = diff.diff, hint = "diff", desc = "open diff" },
-            { lhs = "+", rhs = react_pick, hint = "react", desc = "react" },
-            { lhs = "K", rhs = who_reacted, hint = "reactions", desc = "who reacted" },
+            {
+              lhs = "+",
+              rhs = react_pick,
+              hint = "react",
+              desc = "react",
+              ctx = function()
+                return subject_under_cursor() ~= nil
+              end,
+            },
+            {
+              lhs = "K",
+              rhs = who_reacted,
+              hint = "reactions",
+              desc = "who reacted",
+              ctx = function()
+                local row = cursor_row()
+                if not row then
+                  return false
+                end
+                local subj, id = subject_by_row[row], id_by_row[row]
+                return (subj and model.reactions[subj.id] or id and model.reactions[id]) ~= nil
+              end,
+            },
             {
               lhs = "E",
               rhs = function()
@@ -1280,19 +1371,44 @@ function M.view(opts)
               end,
               desc = "edit description",
             },
-            { lhs = "<Tab>", rhs = toggle, lhs_hint = "⇥", hint = "expand", desc = "toggle thread" },
-            { lhs = "<CR>", rhs = toggle_or_jump, desc = "toggle / open in diff" },
+            {
+              lhs = "<Tab>",
+              rhs = toggle,
+              lhs_hint = "⇥",
+              hint = "expand",
+              desc = "toggle thread",
+              ctx = function()
+                local row = cursor_row()
+                return (row and id_by_row[row]) ~= nil
+              end,
+            },
+            {
+              lhs = "<CR>",
+              rhs = toggle_or_jump,
+              lhs_hint = "⏎",
+              desc = "toggle / open in diff",
+              ctx = function()
+                local row = cursor_row()
+                return (row and jump_by_row[row]) and "diff"
+              end,
+            },
             { lhs = "go", rhs = M.browser, desc = "open in browser" },
             { lhs = "q", rhs = "<cmd>tabclose<cr>", hint = "close", desc = "close" },
           }
-          keys.apply(buf)
-          local hints = keys.hints()
+
           -- a cached paint flags its age so it's clear the data may be stale
           -- and <C-r> will refetch; a live fetch (age nil) shows no marker.
-          if age then
-            hints[#hints + 1] = ("%%#Comment#cached %s ago"):format(util.short_age(age))
-          end
-          set_hints(hints)
+          local bar = ui.hintbar {
+            keys = keys,
+            set_hints = set_hints,
+            state = hint_state,
+            extra = function()
+              return age and { ("%%#Comment#cached %s ago"):format(util.short_age(age)) } or {}
+            end,
+          }
+          keys.apply(buf)
+          bar.attach(buf)
+          bar.refresh()
 
           pcall(vim.api.nvim_win_set_cursor, win, { math.min(prev_line, vim.api.nvim_buf_line_count(buf)), 0 })
         end)

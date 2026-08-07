@@ -78,25 +78,38 @@ function M.set_tab_title(buf, label, hints)
     end
   end
   local function apply(hs)
-    title = M.bar(label, hs)
+    local new = M.bar(label, hs)
+    -- an unchanged bar that's already painted skips the tabline write, so
+    -- e.g. cursor-move refreshes with identical hints don't force redraws.
+    if new == title and vim.o.tabline == new then
+      return
+    end
+    title = new
     refresh()
   end
   -- set_hints rebuilds the bar (e.g. to reveal a key once data confirms it
-  -- applies) and re-applies it if this tab is current.
+  -- applies) and re-applies it if this tab is current. While a spin is
+  -- animating it only records the hints — applying would fight the spinner
+  -- frames and flicker — and stop paints the latest recorded set.
   local current_hints = hints
+  local spinning = false
   local function set_hints(new_hints)
     current_hints = new_hints
-    apply(new_hints)
+    if not spinning then
+      apply(new_hints)
+    end
   end
   -- spin animates a loader through the bar itself — tab-scoped, unlike the
   -- global M.spin, so frames never bleed onto other tabs — and restores the
   -- last-set hints on stop.
   local function spin(spin_label)
+    spinning = true
     local stop = M.spinner(function(frame)
       apply { ("%%#Title#%s %s"):format(frame, spin_label) }
     end)
     return function()
       stop()
+      spinning = false
       apply(current_hints)
     end
   end
@@ -197,7 +210,73 @@ function M.keyspec(entries)
     end
     return out
   end
+  -- ctx_hints renders the entries whose `ctx` says they apply at the cursor:
+  -- falsy no, true yes (normal hint), a string overrides the label — so a
+  -- key can read differently (or hint only) in context.
+  function ks.ctx_hints()
+    local out = {}
+    for _, k in ipairs(entries) do
+      if k.ctx and (not k.when or k.when()) then
+        local r = k.ctx()
+        if r then
+          local label = type(r) == "string" and r or k.hint
+          if type(label) == "function" then
+            label = label()
+          end
+          if label then
+            out[#out + 1] = M.key_hint(k.lhs_hint or k.lhs, label)
+          end
+        end
+      end
+    end
+    return out
+  end
   return ks
+end
+
+-- hintbar drives a set_hints bar from a keyspec: collapsed shows a `? keys`
+-- reminder plus the entries whose ctx applies at the cursor; ? flips to the
+-- full hint list. state = { hidden = bool } is caller-owned so the
+-- preference outlives the bar; extra(), when given, appends trailing notes
+-- (e.g. a cache-age marker). The ? key is injected into the spec, so apply
+-- the spec after constructing the bar.
+function M.hintbar(o)
+  local bar = {}
+  function bar.refresh()
+    local out
+    if o.state.hidden then
+      out = { M.key_hint("?", "keys") }
+      vim.list_extend(out, o.keys.ctx_hints())
+    else
+      out = o.keys.hints()
+    end
+    if o.extra then
+      vim.list_extend(out, o.extra())
+    end
+    o.set_hints(out)
+  end
+  table.insert(o.keys.entries, {
+    lhs = "?",
+    rhs = function()
+      o.state.hidden = not o.state.hidden
+      bar.refresh()
+    end,
+    desc = "toggle key hints",
+  })
+  -- the collapsed bar tracks the cursor so its contextual hints stay true to
+  -- the row; the full bar is static, so it skips the work.
+  function bar.attach(buf)
+    vim.api.nvim_create_autocmd("CursorMoved", {
+      group = vim.api.nvim_create_augroup("jmux_hintbar_" .. buf, { clear = true }),
+      buffer = buf,
+      callback = function()
+        if o.state.hidden then
+          bar.refresh()
+        end
+      end,
+    })
+  end
+  return bar
 end
 
 -- spin is the loader for async ops: the current tab's title bar when it has
@@ -325,9 +404,9 @@ end)
 
 -- hover shows lines in a small unfocused float anchored below the cursor,
 -- closed by the first cursor movement or by leaving the source buffer.
-function M.hover(lines)
+function M.hover(lines, title)
   local src = vim.api.nvim_get_current_buf()
-  local width = 1
+  local width = title and (vim.fn.strdisplaywidth(title) + 2) or 1
   for _, l in ipairs(lines) do
     width = math.max(width, vim.fn.strdisplaywidth(l))
   end
@@ -338,6 +417,7 @@ function M.hover(lines)
     width = width,
     height = #lines,
     border = "rounded",
+    title = title and (" " .. title .. " ") or nil,
     enter = false,
     focusable = false,
     backdrop = false,

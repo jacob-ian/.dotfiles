@@ -215,10 +215,9 @@ local THREAD_SIGN = vim.fn.nr2char(0xf086)
 local RESOLVED_SIGN = vim.fn.nr2char(0xf00c)
 local threads = {}
 local FLOAT_NS = vim.api.nvim_create_namespace "jmux_pr_thread_float"
+-- the occupant is a snacks.win; its close is idempotent.
 local thread_float = ui.slot(function(w)
-  if vim.api.nvim_win_is_valid(w) then
-    vim.api.nvim_win_close(w, true)
-  end
+  w:close()
 end)
 
 -- THREADS_QUERY pulls review threads via GraphQL — REST's pulls/comments carries
@@ -398,47 +397,47 @@ local function open_thread_float(t)
     end
   end
 
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].filetype = "markdown"
-  vim.bo[buf].modifiable = false
-  for _, row in ipairs(headers) do
-    vim.api.nvim_buf_set_extmark(buf, FLOAT_NS, row, 0, { line_hl_group = t.resolved and "Comment" or "Title" })
-  end
-
   -- a comfortable reading column; wrap long bodies rather than widen the float.
   local width = math.min(64, math.floor(vim.o.columns * 0.8))
   local rows = 0
   for _, l in ipairs(lines) do
     rows = rows + math.max(1, math.ceil(vim.fn.strdisplaywidth(l) / width))
   end
-  local win = vim.api.nvim_open_win(buf, true, {
+  local win = require("snacks").win {
     relative = "cursor",
     row = 1,
     col = 0,
     width = width,
     height = math.min(rows, math.floor(vim.o.lines * 0.4)),
     border = "rounded",
-    style = "minimal",
+    backdrop = false,
     title = (t.resolved and " resolved" or " thread")
       .. " · r reply · x "
       .. (t.resolved and "unresolve " or "resolve "),
     title_pos = "right",
-  })
+    text = lines,
+    bo = { filetype = "markdown", bufhidden = "wipe" },
+    wo = { wrap = true, linebreak = true },
+    -- through the slot, not snacks' own close, so slot state stays truthful.
+    keys = {
+      q = thread_float.clear,
+      ["<Esc>"] = thread_float.clear,
+      r = function()
+        thread_float.clear()
+        M.reply_to_thread(t, refresh_threads)
+      end,
+      x = function()
+        thread_float.clear()
+        M.resolve_thread(t, refresh_threads)
+      end,
+    },
+  }
   thread_float.set(win)
-  vim.wo[win].wrap = true
-  vim.wo[win].linebreak = true
-  vim.keymap.set("n", "q", thread_float.clear, { buffer = buf, nowait = true })
-  vim.keymap.set("n", "<Esc>", thread_float.clear, { buffer = buf, nowait = true })
-  vim.keymap.set("n", "r", function()
-    thread_float.clear()
-    M.reply_to_thread(t, refresh_threads)
-  end, { buffer = buf, nowait = true })
-  vim.keymap.set("n", "x", function()
-    thread_float.clear()
-    M.resolve_thread(t, refresh_threads)
-  end, { buffer = buf, nowait = true })
-  vim.api.nvim_create_autocmd("WinLeave", { buffer = buf, once = true, callback = thread_float.clear })
+  vim.bo[win.buf].modifiable = false
+  for _, row in ipairs(headers) do
+    vim.api.nvim_buf_set_extmark(win.buf, FLOAT_NS, row, 0, { line_hl_group = t.resolved and "Comment" or "Title" })
+  end
+  vim.api.nvim_create_autocmd("WinLeave", { buffer = win.buf, once = true, callback = thread_float.clear })
 end
 
 -- place_threads (re)draws this buffer's thread gutter signs; K on one opens the
