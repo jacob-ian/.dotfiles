@@ -43,9 +43,9 @@ function M.prompt_remove_workspace(on_keep)
   if not root then
     return keep()
   end
-  local prompt = "remove this workspace?"
+  local prompt = "clean up this workspace?"
   if (M.sh { "git", "status", "--porcelain" } or "") ~= "" then
-    prompt = "remove this workspace? (has uncommitted changes)"
+    prompt = "clean up this workspace? (has uncommitted changes)"
   end
   require("jmux.pr.ui").confirm(prompt, function()
     vim.system({ "jmux", "workspace", "remove", "--path", root, "--quiet" }, { detach = true })
