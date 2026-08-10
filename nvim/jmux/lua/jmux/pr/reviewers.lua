@@ -117,10 +117,15 @@ function M.model(pr)
     end
   end
 
-  local hs = STATES[head]
+  local icon, hl = STATES[head].icon, STATES[head].hl
+  -- reviewDecision accounts for the branch's required approvals, so awaited
+  -- reviewers don't hold the icon back once the requirement is met.
+  if tostring(nilable(pr.reviewDecision) or ""):upper() == "APPROVED" and head ~= "CHANGES_REQUESTED" then
+    icon, hl = STATES.APPROVED.icon, STATES.APPROVED.hl
+  end
   return {
-    header = ("%s Reviewers"):format(hs.icon),
-    header_mark = { col = 0, col_end = #hs.icon, hl = hs.hl },
+    header = ("%s Reviewers"):format(icon),
+    header_mark = { col = 0, col_end = #icon, hl = hl },
     lines = lines,
     marks = marks,
     entries = entries,
