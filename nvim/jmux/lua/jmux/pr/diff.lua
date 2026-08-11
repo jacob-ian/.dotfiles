@@ -692,12 +692,18 @@ function M.diff(selected)
     vim.notify(err or "could not resolve PR base", vim.log.levels.ERROR)
     return
   end
-  local ok_base, berr = ensure_base(pr.base)
-  if not ok_base then
-    vim.notify("could not fetch PR base " .. pr.base:sub(1, 7) .. ": " .. (berr or ""), vim.log.levels.ERROR)
-    return
+  -- not pr.base: that cached base-tip sha can sit behind a local rebase's
+  -- fork point, pulling upstream commits into the diff.
+  local base = pr.baseRef and util.sh { "git", "merge-base", "HEAD", "origin/" .. pr.baseRef } or nil
+  if not base then
+    base = pr.base
+    local ok_base, berr = ensure_base(base)
+    if not ok_base then
+      vim.notify("could not fetch PR base " .. base:sub(1, 7) .. ": " .. (berr or ""), vim.log.levels.ERROR)
+      return
+    end
   end
-  local cmd = "DiffviewOpen " .. pr.base .. "...HEAD"
+  local cmd = "DiffviewOpen " .. base .. "...HEAD"
   if type(selected) == "string" and selected ~= "" then
     cmd = cmd .. " --selected-file=" .. vim.fn.fnameescape(selected)
   end

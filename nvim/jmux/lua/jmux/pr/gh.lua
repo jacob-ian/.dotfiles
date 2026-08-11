@@ -42,7 +42,7 @@ end
 -- cached number/id valid.
 local info
 
-local INFO_FIELDS = "number,baseRefOid,url,id"
+local INFO_FIELDS = "number,baseRefOid,baseRefName,url,id"
 
 -- parse_pr_info turns `gh pr view --json` output into the { slug, number, base,
 -- id } identity (id is the GraphQL node id, used by mutations). The slug comes
@@ -61,7 +61,13 @@ local function parse_pr_info(out)
       return nil, "gh repo view: " .. (e or "")
     end
   end
-  return { slug = slug, number = data.number, base = data.baseRefOid, id = type(data.id) == "string" and data.id or nil }
+  return {
+    slug = slug,
+    number = data.number,
+    base = data.baseRefOid,
+    baseRef = type(data.baseRefName) == "string" and data.baseRefName or nil,
+    id = type(data.id) == "string" and data.id or nil,
+  }
 end
 
 -- The identity also persists to the worktree's git dir (like the pending review
