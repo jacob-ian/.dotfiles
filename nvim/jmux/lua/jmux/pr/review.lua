@@ -257,32 +257,19 @@ function M.review()
   local root = util.sh { "git", "rev-parse", "--show-toplevel" }
 
   vim.cmd "tabnew"
-  local lwin = vim.api.nvim_get_current_win()
-  local lbuf = vim.api.nvim_get_current_buf()
+  local left = ui.pane { wo = { scrollbind = true, wrap = false } }
+  local right = ui.pane { cmd = "rightbelow vsplit", wo = { scrollbind = true, wrap = true, linebreak = true } }
+  local lwin, lbuf, rwin, rbuf = left.win, left.buf, right.win, right.buf
+  -- peers: either pane dying closes the other, so a stray <C-w>c can't
+  -- strand half the preview.
+  local group = ui.panegroup { panes = { left, right } }
 
-  vim.cmd "rightbelow vsplit"
-  local rwin = vim.api.nvim_get_current_win()
-  local rbuf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_win_set_buf(rwin, rbuf)
-
-  for _, buf in ipairs { lbuf, rbuf } do
-    vim.bo[buf].buftype = "nofile"
-    vim.bo[buf].bufhidden = "wipe"
-  end
   local locs, owner = render(blocks, lbuf, rbuf)
-
-  for _, win in ipairs { lwin, rwin } do
-    vim.wo[win].number = false
-    vim.wo[win].scrollbind = true
-  end
-  vim.wo[lwin].wrap = false
-  vim.wo[rwin].wrap = true
-  vim.wo[rwin].linebreak = true
 
   -- Row 1 (tabline, full width): title + the review-level commands that work
   -- from either pane. The bar's own spin animates the submit loader —
   -- tab-scoped, so frames never paint over other tabs.
-  local _, _, _, bar_spin = ui.set_tab_title(lbuf, "jmux review", {
+  local _, restore, _, bar_spin = ui.set_tab_title(lbuf, "jmux review", {
     ui.key_hint("a", "approve"),
     ui.key_hint("c", "comment"),
     ui.key_hint("r", "request"),
@@ -291,24 +278,26 @@ function M.review()
   })
 
   -- Row 2 (winbar, per pane): the actions specific to each side.
-  vim.wo[lwin].winbar = ui.bar("code", { ui.key_hint("⏎", "open"), ui.key_hint("d", "remove") })
-  vim.wo[rwin].winbar = ui.bar("comments", { ui.key_hint("d", "remove") })
+  local function winbar(win, wb)
+    vim.api.nvim_set_option_value("winbar", wb, { scope = "local", win = win })
+  end
+  winbar(lwin, ui.bar("code", { ui.key_hint("⏎", "open"), ui.key_hint("d", "remove") }))
+  winbar(rwin, ui.bar("comments", { ui.key_hint("d", "remove") }))
   vim.api.nvim_set_current_win(lwin)
   vim.cmd "syncbind"
 
-  local closed = false
-  -- stop_spin is set while a submit is in flight (it stops the tabline loader);
-  -- its presence also marks the preview busy, so a second submit is refused.
+  -- stop_spin is set while a submit is in flight (it stops the tabline
+  -- loader); its presence also marks the preview busy, so a second submit is
+  -- refused. Teardown stops it too, so a killed preview can't leave the
+  -- loader running.
   local stop_spin
-  local function close()
-    if not closed then
-      closed = true
-      if stop_spin then
-        stop_spin()
-      end
-      pcall(vim.cmd, "tabclose")
+  left.on_close.add(restore)
+  left.on_close.add(function()
+    if stop_spin then
+      stop_spin()
     end
-  end
+  end)
+  local close = group.close
 
   -- goto_code closes the preview and jumps to the file/line under the cursor.
   -- RIGHT lines map to the head, which is the working tree; LEFT (old) lines
