@@ -17,4 +17,5 @@
 
 # PR rules
 
+- **Never, ever, ever reply on my behalf to PR comments**.
 - **Explain the why, not the what.** PR descriptions should explain why the change is needed, the diff explains what the change is.
