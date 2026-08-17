@@ -17,5 +17,6 @@
 
 # PR rules
 
+- **Never create a PR unless the user asked or has confirmed your offer**. Even if you have previously created a PR in the context window, subsequent PRs MUST be permitted by the user only.
 - **Never, ever, ever reply on my behalf to PR comments**.
-- **Explain the why, not the what.** PR descriptions should explain why the change is needed, the diff explains what the change is.
+- **Use single line PR descriptions whenever possible**. PR descriptions should explain why the change is needed, the diff explains what the change is. This can typically be one line.
