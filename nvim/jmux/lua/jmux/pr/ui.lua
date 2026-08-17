@@ -256,6 +256,159 @@ function M.disposer()
   return d
 end
 
+local PANE_NS = vim.api.nvim_create_namespace "jmux_pane"
+
+-- pane creates a scratch window jmux owns: a split (cmd) with a fresh
+-- scratch buffer, or — with no cmd — the current window and its buffer
+-- adopted (the fresh tabnew case). Window options are set scope-local:
+-- vim.wo[win].opt writes the global value too, leaking cosmetics into every
+-- later window. o.width is a fn the pane owns for its lifetime, re-clamped
+-- when the screen size changes — including the UI attaching after a
+-- mid-startup open, when columns is still the 80 default. on_close is a
+-- disposer run once, scheduled, on either death signal: the window closing,
+-- or another buffer displacing this one (bufhidden=wipe kills the pane with
+-- no WinClosed).
+function M.pane(o)
+  o = o or {}
+  local win, buf
+  if o.cmd then
+    vim.cmd(o.cmd)
+    win = vim.api.nvim_get_current_win()
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_win_set_buf(win, buf)
+  else
+    win = vim.api.nvim_get_current_win()
+    buf = vim.api.nvim_get_current_buf()
+  end
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "wipe"
+  for k, v in pairs(o.bo or {}) do
+    vim.bo[buf][k] = v
+  end
+  local wo = vim.tbl_extend("force", { number = false, relativenumber = false }, o.wo or {})
+  if o.width then
+    wo.winfixwidth = true
+  end
+  for k, v in pairs(wo) do
+    vim.api.nvim_set_option_value(k, v, { scope = "local", win = win })
+  end
+
+  local p = { win = win, buf = buf, label = o.label, on_close = M.disposer() }
+
+  local function set_winbar(wb)
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_set_option_value("winbar", wb, { scope = "local", win = win })
+    end
+  end
+  if o.label then
+    set_winbar(M.bar(o.label, {}))
+  end
+
+  if o.width then
+    vim.api.nvim_win_set_width(win, o.width())
+    local group = vim.api.nvim_create_augroup("jmux_pane_width_" .. win, { clear = true })
+    vim.api.nvim_create_autocmd({ "UIEnter", "VimResized" }, {
+      group = group,
+      callback = function()
+        if vim.api.nvim_win_is_valid(win) then
+          vim.api.nvim_win_set_width(win, o.width())
+        end
+      end,
+    })
+    p.on_close.add(function()
+      vim.api.nvim_clear_autocmds { group = group }
+    end)
+  end
+
+  local torn = false
+  local function teardown()
+    if torn then
+      return
+    end
+    torn = true
+    p.on_close.run()
+  end
+  vim.api.nvim_create_autocmd("WinClosed", {
+    pattern = tostring(win),
+    once = true,
+    callback = vim.schedule_wrap(teardown),
+  })
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    buffer = buf,
+    once = true,
+    callback = vim.schedule_wrap(teardown),
+  })
+
+  function p.close()
+    if vim.api.nvim_win_is_valid(win) then
+      pcall(vim.api.nvim_win_close, win, true)
+    end
+  end
+
+  -- fill paints a pure model ({ header, header_mark, lines, marks }) into
+  -- the pane: the summary header becomes the winbar title (icon coloured
+  -- with statusline highlights), the lines the body. nil empties the pane.
+  function p.fill(pmodel)
+    if not vim.api.nvim_buf_is_valid(buf) then
+      return
+    end
+    local lines = pmodel and pmodel.lines or {}
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+    vim.api.nvim_buf_clear_namespace(buf, PANE_NS, 0, -1)
+    for _, m in ipairs(pmodel and pmodel.marks or {}) do
+      pcall(vim.api.nvim_buf_set_extmark, buf, PANE_NS, m.rel, m.col, {
+        end_col = m.col_end,
+        hl_group = m.hl,
+        priority = 200,
+      })
+    end
+    local wb = o.label and M.bar(o.label, {}) or ""
+    if pmodel then
+      -- % escaped so header text can never expand as statusline items.
+      local function esc(s)
+        return (s:gsub("%%", "%%%%"))
+      end
+      local icon = pmodel.header:sub(1, pmodel.header_mark.col_end)
+      local rest = pmodel.header:sub(pmodel.header_mark.col_end + 1)
+      wb = ("%%#%s# %s%%* %s "):format(pmodel.header_mark.hl, esc(icon), esc(vim.trim(rest)))
+    end
+    set_winbar(wb)
+  end
+
+  return p
+end
+
+-- panegroup ties pane lifetimes together: with an owner, the owner's death
+-- closes every other pane (a dependent dying alone is allowed); without
+-- one, any member's death closes the rest.
+function M.panegroup(o)
+  local function close_others(dead)
+    for _, p in ipairs(o.panes) do
+      if p ~= dead then
+        p.close()
+      end
+    end
+  end
+  if o.owner then
+    o.owner.on_close.add(function()
+      close_others(o.owner)
+    end)
+  else
+    for _, p in ipairs(o.panes) do
+      p.on_close.add(function()
+        close_others(p)
+      end)
+    end
+  end
+  return {
+    close = function()
+      close_others(nil)
+    end,
+  }
+end
+
 -- hintbar drives a set_hints bar from a keyspec: collapsed shows a `? keys`
 -- reminder plus the entries whose ctx applies at the cursor; ? flips to the
 -- full hint list. state = { hidden = bool } is caller-owned so the

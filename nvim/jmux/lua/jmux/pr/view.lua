@@ -317,79 +317,37 @@ function M.view(opts)
   -- keeps animating during any round trip.
   vim.cmd "tabnew"
   pv_tab = vim.api.nvim_get_current_tabpage()
-  local win = vim.api.nvim_get_current_win()
-  local buf = vim.api.nvim_get_current_buf()
-  vim.bo[buf].buftype = "nofile"
-  vim.bo[buf].bufhidden = "wipe"
-  vim.bo[buf].filetype = "markdown"
+  local conv = ui.pane {
+    bo = { filetype = "markdown" },
+    wo = {
+      wrap = true,
+      linebreak = true,
+      breakindent = true,
+      conceallevel = 2,
+      -- concealed even on the cursor line: this is a read-only view, so
+      -- revealing raw syntax on hover just makes lines jump around.
+      concealcursor = "nvic",
+    },
+  }
+  local win, buf = conv.win, conv.buf
 
-  -- scope=local: vim.wo[win] writes the option's global value too, which
-  -- would leak pv's cosmetics (numbers off, conceal on…) into every window
-  -- opened for the rest of the session.
-  local function scratch_opts(w, opts_tbl)
-    for opt, val in pairs(opts_tbl) do
-      vim.api.nvim_set_option_value(opt, val, { scope = "local", win = w })
-    end
-  end
-  scratch_opts(win, {
-    wrap = true,
-    linebreak = true,
-    breakindent = true,
-    conceallevel = 2,
-    -- concealed even on the cursor line: this is a read-only view, so
-    -- revealing raw syntax on hover just makes lines jump around.
-    concealcursor = "nvic",
-    number = false,
-    relativenumber = false,
-  })
-
-  -- on_close collects each part's cleanup as it's created; the WinClosed
-  -- teardown just runs the stack.
-  local on_close = ui.disposer()
-
-  -- The side column: reviewers over checks, plain splits so every native
-  -- window motion (<C-w>hjkl, resize, close) just works. Each pane is a
-  -- scratch buffer titled by its winbar and re-filled on every render. A
-  -- pane given a width fn owns that width for its lifetime: applied now and
-  -- re-clamped when the screen size changes — including the UI attaching
-  -- after `jmux pr` opens pv mid-startup, when columns is still the 80
-  -- default and a one-shot width would lock in skinny (winfixwidth).
-  local function side_pane(label, cmd, width)
-    vim.cmd(cmd)
-    local w = vim.api.nvim_get_current_win()
-    if width then
-      vim.api.nvim_win_set_width(w, width())
-      local group = vim.api.nvim_create_augroup("jmux_pv_width_" .. w, { clear = true })
-      vim.api.nvim_create_autocmd({ "UIEnter", "VimResized" }, {
-        group = group,
-        callback = function()
-          if vim.api.nvim_win_is_valid(w) then
-            vim.api.nvim_win_set_width(w, width())
-          end
-        end,
-      })
-      on_close.add(function()
-        vim.api.nvim_clear_autocmds { group = group }
-      end)
-    end
-    local b = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_win_set_buf(w, b)
-    vim.bo[b].bufhidden = "wipe"
-    scratch_opts(w, { number = false, relativenumber = false, wrap = false, winfixwidth = true })
-    vim.api.nvim_set_option_value("winbar", ui.bar(label, {}), { scope = "local", win = w })
-    -- q works even before the first render binds the full spec.
-    vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = b, nowait = true, desc = "close" })
-    return { win = w, buf = b, label = label }
-  end
-  -- wide enough that a typical "◷ Reviewers · 1 approved · 1 awaiting" title
-  -- survives whole, but never more than a third of a narrow screen.
+  -- wide enough that a typical "◷ Reviewers · 1 approved · 1 awaiting"
+  -- title survives whole, but never more than a third of a narrow screen.
   local function side_width()
     return math.min(42, math.floor(vim.o.columns / 3))
   end
+  -- The side column: reviewers over checks, plain splits so every native
+  -- window motion (<C-w>hjkl, resize, close) just works; they die with the
+  -- conversation, whichever way it goes.
   local panes = {
-    reviewers = side_pane("reviewers", "botright vsplit", side_width),
+    reviewers = ui.pane { cmd = "botright vsplit", label = "reviewers", width = side_width, wo = { wrap = false } },
   }
-  panes.checks = side_pane("checks", "belowright split")
+  panes.checks = ui.pane { cmd = "belowright split", label = "checks", wo = { wrap = false } }
+  ui.panegroup { owner = conv, panes = { conv, panes.reviewers, panes.checks } }
+  for _, pane in pairs(panes) do
+    -- q works even before the first render binds the full spec.
+    vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = pane.buf, nowait = true, desc = "close" })
+  end
   vim.api.nvim_set_current_win(win)
 
   local function fill(lines)
@@ -398,56 +356,14 @@ function M.view(opts)
     vim.bo[buf].modifiable = false
   end
 
-  -- fill_pane paints a side pane from a pure model ({header, header_mark,
-  -- lines, marks}): the summary header becomes the pane's winbar title (the
-  -- icon coloured with statusline highlights), the lines the body. nil
-  -- models empty the pane. Row maps stay with the caller (reviewers' R).
-  local pane_ns = vim.api.nvim_create_namespace "jmux_pv_panes"
-  local function fill_pane(pane, pmodel)
-    if not (pane.buf and vim.api.nvim_buf_is_valid(pane.buf)) then
-      return
-    end
-    local lines = pmodel and pmodel.lines or {}
-    vim.bo[pane.buf].modifiable = true
-    vim.api.nvim_buf_set_lines(pane.buf, 0, -1, false, lines)
-    vim.bo[pane.buf].modifiable = false
-    vim.api.nvim_buf_clear_namespace(pane.buf, pane_ns, 0, -1)
-    for _, m in ipairs(pmodel and pmodel.marks or {}) do
-      pcall(vim.api.nvim_buf_set_extmark, pane.buf, pane_ns, m.rel, m.col, {
-        end_col = m.col_end,
-        hl_group = m.hl,
-        priority = 200,
-      })
-    end
-    if not (pane.win and vim.api.nvim_win_is_valid(pane.win)) then
-      return
-    end
-    local wb = ui.bar(pane.label, {})
-    if pmodel then
-      -- % escaped so header text can never expand as statusline items.
-      local function esc(s)
-        return (s:gsub("%%", "%%%%"))
-      end
-      local icon = pmodel.header:sub(1, pmodel.header_mark.col_end)
-      local rest = pmodel.header:sub(pmodel.header_mark.col_end + 1)
-      wb = ("%%#%s# %s%%* %s "):format(pmodel.header_mark.hl, esc(icon), esc(vim.trim(rest)))
-    end
-    vim.api.nvim_set_option_value("winbar", wb, { scope = "local", win = pane.win })
-  end
-
   local _, restore, set_hints =
     ui.set_tab_title(buf, "jmux pr view", { ui.key_hint("⇥", "expand"), ui.key_hint("q", "close") })
-  on_close.add(restore)
-  on_close.add(watch.clear)
-  vim.api.nvim_create_autocmd("WinClosed", {
-    pattern = tostring(win),
-    once = true,
-    callback = function()
-      on_close.run()
-      pv_tab = nil
-      pv_refresh = nil
-    end,
-  })
+  conv.on_close.add(restore)
+  conv.on_close.add(watch.clear)
+  conv.on_close.add(function()
+    pv_tab = nil
+    pv_refresh = nil
+  end)
   vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = buf, nowait = true, desc = "close" })
 
   -- Draw the first frame synchronously and force a redraw so the loader shows the
@@ -616,8 +532,8 @@ function M.view(opts)
 
             -- the side panes re-fill from their models on every render, and
             -- the reviewers rows map for R (entry i on 0-indexed row i - 1).
-            fill_pane(panes.reviewers, model.reviewers)
-            fill_pane(panes.checks, model.checks)
+            panes.reviewers.fill(model.reviewers)
+            panes.checks.fill(model.checks)
             reviewer_by_row, check_by_row = {}, {}
             for i, e in ipairs(model.reviewers and model.reviewers.entries or {}) do
               reviewer_by_row[i - 1] = e
