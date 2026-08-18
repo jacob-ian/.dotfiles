@@ -21,7 +21,7 @@ local pd_mode
 local title = ui.title_slot()
 
 -- Handlers KEYS closes over, defined with their machinery below.
-local refresh_threads, open_thread_under_cursor, goto_thread
+local refresh_threads, open_thread_under_cursor, goto_thread, goto_base
 
 -- refresh re-runs the mode's data fetch and rebuilds the file list — in agent
 -- mode that also picks up files created since the view opened.
@@ -93,6 +93,14 @@ local KEYS = ui.keyspec {
   },
   { mode = "n", lhs = "<C-r>", rhs = refresh, hint = "refresh", panel = true },
   { mode = "n", lhs = "q", rhs = "<cmd>DiffviewClose<cr>", hint = "close", panel = true },
+  {
+    mode = "n",
+    lhs = "<CR>",
+    rhs = function()
+      goto_base()
+    end,
+    desc = "open file in base tab",
+  },
 }
 
 -- diff_view returns the active diffview's { entry, layout }, or nil + reason when
@@ -152,6 +160,28 @@ local function target()
   end
 
   return { path = path, side = side, start_line = sline, line = eline }
+end
+
+-- goto_base opens the diffed file in the base tab at the cursor line. LEFT
+-- lines belong to the old revision, so their numbers don't map to the
+-- working tree — declined, like the review panel's jump.
+goto_base = function()
+  local t, err = target()
+  if not t then
+    return vim.notify(err or "no file under cursor", vim.log.levels.WARN)
+  end
+  if t.side ~= "RIGHT" then
+    return vim.notify("base-side line — open from the right pane", vim.log.levels.WARN)
+  end
+  local base = vim.api.nvim_list_tabpages()[1]
+  if base == vim.api.nvim_get_current_tabpage() then
+    return vim.notify("no base tab to open in", vim.log.levels.WARN)
+  end
+  local root = util.sh { "git", "rev-parse", "--show-toplevel" }
+  vim.api.nvim_set_current_tabpage(base)
+  vim.cmd("edit " .. vim.fn.fnameescape(root and (root .. "/" .. t.path) or t.path))
+  pcall(vim.api.nvim_win_set_cursor, 0, { t.line, 0 })
+  vim.cmd "normal! zz"
 end
 
 -- cursor_diff resolves the current diff window to (path, side, buf, line), or nil
