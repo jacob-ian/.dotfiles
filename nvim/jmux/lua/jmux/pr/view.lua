@@ -301,6 +301,32 @@ local function edit_description(pr, body, on_done)
   end, body ~= "" and body or nil, nil, " :w save · :q close ")
 end
 
+-- edit_title prompts with the current title prefilled and saves via
+-- `gh pr edit`; cancel or an unchanged/empty title is a no-op.
+local function edit_title(pr, current, on_done)
+  vim.ui.input({ prompt = "title> ", default = current }, function(text)
+    if text == nil or vim.trim(text) == "" or text == current then
+      return
+    end
+    ui.act("saving title…", function(done)
+      vim.system(
+        { "gh", "pr", "edit", tostring(pr.number), "--repo", pr.slug, "--title", text },
+        { text = true },
+        function(res)
+          vim.schedule(function()
+            done(res.code == 0 or nil, vim.trim(res.stderr or ""))
+          end)
+        end
+      )
+    end, function()
+      vim.notify(("updated #%d title"):format(pr.number))
+      if on_done then
+        on_done()
+      end
+    end)
+  end)
+end
+
 -- view renders the full PR conversation — body, comments, reviews, inline review
 -- threads, and checks — into a markdown tab. Fetched async (a "Loading…" stub
 -- shows first) so opening is instant; q closes it.
@@ -772,6 +798,21 @@ function M.view(opts)
             return reviewer_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
           end
 
+          -- edit_target says what `i` edits at the cursor: the title on the
+          -- two header rows, the description anywhere in the pr block.
+          local function edit_target()
+            local row = cursor_row()
+            if not row then
+              return nil
+            end
+            if row <= 1 then
+              return "title"
+            end
+            if id_by_row[row] == "pr" or (subject_by_row[row] ~= nil and subject_by_row[row] == model.subjects.pr) then
+              return "description"
+            end
+          end
+
           -- R on a reviewer's line re-requests that reviewer directly;
           -- anywhere else it opens the request picker. Awaiting rows no-op —
           -- GitHub already lists them as requested.
@@ -1002,17 +1043,27 @@ function M.view(opts)
               end,
             },
             {
-              lhs = "E",
+              lhs = "i",
               rhs = function()
-                edit_description(pr, nilable(prnode and prnode.body) or "", function()
-                  fetch_and_render(ui.spin "refreshing…")
-                end)
+                local what = edit_target()
+                if what == "title" then
+                  edit_title(pr, nilable(prnode and prnode.title) or "", function()
+                    fetch_and_render(ui.spin "refreshing…")
+                  end)
+                elseif what == "description" then
+                  edit_description(pr, nilable(prnode and prnode.body) or "", function()
+                    fetch_and_render(ui.spin "refreshing…")
+                  end)
+                end
               end,
-              hint = "edit",
               when = function()
                 return mine
               end,
-              desc = "edit description",
+              ctx = function()
+                local what = edit_target()
+                return what and ("edit " .. what)
+              end,
+              desc = "edit title/description under cursor",
             },
             {
               lhs = "<Tab>",
