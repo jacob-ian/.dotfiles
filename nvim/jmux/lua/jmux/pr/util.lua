@@ -60,28 +60,32 @@ function M.span_str(cm)
   return (s and s ~= cm.line) and string.format("%d-%d", s, cm.line) or tostring(cm.line)
 end
 
--- The local UTC offset, computed once at load. os.time reads a broken-down table
--- as local time, so converting a UTC timestamp needs this constant added back.
--- Taken from "now", so a timestamp in the opposite DST period can be off by up to
--- an hour — fine for the coarse relative ages we render.
-local utc_offset = os.difftime(os.time(os.date "*t"), os.time(os.date "!*t"))
+-- days_from_civil counts days from 1970-01-01 to a proleptic Gregorian date
+-- (Howard Hinnant's algorithm). Shifts the year to start in March so leap days
+-- fall at the end and the month-length table collapses to a linear formula.
+local function days_from_civil(y, m, d)
+  if m <= 2 then
+    y = y - 1
+  end
+  local era = math.floor(y / 400)
+  local yoe = y - era * 400
+  local mp = (m + 9) % 12
+  local doy = math.floor((153 * mp + 2) / 5) + d - 1
+  local doe = yoe * 365 + math.floor(yoe / 4) - math.floor(yoe / 100) + doy
+  return era * 146097 + doe - 719468
+end
 
--- iso_epoch converts an ISO-8601 UTC timestamp to a Unix epoch. os.time reads a
--- broken-down table as local time, so feeding it the UTC fields yields
--- epoch - offset; adding the offset back recovers the true UTC epoch.
+-- iso_epoch converts an ISO-8601 UTC timestamp to a Unix epoch. Lua has no
+-- timegm and os.time reads a broken-down table as local time, with DST applied
+-- per-date, so going through it leaks the local zone into the result. Pure
+-- civil-date arithmetic sidesteps the zone entirely.
 local function iso_epoch(iso)
   local y, mo, d, h, mi, s = tostring(iso):match "(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)"
   if not y then
     return nil
   end
-  return os.time {
-    year = tonumber(y),
-    month = tonumber(mo),
-    day = tonumber(d),
-    hour = tonumber(h),
-    min = tonumber(mi),
-    sec = tonumber(s),
-  } + utc_offset
+  local days = days_from_civil(tonumber(y), tonumber(mo), tonumber(d))
+  return days * 86400 + tonumber(h) * 3600 + tonumber(mi) * 60 + tonumber(s)
 end
 
 -- short_age renders a positive seconds delta as "now/5m/3h/2d/4mo".
