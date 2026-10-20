@@ -61,6 +61,15 @@ func AddWorktree(bareRoot string) error {
 				_ = gitctl.FastForward(mainWt, base)
 			}
 		}
+		// A typed name can be a remote branch the bare repo hasn't fetched yet (a
+		// bot's PR branch, a teammate's push): check out that branch rather than
+		// shadowing it with a fresh one off the default.
+		if createBranch {
+			phase <- "fetching " + branchName + "…"
+			if gitctl.FetchBranch(bareRoot, branchName) == nil {
+				createBranch = false
+			}
+		}
 		if err := gitctl.WorktreeAdd(bareRoot, worktreePath, branchName, base, createBranch); err != nil {
 			flag := ""
 			if createBranch {
