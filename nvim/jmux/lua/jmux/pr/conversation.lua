@@ -16,7 +16,9 @@ local M = {}
 -- The conversation's selections in the main query. PR_FIELDS covers the node
 -- scalars and description; the three connection field lists are also what
 -- view's pagination re-requests per page.
-M.PR_FIELDS = ("id title number state createdAt author{login} body url %s"):format(reactions.FIELDS)
+M.PR_FIELDS = ("id title number state createdAt author{login} body url changedFiles additions deletions %s"):format(
+  reactions.FIELDS
+)
 M.COMMENT_FIELDS = ("id author{login} body createdAt %s"):format(reactions.FIELDS)
 M.REVIEW_FIELDS = ("id author{login} body state createdAt %s"):format(reactions.FIELDS)
 M.THREAD_FIELDS = ("id isResolved isOutdated path line comments(first:100){ nodes{ id author{login} body createdAt pullRequestReview{id} %s } }"):format(
@@ -46,6 +48,16 @@ function M.model(pr)
     local prefix = status .. " · "
     status = ("%s%s %s"):format(prefix, chip.icon, chip.text)
     header_marks[#header_marks + 1] = { row = 1, col = #prefix, col_end = #prefix + #chip.icon, hl = chip.hl }
+  end
+  if type(pr.changedFiles) == "number" then
+    local files = ("%d file%s"):format(pr.changedFiles, pr.changedFiles == 1 and "" or "s")
+    local added = ("+%d"):format(pr.additions or 0)
+    local removed = ("-%d"):format(pr.deletions or 0)
+    local prefix = ("%s · %s "):format(status, files)
+    header_marks[#header_marks + 1] = { row = 1, col = #prefix, col_end = #prefix + #added, hl = "Added" }
+    header_marks[#header_marks + 1] =
+      { row = 1, col = #prefix + #added + 1, col_end = #prefix + #added + 1 + #removed, hl = "Removed" }
+    status = ("%s%s %s"):format(prefix, added, removed)
   end
   local header = {
     ("# %s  #%s"):format(pr.title or "", tostring(pr.number or "")),
