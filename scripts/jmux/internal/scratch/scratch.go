@@ -1,5 +1,5 @@
 // Package scratch implements `jmux scratch`: sessions are worktrees named
-// YYYY-MM-DD[-name] under repo.ScratchRoot, harvested into the default branch
+// YYYY-MM-DD[-name] under Config.ScratchRoot, harvested into the default branch
 // by worktree.Remove.
 package scratch
 
@@ -24,8 +24,8 @@ import (
 var datePrefix = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(-|$)`)
 
 // Run handles `jmux scratch` (the picker) and `jmux scratch new [name]`.
-func Run(args []string) error {
-	bare, err := bareRoot()
+func Run(cfg repo.Config, args []string) error {
+	bare, err := bareRoot(cfg)
 	if err != nil {
 		return err
 	}
@@ -42,7 +42,7 @@ func Run(args []string) error {
 				return nil
 			}
 		}
-		return create(bare, query)
+		return create(cfg, query)
 	}
 	self := fzfutil.Self()
 	sel, err := fzfutil.Pick(rows(bare), fzfutil.Options{
@@ -61,24 +61,24 @@ func Run(args []string) error {
 	if err != nil || sel == "" {
 		return nil
 	}
-	return session.Open(fzfutil.RowPath(sel), session.OpenOptions{WithClaude: true})
+	path := fzfutil.RowPath(sel)
+	return session.Open(path, session.OpenOptions{WithClaude: true, Dir: cfg.WorkDir(path)})
 }
 
 // RunItems handles `jmux fzf scratch items`: the picker's reload rows.
-func RunItems() {
-	bare, err := bareRoot()
+func RunItems(cfg repo.Config) {
+	bare, err := bareRoot(cfg)
 	if err != nil {
 		return
 	}
 	fmt.Println(strings.Join(rows(bare), "\n"))
 }
 
-func bareRoot() (string, error) {
-	bare := os.ExpandEnv(repo.ScratchRoot)
-	if repo.FindBareRoot(bare) != bare {
-		return "", fmt.Errorf("no scratch repo at %s (bare-clone one there first)", repo.ScratchRoot)
+func bareRoot(cfg repo.Config) (string, error) {
+	if repo.FindBareRoot(cfg.ScratchRoot) != cfg.ScratchRoot {
+		return "", fmt.Errorf("no scratch repo at %s (bare-clone one there first)", cfg.ScratchRoot)
 	}
-	return bare, nil
+	return cfg.ScratchRoot, nil
 }
 
 // rows are newest first so today's work sits at the top.
@@ -93,7 +93,8 @@ func rows(bare string) []string {
 	return out
 }
 
-func create(bare, query string) error {
+func create(cfg repo.Config, query string) error {
+	bare := cfg.ScratchRoot
 	name := SessionName(query, time.Now().Format(time.DateOnly), func(n string) bool {
 		return repo.IsDir(filepath.Join(bare, n)) || gitctl.RefExists(bare, n)
 	})
@@ -106,7 +107,7 @@ func create(bare, query string) error {
 		if err := gitctl.WorktreeAdd(bare, path, name, def, true); err != nil {
 			return fmt.Errorf("git worktree add: %s", gitctl.CleanErr(err))
 		}
-		// The session works inside <name>/ (see repo.WorkDir) so its files are
+		// The session works inside <name>/ (see Config.WorkDir) so its files are
 		// already where history keeps them; harvest has nothing to move.
 		if err := os.MkdirAll(filepath.Join(path, name), 0o755); err != nil {
 			return err
@@ -116,7 +117,7 @@ func create(bare, query string) error {
 	}); err != nil {
 		return err
 	}
-	return session.Open(path, session.OpenOptions{WithClaude: true})
+	return session.Open(path, session.OpenOptions{WithClaude: true, Dir: cfg.WorkDir(path)})
 }
 
 // SessionName: empty → today; a query with its own date → as is; otherwise

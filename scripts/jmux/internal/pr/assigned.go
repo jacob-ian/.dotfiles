@@ -15,7 +15,7 @@ import (
 // your review or are assigned to you. Unlike `jmux pr <dir>` it isn't tied to
 // one repo — it searches every repo, then maps the chosen PR back to a local
 // clone to check out as usual.
-func RunAssigned() error {
+func RunAssigned(cfg repo.Config) error {
 	if !ghctl.Available() {
 		return errNoGH
 	}
@@ -30,12 +30,12 @@ func RunAssigned() error {
 	if !ok {
 		return nil
 	}
-	return reviewSelection(slug, num, sel)
+	return reviewSelection(cfg, slug, num, sel)
 }
 
 // reviewSelection maps a picked cross-repo PR to its local clone and reviews it.
-func reviewSelection(slug string, num int, sel string) error {
-	bareRoot := findLocalRepo(slug)
+func reviewSelection(cfg repo.Config, slug string, num int, sel string) error {
+	bareRoot := findLocalRepo(cfg, slug)
 	if bareRoot == "" {
 		return fmt.Errorf("no local clone of %s", slug)
 	}
@@ -48,8 +48,8 @@ func reviewSelection(slug string, num int, sel string) error {
 
 // findLocalRepo returns the bare repo whose origin remote is nameWithOwner, or
 // "" if no local clone matches.
-func findLocalRepo(nameWithOwner string) string {
-	for _, bare := range repo.BareRepos() {
+func findLocalRepo(cfg repo.Config, nameWithOwner string) string {
+	for _, bare := range cfg.BareRepos() {
 		if strings.EqualFold(gitctl.RepoSlug(bare), nameWithOwner) {
 			return bare
 		}

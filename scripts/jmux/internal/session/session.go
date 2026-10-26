@@ -50,6 +50,10 @@ type OpenOptions struct {
 	InstallCmd string
 	// EditorCmd overrides the editor-window command; empty means plain "nvim".
 	EditorCmd string
+	// Dir is where the windows start when it should differ from dir (a scratch
+	// session's dated directory); the session keeps dir's name and stamp so
+	// pickers and remove still see the worktree.
+	Dir string
 }
 
 // Open ensures a tmux session exists for dir and switches/attaches to it.
@@ -60,9 +64,10 @@ func Open(dir string, opts OpenOptions) error {
 		if editorCmd == "" {
 			editorCmd = "nvim"
 		}
-		// Windows start in the work dir; the session keeps dir's name and stamp
-		// so pickers and remove still see the worktree.
-		cwd := repo.WorkDir(dir)
+		cwd := opts.Dir
+		if cwd == "" {
+			cwd = dir
+		}
 		if err := tmuxctl.NewSession(name, cwd, nvimctl.WindowName, editorCmd); err != nil {
 			return fmt.Errorf("create session %q: %w", name, err)
 		}

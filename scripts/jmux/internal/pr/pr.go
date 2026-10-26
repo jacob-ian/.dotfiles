@@ -56,11 +56,11 @@ var errNoBareRepos = errors.New("no bare repos found")
 // RunRepo handles `jmux pr <dir>`: list one repo's open PRs and review the
 // choice. dir picks the repo ("" or "." = current); the global queue is
 // RunAssigned.
-func RunRepo(dir string) error {
+func RunRepo(cfg repo.Config, dir string) error {
 	if !ghctl.Available() {
 		return errNoGH
 	}
-	bareRoot, slug, err := resolveRepoSlug(dir)
+	bareRoot, slug, err := resolveRepoSlug(cfg, dir)
 	if errors.Is(err, errNoBareRepos) {
 		notify.Info("No bare repos found")
 		return nil
@@ -90,11 +90,11 @@ func RunRepo(dir string) error {
 }
 
 // RunNumber handles `jmux pr <num>`: review the PR directly, skipping the picker.
-func RunNumber(num int) error {
+func RunNumber(cfg repo.Config, num int) error {
 	if !ghctl.Available() {
 		return errNoGH
 	}
-	bareRoot, slug, err := resolveRepoSlug("")
+	bareRoot, slug, err := resolveRepoSlug(cfg, "")
 	if errors.Is(err, errNoBareRepos) {
 		notify.Info("No bare repos found")
 		return nil
@@ -212,8 +212,8 @@ func checkoutWorktree(bareRoot string, p ghctl.PR, phase chan<- string) (string,
 // resolveRepoSlug resolves the bare repo containing dir (cwd when "") — or one
 // the user picks — plus its origin "owner/repo" slug. A cancelled picker
 // returns empty results with a nil error.
-func resolveRepoSlug(dir string) (bareRoot, slug string, err error) {
-	bareRoot, err = resolveBareRoot(dir)
+func resolveRepoSlug(cfg repo.Config, dir string) (bareRoot, slug string, err error) {
+	bareRoot, err = resolveBareRoot(cfg, dir)
 	if err != nil || bareRoot == "" {
 		return "", "", err
 	}
@@ -225,7 +225,7 @@ func resolveRepoSlug(dir string) (bareRoot, slug string, err error) {
 
 // resolveBareRoot returns the bare repo containing start (cwd when start is ""),
 // or one the user picks. A cancelled picker returns "" with a nil error.
-func resolveBareRoot(start string) (string, error) {
+func resolveBareRoot(cfg repo.Config, start string) (string, error) {
 	if start == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -237,7 +237,7 @@ func resolveBareRoot(start string) (string, error) {
 		return bareRoot, nil
 	}
 
-	repos := repo.BareRepos()
+	repos := cfg.BareRepos()
 	if len(repos) == 0 {
 		return "", errNoBareRepos
 	}

@@ -2,7 +2,6 @@ package worktree
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,54 +9,10 @@ import (
 	"strings"
 	"syscall"
 
-	"jmux/internal/fzfutil"
 	"jmux/internal/gitctl"
-	"jmux/internal/notify"
 	"jmux/internal/repo"
 	"jmux/internal/session"
 )
-
-// RunRemove handles `jmux worktree remove`.
-//   - With --path P: skip fzf and target P directly.
-//   - With --quiet:  suppress the success message (failures still propagate).
-//   - Without flags: open an fzf picker rooted at the bare repo of cwd.
-func RunRemove(args []string) error {
-	fs := flag.NewFlagSet("worktree remove", flag.ExitOnError)
-	pathArg := fs.String("path", "", "Worktree path to remove (skips fzf)")
-	quiet := fs.Bool("quiet", false, "Suppress tmux display-message status")
-	fs.Parse(args)
-
-	target := *pathArg
-	if target == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("reading cwd: %w", err)
-		}
-		bareRoot := gitctl.CommonDir(cwd)
-		if bareRoot == "" {
-			return errors.New("not in a bare repo worktree")
-		}
-		candidates := repo.BareRepoWorktrees(bareRoot, true)
-		if len(candidates) == 0 {
-			notify.Info("No removable worktrees")
-			return nil
-		}
-		sel, err := fzfutil.Pick(candidates, fzfutil.Options{Prompt: "remove worktree> "})
-		if err != nil || sel == "" {
-			return nil
-		}
-		target = repo.TrimSlash(sel)
-	}
-
-	msg, err := Remove(target)
-	if err != nil {
-		return err
-	}
-	if !*quiet {
-		notify.Info(msg)
-	}
-	return nil
-}
 
 // IsManagedWorktree reports whether path is a jmux-removable worktree: it lives
 // under a bare repo's worktrees admin and is not the default/main branch
@@ -87,7 +42,7 @@ func managedBareRoot(path string) string {
 // Remove takes a worktree out of git's view and kills its tmux session. It
 // refuses any path that isn't a removable worktree (see IsManagedWorktree),
 // so it never deletes a plain directory or the main/default checkout.
-func Remove(path string) (string, error) {
+func Remove(cfg repo.Config, path string) (string, error) {
 	bareRoot := managedBareRoot(path)
 	if bareRoot == "" {
 		return "", fmt.Errorf("refusing to remove '%s': not a removable worktree", filepath.Base(path))
@@ -95,7 +50,7 @@ func Remove(path string) (string, error) {
 
 	// Scratch worktrees are sessions, not discardable branches.
 	harvested := ""
-	if repo.IsScratch(path) {
+	if cfg.IsScratch(path) {
 		branch, err := harvest(path, bareRoot)
 		if err != nil {
 			return "", fmt.Errorf("harvesting '%s': %w", displayName(path, bareRoot), err)

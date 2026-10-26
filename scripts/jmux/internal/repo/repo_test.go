@@ -134,8 +134,7 @@ func TestDefaultBranchName(t *testing.T) {
 
 func TestWorkDir(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("HOME", root)
-	ScratchRoot = "$HOME/scratch"
+	cfg := Config{ScratchRoot: filepath.Join(root, "scratch")}
 	nested := filepath.Join(root, "scratch", "2026-10-26-foo", "2026-10-26-foo")
 	bare := filepath.Join(root, "scratch", "2026-10-26-bare")
 	other := filepath.Join(root, "euc", "repo", "repo")
@@ -151,7 +150,7 @@ func TestWorkDir(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			if got := WorkDir(tt.dir); got != tt.want {
+			if got := cfg.WorkDir(tt.dir); got != tt.want {
 				t.Errorf("WorkDir(%q) = %q, want %q", tt.dir, got, tt.want)
 			}
 		})
@@ -160,8 +159,7 @@ func TestWorkDir(t *testing.T) {
 
 func TestIsScratch(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("HOME", root)
-	ScratchRoot = "$HOME/scratch"
+	cfg := Config{ScratchRoot: filepath.Join(root, "scratch")}
 	if err := os.MkdirAll(filepath.Join(root, "scratch", "2026-10-26"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +178,7 @@ func TestIsScratch(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			if got := IsScratch(tt.path); got != tt.want {
+			if got := cfg.IsScratch(tt.path); got != tt.want {
 				t.Errorf("IsScratch(%q) = %v, want %v", tt.path, got, tt.want)
 			}
 		})

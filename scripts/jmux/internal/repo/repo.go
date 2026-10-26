@@ -7,26 +7,36 @@ import (
 	"sync"
 )
 
-// ScanRoots are the parent directories under which repos and worktrees live.
-var ScanRoots = []string{"$HOME/dev", "$HOME/euc", "$HOME/net"}
+// Config is where jmux looks for repos. Paths are absolute; roots that don't
+// exist on a machine are skipped, so one Default serves every machine.
+type Config struct {
+	// ScanRoots are the parent directories under which repos and worktrees live.
+	ScanRoots []string
+	// AdditionalDirs are non-repo directories included in the default picker.
+	AdditionalDirs []string
+	// ScratchRoot is the bare repo of dated scratch sessions (see package
+	// scratch). It sits outside the scan roots so it works without them.
+	ScratchRoot string
+}
 
-// AdditionalDirs are non-repo directories included in the default picker.
-var AdditionalDirs = []string{"$HOME/.config", "$HOME/.claude"}
+func Default() Config {
+	return Config{
+		ScanRoots:      ExpandPaths([]string{"$HOME/dev", "$HOME/euc", "$HOME/net"}),
+		AdditionalDirs: ExpandPaths([]string{"$HOME/.config", "$HOME/.claude"}),
+		ScratchRoot:    os.ExpandEnv("$HOME/scratch"),
+	}
+}
 
-// ScratchRoot is the bare repo of dated scratch sessions (see package scratch).
-// It sits outside the scan roots so it works on machines without them.
-var ScratchRoot = "$HOME/scratch"
-
-func IsScratch(path string) bool {
-	root := Resolve(os.ExpandEnv(ScratchRoot))
+func (c Config) IsScratch(path string) bool {
+	root := Resolve(c.ScratchRoot)
 	p := Resolve(path)
 	return p == root || strings.HasPrefix(p, root+string(filepath.Separator))
 }
 
 // Marker is the picker prefix for scratch rows; other rows get the same width
 // so paths stay aligned.
-func Marker(path string) string {
-	if IsScratch(path) {
+func (c Config) Marker(path string) string {
+	if c.IsScratch(path) {
 		return "✎ "
 	}
 	return "  "
@@ -35,13 +45,46 @@ func Marker(path string) string {
 // WorkDir is where a session's windows start: a scratch worktree's dated
 // directory (worktree/<name>, the session's own files) when it exists,
 // otherwise dir itself.
-func WorkDir(dir string) string {
-	if IsScratch(dir) {
+func (c Config) WorkDir(dir string) string {
+	if c.IsScratch(dir) {
 		if nested := filepath.Join(dir, filepath.Base(dir)); IsDir(nested) {
 			return nested
 		}
 	}
 	return dir
+}
+
+// BareRepos returns the bare-repo roots found directly under the scan roots.
+func (c Config) BareRepos() []string {
+	return ScanReposParallel(c.ScanRoots, func(dir string) []string {
+		if isBareRepo(dir) {
+			return []string{dir}
+		}
+		return nil
+	})
+}
+
+// FeatureWorktrees lists every non-default worktree across the scan roots and
+// the scratch repo.
+func (c Config) FeatureWorktrees() []string {
+	out := ScanReposParallel(c.ScanRoots, FeatureWorktrees)
+	return append(out, FeatureWorktrees(c.ScratchRoot)...)
+}
+
+// ProjectDirs lists everything the default picker offers: every worktree under
+// the scan roots, the additional dirs and roots themselves, and the scratch
+// repo's worktrees.
+func (c Config) ProjectDirs() []string {
+	dirs := ScanReposParallel(c.ScanRoots, ProjectDirs)
+	for _, d := range append(append([]string{}, c.AdditionalDirs...), c.ScanRoots...) {
+		if IsDir(d) {
+			dirs = append(dirs, d)
+		}
+	}
+	if IsDir(c.ScratchRoot) {
+		dirs = append(dirs, ProjectDirs(c.ScratchRoot)...)
+	}
+	return dirs
 }
 
 // DefaultBranchName reads bare's HEAD file directly (this package stays
@@ -155,17 +198,6 @@ func BareRepoWorktrees(bare string, skipDefault bool) []string {
 		out = append(out, a.gitdir)
 	}
 	return out
-}
-
-// BareRepos returns the bare-repo roots found directly under the scan roots.
-func BareRepos() []string {
-	roots := ExpandPaths(ScanRoots)
-	return ScanReposParallel(roots, func(dir string) []string {
-		if isBareRepo(dir) {
-			return []string{dir}
-		}
-		return nil
-	})
 }
 
 func ProjectDirs(dir string) []string {

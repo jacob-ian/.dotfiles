@@ -20,14 +20,14 @@ import (
 
 // Run handles `jmux repo clone <url>`: pick a scan root, clone into it, and
 // open a session on the default-branch worktree.
-func Run(url string) error {
+func Run(cfg repo.Config, url string) error {
 	name := repoName(url)
 	if name == "" {
 		return fmt.Errorf("cannot derive a repo name from %q", url)
 	}
 
 	var roots []string
-	for _, r := range repo.ExpandPaths(repo.ScanRoots) {
+	for _, r := range cfg.ScanRoots {
 		if repo.IsDir(r) {
 			roots = append(roots, r)
 		}

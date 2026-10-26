@@ -56,10 +56,6 @@ func scratchRepo(t *testing.T, session string) (bare, wt, history string, git fu
 	git(bare, "worktree", "add", "-q", "history", "history")
 	git(bare, "worktree", "add", "-q", "-b", session, session, "history")
 
-	old := repo.ScratchRoot
-	repo.ScratchRoot = bare
-	t.Cleanup(func() { repo.ScratchRoot = old })
-
 	return bare, filepath.Join(bare, session), filepath.Join(bare, "history"), git
 }
 
@@ -82,7 +78,7 @@ func TestRemoveHarvestsScratch(t *testing.T) {
 		write(t, filepath.Join(wt, "sub", "b.md"), "b\n")
 		write(t, filepath.Join(wt, "old", "x.md"), "two\n")
 
-		msg, err := worktree.Remove(wt)
+		msg, err := worktree.Remove(repo.Config{ScratchRoot: bare}, wt)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -118,7 +114,7 @@ func TestRemoveHarvestsScratch(t *testing.T) {
 		bare, wt, history, git := scratchRepo(t, session)
 		before := git(history, "rev-parse", "HEAD")
 
-		if _, err := worktree.Remove(wt); err != nil {
+		if _, err := worktree.Remove(repo.Config{ScratchRoot: bare}, wt); err != nil {
 			t.Fatal(err)
 		}
 		if got := git(history, "rev-parse", "HEAD"); got != before {
@@ -130,12 +126,12 @@ func TestRemoveHarvestsScratch(t *testing.T) {
 	})
 
 	t.Run("conflict keeps the worktree and a clean history", func(t *testing.T) {
-		_, wt, history, git := scratchRepo(t, session)
+		bare, wt, history, git := scratchRepo(t, session)
 		write(t, filepath.Join(wt, "old", "x.md"), "mine\n")
 		write(t, filepath.Join(history, "old", "x.md"), "theirs\n")
 		git(history, "commit", "-q", "-am", "diverge")
 
-		_, err := worktree.Remove(wt)
+		_, err := worktree.Remove(repo.Config{ScratchRoot: bare}, wt)
 		if err == nil || !strings.Contains(err.Error(), "merging into history") {
 			t.Fatalf("err = %v, want merge failure", err)
 		}

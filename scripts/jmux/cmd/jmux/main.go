@@ -9,11 +9,11 @@ import (
 	"jmux/internal/clone"
 	"jmux/internal/notify"
 	"jmux/internal/pr"
+	"jmux/internal/repo"
 	"jmux/internal/scratch"
 	"jmux/internal/session"
 	"jmux/internal/statusbox"
 	"jmux/internal/workspace"
-	"jmux/internal/worktree"
 )
 
 // main reports command failures (the sole notify.Error point) and maps them to
@@ -31,22 +31,21 @@ func main() {
 }
 
 func run(args []string) error {
+	cfg := repo.Default()
 	if len(args) == 0 {
-		return session.RunPicker()
+		return session.RunPicker(cfg)
 	}
 	switch args[0] {
 	case "workspace":
-		return runWorkspace(args[1:])
-	case "worktree":
-		return runWorktree(args[1:])
+		return runWorkspace(cfg, args[1:])
 	case "pr":
-		return runPR(args[1:])
+		return runPR(cfg, args[1:])
 	case "repo":
-		return runRepo(args[1:])
+		return runRepo(cfg, args[1:])
 	case "scratch":
-		return scratch.Run(args[1:])
+		return scratch.Run(cfg, args[1:])
 	case "fzf":
-		return runFzf(args[1:])
+		return runFzf(cfg, args[1:])
 	case "claude":
 		return runClaude(args[1:])
 	case "statusline":
@@ -59,35 +58,21 @@ func run(args []string) error {
 	}
 }
 
-func runWorkspace(args []string) error {
+func runWorkspace(cfg repo.Config, args []string) error {
 	if len(args) == 0 {
-		return workspace.RunPicker()
+		return workspace.RunPicker(cfg)
 	}
 	switch args[0] {
 	case "add":
-		return workspace.RunAdd()
+		return workspace.RunAdd(cfg)
 	case "remove":
-		return workspace.RunRemove(args[1:])
+		return workspace.RunRemove(cfg, args[1:])
 	default:
 		return badUsage("jmux workspace: unknown subcommand %q", args[0])
 	}
 }
 
-func runWorktree(args []string) error {
-	if len(args) == 0 {
-		return worktree.RunPicker()
-	}
-	switch args[0] {
-	case "add":
-		return worktree.RunAdd()
-	case "remove":
-		return worktree.RunRemove(args[1:])
-	default:
-		return badUsage("jmux worktree: unknown subcommand %q", args[0])
-	}
-}
-
-func runRepo(args []string) error {
+func runRepo(cfg repo.Config, args []string) error {
 	if len(args) == 0 {
 		return badUsage("jmux repo: expected clone <url>")
 	}
@@ -96,20 +81,20 @@ func runRepo(args []string) error {
 		if len(args) != 2 {
 			return badUsage("jmux repo clone: expected <url>")
 		}
-		return clone.Run(args[1])
+		return clone.Run(cfg, args[1])
 	default:
 		return badUsage("jmux repo: unknown subcommand %q", args[0])
 	}
 }
 
-func runPR(args []string) error {
+func runPR(cfg repo.Config, args []string) error {
 	if len(args) == 0 {
-		return pr.RunAssigned()
+		return pr.RunAssigned(cfg)
 	}
 	if num, ok := pr.ParseNumber(args[0]); ok {
-		return pr.RunNumber(num)
+		return pr.RunNumber(cfg, num)
 	}
-	return pr.RunRepo(args[0])
+	return pr.RunRepo(cfg, args[0])
 }
 
 // runClaude handles `jmux claude`: hook/focus are jmux's own subcommands;
@@ -147,20 +132,17 @@ func runStatusline(args []string) error {
 // runFzf dispatches `jmux fzf <picker> items|preview` — plumbing invoked by
 // fzf bindings, not humans. Void by design: stdout belongs to fzf, so these
 // report locally rather than propagate.
-func runFzf(args []string) error {
+func runFzf(cfg repo.Config, args []string) error {
 	if len(args) >= 2 {
 		switch args[0] + " " + args[1] {
 		case "workspace items":
-			workspace.RunItems()
+			workspace.RunItems(cfg)
 			return nil
 		case "workspace preview":
 			workspace.RunPreview(args[2:])
 			return nil
-		case "worktree items":
-			worktree.RunItems()
-			return nil
 		case "scratch items":
-			scratch.RunItems()
+			scratch.RunItems(cfg)
 			return nil
 		case "pr items":
 			pr.RunItems(args[2:])
@@ -190,10 +172,6 @@ func usage() {
   jmux workspace add            Pick a bare repo and create a worktree in it
   jmux workspace remove --path P [--quiet]
                                 Remove the workspace (never deletes a plain dir)
-  jmux worktree                 Open the worktrees picker
-  jmux worktree add             Create a worktree from a remote branch
-  jmux worktree remove [--path P] [--quiet]
-                                Remove a worktree
   jmux pr                       Review queue: check a PR out into a worktree
   jmux pr <dir>                 PRs for the repo at <dir> (. for current)
   jmux pr <num>                 Review PR <num> in the current repo

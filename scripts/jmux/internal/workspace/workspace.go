@@ -24,7 +24,7 @@ import (
 
 // workspaces returns the overview rows: feature worktrees plus the directories
 // of any open sessions, deduped by resolved path.
-func workspaces() []string {
+func workspaces(cfg repo.Config) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(p string) {
@@ -36,7 +36,7 @@ func workspaces() []string {
 		seen[key] = true
 		out = append(out, p)
 	}
-	for _, w := range worktree.AllFeatureWorktrees() {
+	for _, w := range cfg.FeatureWorktrees() {
 		add(w)
 	}
 	for _, d := range openSessionDirs() {
@@ -69,7 +69,7 @@ func openSessionDirs() []string {
 // has died are dropped (their source is gone but never fired a cleanup event),
 // and when several survive for one path each gets a "@window" label so
 // concurrent claude agents are tellable apart.
-func displayRows(dirs []string) []string {
+func displayRows(cfg repo.Config, dirs []string) []string {
 	tagged := tag.All()
 	panes := tmuxctl.PaneWindows()
 	rows := make([]string, len(dirs))
@@ -102,7 +102,7 @@ func displayRows(dirs []string) []string {
 			}
 			display = d + "  ·  " + strings.Join(parts, "  ·  ")
 		}
-		rows[i] = fzfutil.Row(repo.Marker(d)+display, d)
+		rows[i] = fzfutil.Row(cfg.Marker(d)+display, d)
 	}
 	return rows
 }
@@ -124,20 +124,20 @@ func windowIndex(b tag.Tag, panes map[string]string) int {
 // tab), falling back to the whole line for rows without one.
 // RunItems handles `jmux fzf workspace items`: print the overview rows for the
 // picker's reload bindings.
-func RunItems() {
-	fmt.Println(strings.Join(displayRows(workspaces()), "\n"))
+func RunItems(cfg repo.Config) {
+	fmt.Println(strings.Join(displayRows(cfg, workspaces(cfg)), "\n"))
 }
 
 // RunPicker handles `jmux workspace`: the fzf overview.
-func RunPicker() error {
-	dirs := workspaces()
+func RunPicker(cfg repo.Config) error {
+	dirs := workspaces(cfg)
 	if len(dirs) == 0 {
 		notify.Info("No workspaces found")
 		return nil
 	}
 
 	self := fzfutil.Self()
-	sel, err := fzfutil.Pick(displayRows(dirs), fzfutil.Options{
+	sel, err := fzfutil.Pick(displayRows(cfg, dirs), fzfutil.Options{
 		Prompt: "workspace> ",
 		Header: "ctrl-t: add worktree · ctrl-x: remove workspace · ctrl-/: toggle preview",
 		Bindings: []string{
@@ -154,13 +154,14 @@ func RunPicker() error {
 	if err != nil || sel == "" {
 		return nil
 	}
-	return session.Open(repo.TrimSlash(fzfutil.RowPath(sel)), session.OpenOptions{})
+	dir := repo.TrimSlash(fzfutil.RowPath(sel))
+	return session.Open(dir, session.OpenOptions{Dir: cfg.WorkDir(dir)})
 }
 
 // RunAdd handles `jmux workspace add`: pick a bare repo, then run the worktree
 // branch flow against it.
-func RunAdd() error {
-	repos := repo.BareRepos()
+func RunAdd(cfg repo.Config) error {
+	repos := cfg.BareRepos()
 	if len(repos) == 0 {
 		notify.Info("No bare repos found")
 		return nil
@@ -176,7 +177,7 @@ func RunAdd() error {
 // workspace is removed (worktree + session); any other workspace just has its
 // session closed — the directory is never deleted. --quiet suppresses the
 // success messages; failures still propagate.
-func RunRemove(args []string) error {
+func RunRemove(cfg repo.Config, args []string) error {
 	fs := flag.NewFlagSet("workspace remove", flag.ExitOnError)
 	pathArg := fs.String("path", "", "Workspace path to remove")
 	quiet := fs.Bool("quiet", false, "Suppress tmux display-message status")
@@ -188,7 +189,7 @@ func RunRemove(args []string) error {
 	}
 
 	if worktree.IsManagedWorktree(path) {
-		msg, err := worktree.Remove(path)
+		msg, err := worktree.Remove(cfg, path)
 		if err != nil {
 			return err
 		}
