@@ -115,6 +115,14 @@ func CopyEnvFiles(bareRoot, newPath string) {
 		dst := filepath.Join(newPath, e.Name())
 		copyFile(src, dst)
 	}
+	// Claude's per-checkout permissions are gitignored like env files, so a
+	// fresh worktree would re-prompt for everything without them.
+	local := filepath.Join(".claude", "settings.local.json")
+	if _, err := os.Stat(filepath.Join(mainWt, local)); err == nil {
+		if err := os.MkdirAll(filepath.Join(newPath, ".claude"), 0o755); err == nil {
+			copyFile(filepath.Join(mainWt, local), filepath.Join(newPath, local))
+		}
+	}
 }
 
 func copyFile(src, dst string) {
