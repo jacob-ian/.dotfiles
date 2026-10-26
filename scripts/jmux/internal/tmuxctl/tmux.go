@@ -175,6 +175,11 @@ func NewSession(name, cwd, windowName, cmd string) error {
 
 // NewWindow creates a new window in session `target`. If `detached` is true the
 // window is created without selecting it.
+// ShellQuote single-quotes s for use inside a tmux or fzf shell command.
+func ShellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 func NewWindow(target, name, cwd, cmd string, detached bool) error {
 	args := []string{"new-window"}
 	if detached {

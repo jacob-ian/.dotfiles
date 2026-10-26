@@ -50,6 +50,8 @@ type OpenOptions struct {
 	InstallCmd string
 	// EditorCmd overrides the editor-window command; empty means plain "nvim".
 	EditorCmd string
+	// Prompt, if non-empty, is claude's opening message in the claude window.
+	Prompt string
 	// Dir is where the windows start when it should differ from dir (a scratch
 	// session's dated directory); the session keeps dir's name and stamp so
 	// pickers and remove still see the worktree.
@@ -75,7 +77,11 @@ func Open(dir string, opts OpenOptions) error {
 		// back to directories without reverse-engineering the session name.
 		tmuxctl.SetSessionOption(name, "@jmux_dir", dir)
 		if opts.WithClaude {
-			if err := tmuxctl.NewWindow(name, "claude", cwd, "jmux claude", false); err != nil {
+			claudeCmd := "jmux claude"
+			if opts.Prompt != "" {
+				claudeCmd += " " + tmuxctl.ShellQuote(opts.Prompt)
+			}
+			if err := tmuxctl.NewWindow(name, "claude", cwd, claudeCmd, false); err != nil {
 				return fmt.Errorf("create claude window: %w", err)
 			}
 			tmuxctl.SelectWindow(name + ":1")

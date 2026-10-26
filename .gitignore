@@ -45,6 +45,8 @@
 !/scripts/*
 !/scripts/jmux/
 !/scripts/jmux/**/*
+!/jmux/
+!/jmux/*
 !/claude/
 !/claude/*
 !/skills/

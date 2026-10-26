@@ -1,0 +1,26 @@
+# Opening prompts offered when a workspace is created (prefix t, or Space then
+# ctrl-t). Templates see .Repo, .Language and .Skills. .Skills is the detected
+# language's list plus "common", filtered to skills installed in
+# ~/.claude/skills, so this file also works on a machine without the work
+# skills. Language comes from go.mod, package.json (react when it or a
+# workspace package depends on react or react-native), pyproject.toml /
+# requirements.txt, or *.tf.
+skills:
+  go: [euc-go, euc-go-microservice, euc-sql, euc-protobuf, euc-gotmpl, euc-dockerfile]
+  ts: [euc-ts, euc-ts-microservice, euc-graphql, euc-prisma, euc-json]
+  react: [euc-ts, euc-react-native, euc-graphql-frontend, euc-html, euc-json]
+  python: [euc-python, euc-dagster-dataops, euc-dagster-mlops, euc-mlops, euc-dbt-analytics]
+  terraform: [euc-terraform, euc-datadog, euc-ml-terraform, euc-kubernetes]
+  common: [euc-yaml, euc-github-actions, euc-markdown, euc-pr-guidelines]
+
+prompts:
+  implement: |
+    implement the ticket for this branch with /euc-linear-ticket-implementor.
+    {{- if .Skills}} use {{.Skills}} and other relevant skills.{{else}} use any relevant skills.{{end}}
+  plan: |
+    plan the ticket for this branch with /euc-linear-planner. don't implement anything yet.
+    {{- if .Skills}} consult {{.Skills}} when reading the codebase.{{end}}
+  tsd: |
+    write the technical spec for the ticket for this branch with /euc-linear-tsd-oneshot.
+  review: |
+    review this branch's PR with /euc-pr-review and summarise what needs attention.

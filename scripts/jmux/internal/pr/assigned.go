@@ -9,6 +9,7 @@ import (
 	"jmux/internal/ghctl"
 	"jmux/internal/gitctl"
 	"jmux/internal/repo"
+	"jmux/internal/tmuxctl"
 )
 
 // RunAssigned handles `jmux pr`: the cross-repo review queue of PRs that request
@@ -20,7 +21,7 @@ func RunAssigned(cfg repo.Config) error {
 		return errNoGH
 	}
 
-	self := shellQuote(fzfutil.Self())
+	self := tmuxctl.ShellQuote(fzfutil.Self())
 	sel, err := pickPR("prs> ", self+" fzf pr items", self+" fzf pr items --refresh")
 	if err != nil || sel == "" {
 		return nil

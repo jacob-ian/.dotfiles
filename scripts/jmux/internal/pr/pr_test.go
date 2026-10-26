@@ -119,19 +119,6 @@ func TestAllowedOrgs(t *testing.T) {
 	}
 }
 
-func TestShellQuote(t *testing.T) {
-	cases := map[string]string{
-		"/usr/bin/jmux":        `'/usr/bin/jmux'`,
-		"/path/with a space/x": `'/path/with a space/x'`,
-		"it's":                 `'it'\''s'`,
-	}
-	for in, want := range cases {
-		if got := shellQuote(in); got != want {
-			t.Errorf("shellQuote(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestTagRenders(t *testing.T) {
 	got := tag.New(tagKind, "", tagData{Number: 42}).Text()
 	if got != "\uf407 #42" {

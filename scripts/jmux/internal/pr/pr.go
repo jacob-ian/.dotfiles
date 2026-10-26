@@ -21,6 +21,7 @@ import (
 	"jmux/internal/session"
 	"jmux/internal/spinner"
 	"jmux/internal/tag"
+	"jmux/internal/tmuxctl"
 	"jmux/internal/worktree"
 )
 
@@ -72,7 +73,7 @@ func RunRepo(cfg repo.Config, dir string) error {
 		return nil
 	}
 
-	itemsCmd := fmt.Sprintf("%s fzf pr items --repo %s", shellQuote(fzfutil.Self()), shellQuote(slug))
+	itemsCmd := fmt.Sprintf("%s fzf pr items --repo %s", tmuxctl.ShellQuote(fzfutil.Self()), tmuxctl.ShellQuote(slug))
 	sel, err := pickPR("pr> ", itemsCmd, itemsCmd)
 	if err != nil || sel == "" {
 		return nil
@@ -125,7 +126,7 @@ func pickPR(prompt, itemsCmd, refreshCmd string) (string, error) {
 			fmt.Sprintf("load:change-prompt(%s)", prompt),
 			fmt.Sprintf("ctrl-r:change-prompt(refreshing… )+reload(%s)", refreshCmd),
 		},
-		Preview:       fmt.Sprintf("%s fzf pr preview {}", shellQuote(fzfutil.Self())),
+		Preview:       fmt.Sprintf("%s fzf pr preview {}", tmuxctl.ShellQuote(fzfutil.Self())),
 		PreviewWindow: "right:60%:wrap",
 		Delimiter:     "\t",
 		WithNth:       "1",
@@ -292,9 +293,4 @@ func ParseNumber(s string) (int, bool) {
 		return 0, false
 	}
 	return n, true
-}
-
-// shellQuote single-quotes s for the fzf preview command, which runs via sh.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

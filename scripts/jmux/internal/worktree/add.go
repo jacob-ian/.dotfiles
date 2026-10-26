@@ -9,6 +9,8 @@ import (
 
 	"jmux/internal/fzfutil"
 	"jmux/internal/gitctl"
+	"jmux/internal/notify"
+	"jmux/internal/prompt"
 	"jmux/internal/repo"
 	"jmux/internal/session"
 	"jmux/internal/spinner"
@@ -26,6 +28,15 @@ func AddWorktree(bareRoot string) error {
 	branchName, err := fzfutil.PickOrQuery(branches, fzfutil.Options{Prompt: "branch> "})
 	if err != nil || branchName == "" {
 		return nil
+	}
+
+	prompts, err := prompt.Load(prompt.Path())
+	if err != nil {
+		notify.Errorf("prompts.yaml: %v", err)
+	}
+	promptName := ""
+	if len(prompts.Prompts) > 0 {
+		promptName = prompt.Pick(prompts)
 	}
 
 	worktreePath := filepath.Join(bareRoot, branchName)
@@ -69,9 +80,17 @@ func AddWorktree(bareRoot string) error {
 		return err
 	}
 
+	opening := ""
+	if promptName != "" {
+		opening, err = prompts.Render(promptName, filepath.Base(bareRoot), worktreePath, prompt.SkillsDir())
+		if err != nil {
+			notify.Errorf("prompt %s: %v", promptName, err)
+		}
+	}
 	return session.Open(worktreePath, session.OpenOptions{
 		WithClaude: true,
 		InstallCmd: DetectInstallCmd(worktreePath),
+		Prompt:     opening,
 	})
 }
 
