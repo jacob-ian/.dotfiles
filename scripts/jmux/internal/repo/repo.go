@@ -13,6 +13,51 @@ var ScanRoots = []string{"$HOME/dev", "$HOME/euc", "$HOME/net"}
 // AdditionalDirs are non-repo directories included in the default picker.
 var AdditionalDirs = []string{"$HOME/.config", "$HOME/.claude"}
 
+// ScratchRoot is the bare repo of dated scratch sessions (see package scratch).
+// It sits outside the scan roots so it works on machines without them.
+var ScratchRoot = "$HOME/scratch"
+
+func IsScratch(path string) bool {
+	root := Resolve(os.ExpandEnv(ScratchRoot))
+	p := Resolve(path)
+	return p == root || strings.HasPrefix(p, root+string(filepath.Separator))
+}
+
+// Marker is the picker prefix for scratch rows; other rows get the same width
+// so paths stay aligned.
+func Marker(path string) string {
+	if IsScratch(path) {
+		return "✎ "
+	}
+	return "  "
+}
+
+// WorkDir is where a session's windows start: a scratch worktree's dated
+// directory (worktree/<name>, the session's own files) when it exists,
+// otherwise dir itself.
+func WorkDir(dir string) string {
+	if IsScratch(dir) {
+		if nested := filepath.Join(dir, filepath.Base(dir)); IsDir(nested) {
+			return nested
+		}
+	}
+	return dir
+}
+
+// DefaultBranchName reads bare's HEAD file directly (this package stays
+// git-free); "" when missing or detached.
+func DefaultBranchName(bare string) string {
+	data, err := os.ReadFile(filepath.Join(bare, "HEAD"))
+	if err != nil {
+		return ""
+	}
+	ref, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "ref: refs/heads/")
+	if !ok {
+		return ""
+	}
+	return ref
+}
+
 // isBareRepo reports whether dir is a bare repo root (HEAD + refs/, no .git).
 func isBareRepo(dir string) bool {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
@@ -94,12 +139,16 @@ func AdminDirFor(bare, worktreePath string) string {
 	return ""
 }
 
+// BareRepoWorktrees lists bare's working trees; skipDefault drops the checkout
+// named by HEAD, and main/master regardless (some bare HEADs point at a branch
+// that was never checked out, e.g. develop, with master as the real default).
 func BareRepoWorktrees(bare string, skipDefault bool) []string {
+	def := DefaultBranchName(bare)
 	var out []string
 	for _, a := range readAdmins(bare) {
 		if skipDefault {
 			name := filepath.Base(a.adminDir)
-			if name == "main" || name == "master" {
+			if name == def || name == "main" || name == "master" {
 				continue
 			}
 		}
@@ -183,14 +232,24 @@ func TrimSlash(s string) string {
 }
 
 // Resolve returns the absolute, symlink-resolved form of p, so paths that name
-// the same directory compare equal. Falls back to the best form it could make.
+// the same directory compare equal. A path that doesn't exist yet resolves its
+// nearest existing ancestor and keeps the rest, so a to-be-created worktree
+// compares equal to its eventual real path.
 func Resolve(p string) string {
 	abs, err := filepath.Abs(p)
 	if err != nil {
 		return p
 	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		return real
+	rest := ""
+	for cur := abs; ; {
+		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(real, rest)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return abs
+		}
+		rest = filepath.Join(filepath.Base(cur), rest)
+		cur = parent
 	}
-	return abs
 }

@@ -1,6 +1,8 @@
 package session
 
 import (
+	"os"
+
 	"jmux/internal/fzfutil"
 	"jmux/internal/repo"
 )
@@ -20,6 +22,9 @@ func allDirs() []string {
 			dirs = append(dirs, d)
 		}
 	}
+	if scratch := os.ExpandEnv(repo.ScratchRoot); repo.IsDir(scratch) {
+		dirs = append(dirs, repo.ProjectDirs(scratch)...)
+	}
 	return dirs
 }
 
@@ -30,9 +35,13 @@ func RunPicker() error {
 	if len(dirs) == 0 {
 		return nil
 	}
-	sel, err := fzfutil.Pick(dirs, fzfutil.Options{Prompt: "session> "})
+	rows := make([]string, len(dirs))
+	for i, d := range dirs {
+		rows[i] = fzfutil.Row(repo.Marker(d)+d, d)
+	}
+	sel, err := fzfutil.Pick(rows, fzfutil.Options{Prompt: "session> ", Delimiter: "\t", WithNth: "1"})
 	if err != nil || sel == "" {
 		return nil
 	}
-	return Open(repo.TrimSlash(sel), OpenOptions{})
+	return Open(repo.TrimSlash(fzfutil.RowPath(sel)), OpenOptions{})
 }

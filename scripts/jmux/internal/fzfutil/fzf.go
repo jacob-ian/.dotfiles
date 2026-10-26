@@ -18,7 +18,21 @@ type Options struct {
 	Delimiter string
 	WithNth   string
 	// ANSI enables parsing of ANSI colour codes in the displayed rows.
-	ANSI bool
+	ANSI  bool
+	Query string
+}
+
+// Row builds `display<TAB>path`: with Delimiter "\t" and WithNth "1" fzf shows
+// only display, while bindings still get the path as {2}.
+func Row(display, path string) string {
+	return display + "\t" + path
+}
+
+func RowPath(line string) string {
+	if i := strings.LastIndexByte(line, '\t'); i >= 0 {
+		return line[i+1:]
+	}
+	return line
 }
 
 // Self returns the path of the running jmux binary, for commands that
@@ -91,6 +105,9 @@ func buildArgs(opts Options, printQuery bool) []string {
 	}
 	if opts.ANSI {
 		args = append(args, "--ansi")
+	}
+	if opts.Query != "" {
+		args = append(args, "--query="+opts.Query)
 	}
 	if printQuery {
 		args = append(args, "--print-query")

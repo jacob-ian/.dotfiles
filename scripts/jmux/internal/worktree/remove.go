@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"jmux/internal/fzfutil"
@@ -92,6 +93,16 @@ func Remove(path string) (string, error) {
 		return "", fmt.Errorf("refusing to remove '%s': not a removable worktree", filepath.Base(path))
 	}
 
+	// Scratch worktrees are sessions, not discardable branches.
+	harvested := ""
+	if repo.IsScratch(path) {
+		branch, err := harvest(path, bareRoot)
+		if err != nil {
+			return "", fmt.Errorf("harvesting '%s': %w", displayName(path, bareRoot), err)
+		}
+		harvested = branch
+	}
+
 	if !fastRemove(path, bareRoot) {
 		// Fallback to a synchronous git worktree remove. We're already in the
 		// session being removed, so don't kill it first — git would lose track
@@ -104,7 +115,67 @@ func Remove(path string) (string, error) {
 	// Worktree is now gone from git's view; tear down its session.
 	session.Kill(session.Name(path))
 
+	if harvested != "" {
+		// Deletable only now that no worktree has it checked out; the squash
+		// commit holds its content, so a failure just leaves a stale ref.
+		_ = gitctl.DeleteBranch(bareRoot, harvested)
+		return fmt.Sprintf("Harvested '%s' into %s", harvested, gitctl.DefaultBranch(bareRoot)), nil
+	}
 	return fmt.Sprintf("Removed worktree '%s'", displayName(path, bareRoot)), nil
+}
+
+// harvest commits the scratch worktree and squashes it onto the default
+// checkout, returning the branch for deletion once the worktree is gone. The
+// session works inside <branch>/ already; any stray top-level files are moved
+// in so it still lands as one dated directory. Edits to older notes stay put.
+func harvest(path, bareRoot string) (string, error) {
+	branch := gitctl.CurrentBranch(path)
+	if branch == "" {
+		return "", errors.New("detached HEAD")
+	}
+	def := gitctl.DefaultBranch(bareRoot)
+	if def == "" {
+		return "", errors.New("no default branch")
+	}
+	defWt := filepath.Join(bareRoot, def)
+	if !repo.IsDir(defWt) {
+		return "", fmt.Errorf("no %s checkout to harvest into", def)
+	}
+
+	if err := gitctl.StageAll(path); err != nil {
+		return "", fmt.Errorf("staging: %s", gitctl.CleanErr(err))
+	}
+	added, err := gitctl.AddedSince(path, def)
+	if err != nil {
+		return "", fmt.Errorf("listing new files: %s", gitctl.CleanErr(err))
+	}
+	for _, f := range added {
+		if strings.Contains(f, "/") || strings.HasPrefix(f, ".") {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Join(path, branch), 0o755); err != nil {
+			return "", err
+		}
+		if err := gitctl.Move(path, f, filepath.Join(branch, f)); err != nil {
+			return "", fmt.Errorf("moving %s: %s", f, gitctl.CleanErr(err))
+		}
+	}
+	if gitctl.HasStaged(path) {
+		if err := gitctl.Commit(path, branch); err != nil {
+			return "", fmt.Errorf("committing: %s", gitctl.CleanErr(err))
+		}
+	}
+
+	if err := gitctl.MergeSquash(defWt, branch); err != nil {
+		_ = gitctl.ResetMerge(defWt)
+		return "", fmt.Errorf("merging into %s: %s", def, gitctl.CleanErr(err))
+	}
+	if gitctl.HasStaged(defWt) {
+		if err := gitctl.Commit(defWt, branch); err != nil {
+			return "", fmt.Errorf("committing to %s: %s", def, gitctl.CleanErr(err))
+		}
+	}
+	return branch, nil
 }
 
 // fastRemove takes the worktree out of git's view in O(1) and detaches the

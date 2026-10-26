@@ -93,4 +93,96 @@ func TestBareRepoWorktrees(t *testing.T) {
 			t.Errorf("got %v, want %v", got, want)
 		}
 	})
+
+	t.Run("skip default named by HEAD and main", func(t *testing.T) {
+		history := filepath.Join(bare, "history")
+		writeAdmin(t, bare, "history", filepath.Join(history, ".git"))
+		if err := os.WriteFile(filepath.Join(bare, "HEAD"), []byte("ref: refs/heads/history\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := BareRepoWorktrees(bare, true)
+		want := []string{feat}
+		if !slices.Equal(got, want) {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	})
+}
+
+func TestDefaultBranchName(t *testing.T) {
+	tests := map[string]struct {
+		head string
+		want string
+	}{
+		"branch":   {head: "ref: refs/heads/history\n", want: "history"},
+		"detached": {head: "0123456789abcdef0123456789abcdef01234567\n", want: ""},
+		"missing":  {want: ""},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			bare := t.TempDir()
+			if tt.head != "" {
+				if err := os.WriteFile(filepath.Join(bare, "HEAD"), []byte(tt.head), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := DefaultBranchName(bare); got != tt.want {
+				t.Errorf("DefaultBranchName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWorkDir(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	ScratchRoot = "$HOME/scratch"
+	nested := filepath.Join(root, "scratch", "2026-10-26-foo", "2026-10-26-foo")
+	bare := filepath.Join(root, "scratch", "2026-10-26-bare")
+	other := filepath.Join(root, "euc", "repo", "repo")
+	for _, d := range []string{nested, bare, other} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tests := map[string]struct{ dir, want string }{
+		"scratch with dated dir":    {dir: filepath.Dir(nested), want: nested},
+		"scratch without dated dir": {dir: bare, want: bare},
+		"non-scratch same shape":    {dir: filepath.Dir(other), want: filepath.Dir(other)},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := WorkDir(tt.dir); got != tt.want {
+				t.Errorf("WorkDir(%q) = %q, want %q", tt.dir, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsScratch(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	ScratchRoot = "$HOME/scratch"
+	if err := os.MkdirAll(filepath.Join(root, "scratch", "2026-10-26"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "scratchpad"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tests := map[string]struct {
+		path string
+		want bool
+	}{
+		"root":         {path: filepath.Join(root, "scratch"), want: true},
+		"worktree":     {path: filepath.Join(root, "scratch", "2026-10-26"), want: true},
+		"sibling":      {path: filepath.Join(root, "scratchpad"), want: false},
+		"nonexistent":  {path: filepath.Join(root, "scratch", "missing"), want: true},
+		"outside home": {path: t.TempDir(), want: false},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := IsScratch(tt.path); got != tt.want {
+				t.Errorf("IsScratch(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
 }

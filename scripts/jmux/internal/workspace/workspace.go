@@ -102,7 +102,7 @@ func displayRows(dirs []string) []string {
 			}
 			display = d + "  ·  " + strings.Join(parts, "  ·  ")
 		}
-		rows[i] = display + "\t" + d
+		rows[i] = fzfutil.Row(repo.Marker(d)+display, d)
 	}
 	return rows
 }
@@ -122,13 +122,6 @@ func windowIndex(b tag.Tag, panes map[string]string) int {
 
 // rowPath returns the hidden path field of a workspace row (the text after the
 // tab), falling back to the whole line for rows without one.
-func rowPath(line string) string {
-	if i := strings.LastIndexByte(line, '\t'); i >= 0 {
-		return line[i+1:]
-	}
-	return line
-}
-
 // RunItems handles `jmux fzf workspace items`: print the overview rows for the
 // picker's reload bindings.
 func RunItems() {
@@ -161,7 +154,7 @@ func RunPicker() error {
 	if err != nil || sel == "" {
 		return nil
 	}
-	return session.Open(repo.TrimSlash(rowPath(sel)), session.OpenOptions{})
+	return session.Open(repo.TrimSlash(fzfutil.RowPath(sel)), session.OpenOptions{})
 }
 
 // RunAdd handles `jmux workspace add`: pick a bare repo, then run the worktree

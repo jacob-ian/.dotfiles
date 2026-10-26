@@ -60,21 +60,24 @@ func Open(dir string, opts OpenOptions) error {
 		if editorCmd == "" {
 			editorCmd = "nvim"
 		}
-		if err := tmuxctl.NewSession(name, dir, nvimctl.WindowName, editorCmd); err != nil {
+		// Windows start in the work dir; the session keeps dir's name and stamp
+		// so pickers and remove still see the worktree.
+		cwd := repo.WorkDir(dir)
+		if err := tmuxctl.NewSession(name, cwd, nvimctl.WindowName, editorCmd); err != nil {
 			return fmt.Errorf("create session %q: %w", name, err)
 		}
 		// Stamp the originating dir so the workspace overview can map sessions
 		// back to directories without reverse-engineering the session name.
 		tmuxctl.SetSessionOption(name, "@jmux_dir", dir)
 		if opts.WithClaude {
-			if err := tmuxctl.NewWindow(name, "claude", dir, "jmux claude", false); err != nil {
+			if err := tmuxctl.NewWindow(name, "claude", cwd, "jmux claude", false); err != nil {
 				return fmt.Errorf("create claude window: %w", err)
 			}
 			tmuxctl.SelectWindow(name + ":1")
 		}
 		if opts.InstallCmd != "" {
 			shellCmd := fmt.Sprintf("%s || { echo; echo '[install failed — press enter to close]'; read; }", opts.InstallCmd)
-			if err := tmuxctl.NewWindow(name, "install", dir, shellCmd, true); err != nil {
+			if err := tmuxctl.NewWindow(name, "install", cwd, shellCmd, true); err != nil {
 				return fmt.Errorf("create install window: %w", err)
 			}
 		}

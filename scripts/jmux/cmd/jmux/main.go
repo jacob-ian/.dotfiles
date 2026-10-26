@@ -9,6 +9,7 @@ import (
 	"jmux/internal/clone"
 	"jmux/internal/notify"
 	"jmux/internal/pr"
+	"jmux/internal/scratch"
 	"jmux/internal/session"
 	"jmux/internal/statusbox"
 	"jmux/internal/workspace"
@@ -42,6 +43,8 @@ func run(args []string) error {
 		return runPR(args[1:])
 	case "repo":
 		return runRepo(args[1:])
+	case "scratch":
+		return scratch.Run(args[1:])
 	case "fzf":
 		return runFzf(args[1:])
 	case "claude":
@@ -156,6 +159,9 @@ func runFzf(args []string) error {
 		case "worktree items":
 			worktree.RunItems()
 			return nil
+		case "scratch items":
+			scratch.RunItems()
+			return nil
 		case "pr items":
 			pr.RunItems(args[2:])
 			return nil
@@ -192,6 +198,8 @@ func usage() {
   jmux pr <dir>                 PRs for the repo at <dir> (. for current)
   jmux pr <num>                 Review PR <num> in the current repo
   jmux repo clone <url>         Bare-clone into a scan root and open main
+  jmux scratch                  Scratch sessions picker (ctrl-t new, ctrl-x harvest)
+  jmux scratch new [name]       Create a dated scratch session
   jmux claude [args...]         Launch claude paired with this workspace's nvim
   jmux claude hook              Hook entry point: status badges + notifications
   jmux statusline render        Republish the status-line multibox

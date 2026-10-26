@@ -69,7 +69,11 @@ func RunPreview(args []string) {
 	logOutput := ""
 
 	if defaultBranch != "" {
+		// no remote (scratch): compare against the local default instead.
 		ref := "origin/" + defaultBranch
+		if !gitctl.RefExists(*path, ref) {
+			ref = defaultBranch
+		}
 		var (
 			ahead, behind int
 			ok            bool

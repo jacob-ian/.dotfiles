@@ -90,14 +90,19 @@ func RemoteBranches(bareRoot string) ([]string, error) {
 	return branches, nil
 }
 
-// DefaultBranch returns the name of origin/HEAD's target branch (e.g. "main").
+// DefaultBranch returns the name of origin/HEAD's target branch (e.g. "main"),
+// falling back to the bare repo's own HEAD for repos without a remote.
 // Returns "" if it can't be determined.
 func DefaultBranch(bareRoot string) string {
 	out, err := gitOut(bareRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+	if err == nil {
+		return strings.TrimPrefix(strings.TrimSpace(out), "origin/")
+	}
+	out, err = gitOut(bareRoot, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
 		return ""
 	}
-	return strings.TrimPrefix(strings.TrimSpace(out), "origin/")
+	return strings.TrimSpace(out)
 }
 
 // WorktreeAdd creates a worktree at path. If createBranch is true, the branch is
@@ -265,6 +270,48 @@ func SetupBareRemote(bareRoot string) error {
 		return err
 	}
 	return gitRun(bareRoot, "remote", "set-head", "origin", "--auto")
+}
+
+// StageAll is `git add -A`: untracked files included.
+func StageAll(dir string) error {
+	return gitRun(dir, "add", "-A")
+}
+
+func HasStaged(dir string) bool {
+	return gitRun(dir, "diff", "--cached", "--quiet") != nil
+}
+
+// AddedSince lists files in dir's index (not HEAD) absent from ref's tree.
+func AddedSince(dir, ref string) ([]string, error) {
+	out, err := gitOut(dir, "diff", "--cached", "--name-only", "--diff-filter=A", ref)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(out), nil
+}
+
+func Move(dir, src, dst string) error {
+	return gitRun(dir, "mv", src, dst)
+}
+
+func Commit(dir, msg string) error {
+	return gitRun(dir, "commit", "-q", "-m", msg)
+}
+
+// MergeSquash leaves the index mid-merge on conflict; see ResetMerge.
+func MergeSquash(dir, branch string) error {
+	return gitRun(dir, "merge", "--squash", "-q", branch)
+}
+
+// ResetMerge abandons a squash merge (no MERGE_HEAD, so `merge --abort` can't)
+// while keeping unrelated local edits.
+func ResetMerge(dir string) error {
+	return gitRun(dir, "reset", "-q", "--merge")
+}
+
+// DeleteBranch fails while any worktree has branch checked out.
+func DeleteBranch(bareRoot, branch string) error {
+	return gitRun(bareRoot, "branch", "-q", "-D", branch)
 }
 
 // WorktreeRemove removes a worktree from git's view. Use force to drop
