@@ -15,12 +15,5 @@ skills:
 
 prompts:
   implement: |
-    implement the ticket for this branch with /euc-linear-ticket-implementor.
+    implement the ticket for this branch.
     {{- if .Skills}} use {{.Skills}} and other relevant skills.{{else}} use any relevant skills.{{end}}
-  plan: |
-    plan the ticket for this branch with /euc-linear-planner. don't implement anything yet.
-    {{- if .Skills}} consult {{.Skills}} when reading the codebase.{{end}}
-  tsd: |
-    write the technical spec for the ticket for this branch with /euc-linear-tsd-oneshot.
-  review: |
-    review this branch's PR with /euc-pr-review and summarise what needs attention.
