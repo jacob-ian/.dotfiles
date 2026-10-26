@@ -28,6 +28,52 @@ func TestCleanErr(t *testing.T) {
 	}
 }
 
+func TestDefaultBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	tests := map[string]struct {
+		setup func(bare string)
+		want  string
+	}{
+		"origin/HEAD wins": {
+			setup: func(bare string) {
+				run(bare, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+			},
+			want: "main",
+		},
+		"no remote falls back to HEAD": {want: "history"},
+		"detached HEAD without remote": {
+			setup: func(bare string) {
+				if err := os.WriteFile(bare+"/HEAD", []byte("0123456789abcdef0123456789abcdef01234567\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			bare := t.TempDir()
+			run(bare, "init", "-q", "--bare")
+			run(bare, "symbolic-ref", "HEAD", "refs/heads/history")
+			if tt.setup != nil {
+				tt.setup(bare)
+			}
+			if got := DefaultBranch(bare); got != tt.want {
+				t.Errorf("DefaultBranch() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRefExists(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")

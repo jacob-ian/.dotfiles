@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"jmux/internal/repo"
 )
 
 // gitReadTimeout bounds the read-only git calls below so a wedged one (e.g.
@@ -98,11 +100,7 @@ func DefaultBranch(bareRoot string) string {
 	if err == nil {
 		return strings.TrimPrefix(strings.TrimSpace(out), "origin/")
 	}
-	out, err = gitOut(bareRoot, "symbolic-ref", "--short", "HEAD")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out)
+	return repo.DefaultBranchName(bareRoot)
 }
 
 // WorktreeAdd creates a worktree at path. If createBranch is true, the branch is
