@@ -39,27 +39,10 @@ func workspaces(cfg repo.Config) []string {
 	for _, w := range cfg.FeatureWorktrees() {
 		add(w)
 	}
-	for _, d := range openSessionDirs() {
+	for _, d := range tmuxctl.SessionDirs() {
 		add(d)
 	}
 	slices.Sort(out)
-	return out
-}
-
-// openSessionDirs returns the originating directory of every open tmux session,
-// preferring the @jmux_dir stamp and falling back to the active pane's path for
-// sessions created before stamping existed.
-func openSessionDirs() []string {
-	var out []string
-	for _, s := range tmuxctl.ListSessions() {
-		dir := tmuxctl.SessionOption(s, "@jmux_dir")
-		if dir == "" {
-			dir = tmuxctl.SessionPath(s)
-		}
-		if dir != "" {
-			out = append(out, dir)
-		}
-	}
 	return out
 }
 

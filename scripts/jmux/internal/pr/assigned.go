@@ -2,6 +2,7 @@ package pr
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -48,11 +49,18 @@ func reviewSelection(cfg repo.Config, slug string, num int, sel string) error {
 }
 
 // findLocalRepo returns the bare repo whose origin remote is nameWithOwner, or
-// "" if no local clone matches.
+// "" if no local clone matches. Each check is a git call, so clones named
+// after the repo are tried first: the usual case costs one call, not one
+// per clone.
 func findLocalRepo(cfg repo.Config, nameWithOwner string) string {
-	for _, bare := range cfg.BareRepos() {
-		if strings.EqualFold(gitctl.RepoSlug(bare), nameWithOwner) {
-			return bare
+	_, name, _ := strings.Cut(nameWithOwner, "/")
+	bares := cfg.BareRepos()
+	named := func(bare string) bool { return strings.EqualFold(filepath.Base(bare), name) }
+	for _, pass := range []bool{true, false} {
+		for _, bare := range bares {
+			if named(bare) == pass && strings.EqualFold(gitctl.RepoSlug(bare), nameWithOwner) {
+				return bare
+			}
 		}
 	}
 	return ""

@@ -81,23 +81,25 @@ func SetSessionOption(name, key, value string) {
 	exec.Command("tmux", "set-option", "-t", name, key, value).Run()
 }
 
-// SessionOption returns the value of a session option, or "" if unset.
-func SessionOption(name, key string) string {
-	out, err := exec.Command("tmux", "show-options", "-v", "-t", name, key).Output()
+// SessionDirs returns every session's originating directory in one tmux
+// call: the @jmux_dir stamp, else the active pane's path for sessions created
+// before stamping existed. Sessions with neither are skipped.
+func SessionDirs() []string {
+	out, err := exec.Command("tmux", "list-sessions", "-F", "#{@jmux_dir}\t#{pane_current_path}").Output()
 	if err != nil {
-		return ""
+		return nil
 	}
-	return strings.TrimSpace(string(out))
-}
-
-// SessionPath returns the current path of the session's active pane, used as a
-// fallback for sessions created before @jmux_dir stamping existed.
-func SessionPath(name string) string {
-	out, err := exec.Command("tmux", "display-message", "-p", "-t", name, "#{pane_current_path}").Output()
-	if err != nil {
-		return ""
+	var dirs []string
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		stamp, pane, _ := strings.Cut(line, "\t")
+		if stamp == "" {
+			stamp = strings.TrimSpace(pane)
+		}
+		if stamp != "" {
+			dirs = append(dirs, stamp)
+		}
 	}
-	return strings.TrimSpace(string(out))
+	return dirs
 }
 
 // WindowNames returns the names of all windows in session. Empty on error.
