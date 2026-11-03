@@ -44,6 +44,23 @@ func TestFormatRowRoundTrips(t *testing.T) {
 	}
 }
 
+func TestByline(t *testing.T) {
+	tests := map[string]struct {
+		author, owner, want string
+	}{
+		"human author":         {author: "octocat", want: "octocat"},
+		"bot with owner":       {author: "g3rtrude", owner: "octocat", want: "octocat via g3rtrude"},
+		"bot nobody picked up": {author: "g3rtrude", want: "g3rtrude"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := byline(tt.author, tt.owner); got != tt.want {
+				t.Errorf("byline(%q, %q) = %q, want %q", tt.author, tt.owner, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFormatItemsRowRoundTrips(t *testing.T) {
 	line := formatItemsRow("eucalyptusvc/mobile", 42, true, "Add widget", "octocat", "feat/widget", "release/1.2")
 	if slug, num, ok := parseRepoNumber(line); !ok || slug != "eucalyptusvc/mobile" || num != 42 {

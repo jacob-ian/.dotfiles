@@ -258,6 +258,15 @@ func formatRow(slug string, num int, draft bool, title, login string) string {
 	return fmt.Sprintf("%s#%d  %s%s  ·  %s", slug, num, marker, title, login)
 }
 
+// byline is a row's trailing name: the human driving a bot-authored PR with
+// the bot noted, or just the author.
+func byline(author, owner string) string {
+	if owner == "" {
+		return author
+	}
+	return owner + " via " + author
+}
+
 // formatItemsRow appends the head and base branches as hidden tab fields (fzf
 // shows only column 1) so selection can read them back without a gh lookup.
 func formatItemsRow(slug string, num int, draft bool, title, login, headRef, baseRef string) string {

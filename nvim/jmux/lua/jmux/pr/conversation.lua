@@ -16,9 +16,13 @@ local M = {}
 -- The conversation's selections in the main query. PR_FIELDS covers the node
 -- scalars and description; the three connection field lists are also what
 -- view's pagination re-requests per page.
-M.PR_FIELDS = ("id title number state createdAt author{login} body url changedFiles additions deletions %s"):format(
-  reactions.FIELDS
-)
+M.PR_FIELDS = (
+  "id title number state createdAt author{login __typename} body url changedFiles additions deletions"
+  .. " assignees(first:1){nodes{login}}"
+  .. " timelineItems(last:5, itemTypes:[REVIEW_REQUESTED_EVENT, READY_FOR_REVIEW_EVENT]){nodes{"
+  .. " ... on ReviewRequestedEvent{actor{login __typename}} ... on ReadyForReviewEvent{actor{login __typename}} }}"
+  .. " %s"
+):format(reactions.FIELDS)
 M.COMMENT_FIELDS = ("id author{login} body createdAt %s"):format(reactions.FIELDS)
 M.REVIEW_FIELDS = ("id author{login} body state createdAt %s"):format(reactions.FIELDS)
 M.THREAD_FIELDS = ("id isResolved isOutdated path line comments(first:100){ nodes{ id author{login} body createdAt pullRequestReview{id} %s } }"):format(
@@ -35,13 +39,35 @@ function M.model(pr)
   local function who(n)
     return vim.tbl_get(n, "author", "login") or "?"
   end
+  -- byline names the human driving a bot-authored PR — the newest non-bot
+  -- actor to request review or mark it ready (CODEOWNERS requests come from
+  -- the bot itself), else the first assignee — with the bot noted. A human
+  -- author is just themselves.
+  local function byline(p)
+    local author = who(p)
+    if vim.tbl_get(p, "author", "__typename") ~= "Bot" then
+      return author
+    end
+    local events = vim.tbl_get(p, "timelineItems", "nodes") or {}
+    for i = #events, 1, -1 do
+      local a = events[i].actor
+      if type(a) == "table" and a.login and a.__typename ~= "Bot" then
+        return a.login .. " via " .. author
+      end
+    end
+    local assignee = vim.tbl_get(p, "assignees", "nodes", 1, "login")
+    if assignee then
+      return assignee .. " via " .. author
+    end
+    return author
+  end
   -- GitHub returns bodies with CRLF endings; strip the \r so it doesn't render
   -- as a trailing ^M on every line.
   local function split(text)
     return vim.split(vim.trim((text or ""):gsub("\r", "")), "\n")
   end
 
-  local status = ("`%s` · @%s · %s"):format(tostring(pr.state or ""):lower(), who(pr), reltime(pr.createdAt or ""))
+  local status = ("`%s` · @%s · %s"):format(tostring(pr.state or ""):lower(), byline(pr), reltime(pr.createdAt or ""))
   local header_marks = {}
   local chip = merge.summary(pr)
   if chip then
@@ -68,7 +94,7 @@ function M.model(pr)
   local rx_by_id, subjects, jumps = {}, {}, {}
 
   -- the PR description is its own collapsible block, above the conversation.
-  local pr_header = ("@%s · opened · %s"):format(who(pr), reltime(pr.createdAt or ""))
+  local pr_header = ("@%s · opened · %s"):format(byline(pr), reltime(pr.createdAt or ""))
   local pr_rx = reactions.line(pr)
   if pr_rx then
     pr_header = pr_header .. " · " .. pr_rx
