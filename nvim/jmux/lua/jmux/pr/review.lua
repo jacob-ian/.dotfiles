@@ -256,9 +256,8 @@ function M.review()
   -- repo-relative path, which still resolves when cwd is the worktree root.
   local root = util.sh { "git", "rev-parse", "--show-toplevel" }
 
-  vim.cmd "tabnew"
-  local left = ui.pane { wo = { scrollbind = true, wrap = false } }
-  local right = ui.pane { cmd = "rightbelow vsplit", wo = { scrollbind = true, wrap = true, linebreak = true } }
+  local left = ui.pane { tab = true, wo = { scrollbind = true, wrap = false } }
+  local right = ui.pane { split = "right", wo = { scrollbind = true, wrap = true, linebreak = true } }
   local lwin, lbuf, rwin, rbuf = left.win, left.buf, right.win, right.buf
   -- peers: either pane dying closes the other, so a stray <C-w>c can't
   -- strand half the preview.

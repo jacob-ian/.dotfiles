@@ -25,3 +25,7 @@ vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter" }, {
 
 -- Make sql stuff better
 vim.g.omni_sql_no_default_maps = 1
+
+-- Closing a tab returns to the last-used one, so q in a jmux, neogit or
+-- diffview tab lands back where it was opened from, not on the next tab over.
+opt.tabclose = "uselast"

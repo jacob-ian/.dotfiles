@@ -162,6 +162,28 @@ local function target()
   return { path = path, side = side, start_line = sline, line = eline }
 end
 
+-- file_tab picks the tab goto_base edits in: the last-used tab (where
+-- 'tabclose' will return to) while it shows a plain file buffer, else the
+-- first other tab that does. Jmux and neogit tabs hold scratch buffers, so
+-- an :edit there would replace their view.
+local function file_tab()
+  local function plain(tab)
+    local win = vim.api.nvim_tabpage_get_win(tab)
+    return vim.bo[vim.api.nvim_win_get_buf(win)].buftype == ""
+  end
+  local tabs = vim.api.nvim_list_tabpages()
+  local last = tabs[vim.fn.tabpagenr "#"]
+  if last and plain(last) then
+    return last
+  end
+  local cur = vim.api.nvim_get_current_tabpage()
+  for _, tab in ipairs(tabs) do
+    if tab ~= cur and plain(tab) then
+      return tab
+    end
+  end
+end
+
 -- goto_base opens the diffed file in the base tab at the cursor line. LEFT
 -- lines belong to the old revision, so their numbers don't map to the
 -- working tree — declined, like the review panel's jump.
@@ -173,8 +195,8 @@ goto_base = function()
   if t.side ~= "RIGHT" then
     return vim.notify("base-side line — open from the right pane", vim.log.levels.WARN)
   end
-  local base = vim.api.nvim_list_tabpages()[1]
-  if base == vim.api.nvim_get_current_tabpage() then
+  local base = file_tab()
+  if not base then
     return vim.notify("no base tab to open in", vim.log.levels.WARN)
   end
   local root = util.sh { "git", "rev-parse", "--show-toplevel" }
@@ -835,11 +857,17 @@ vim.api.nvim_create_autocmd("User", {
 
 -- The lease holds everything applied to real file buffers (a diff's RIGHT
 -- side is the buffer on disk); revoking it when the view closes keeps signs
--- and review keys from outliving the diff in normal windows.
+-- and review keys from outliving the diff in normal windows. Diffview fires
+-- this for every view it closes, neogit's included, so only act once our tab
+-- is gone (diffview closes the tab before emitting).
 vim.api.nvim_create_autocmd("User", {
   group = group,
   pattern = "DiffviewViewClosed",
   callback = function()
+    if not pd_tab or vim.api.nvim_tabpage_is_valid(pd_tab) then
+      return
+    end
+    pd_tab = nil
     lease.revoke()
     title.clear()
   end,

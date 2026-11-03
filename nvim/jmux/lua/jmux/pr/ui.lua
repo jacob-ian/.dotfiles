@@ -258,24 +258,28 @@ end
 
 local PANE_NS = vim.api.nvim_create_namespace "jmux_pane"
 
--- pane creates a scratch window jmux owns: a split (cmd) with a fresh
--- scratch buffer, or — with no cmd — the current window and its buffer
--- adopted (the fresh tabnew case). Window options are set scope-local:
--- vim.wo[win].opt writes the global value too, leaking cosmetics into every
--- later window. o.width is a fn the pane owns for its lifetime, re-clamped
--- when the screen size changes — including the UI attaching after a
--- mid-startup open, when columns is still the 80 default. on_close is a
--- disposer run once, scheduled, on either death signal: the window closing,
--- or another buffer displacing this one (bufhidden=wipe kills the pane with
--- no WinClosed).
+-- pane creates a scratch window jmux owns, with a fresh scratch buffer: a
+-- split (o.split = "left"/"right"/"above"/"below", of the current window or
+-- of the whole tab with o.toplevel), a new tab appended after the last one
+-- (o.tab), or — with neither — the current window and its buffer adopted.
+-- Window options are set scope-local: vim.wo[win].opt writes the global
+-- value too, leaking cosmetics into every later window. winfixbuf pins the
+-- window to its buffer, so a stray :edit or jump can't replace the view.
+-- o.width is a fn the pane owns for its lifetime, re-clamped when the screen
+-- size changes — including the UI attaching after a mid-startup open, when
+-- columns is still the 80 default. on_close is a disposer run once,
+-- scheduled, on either death signal: the window closing, or another buffer
+-- displacing this one (bufhidden=wipe kills the pane with no WinClosed).
 function M.pane(o)
   o = o or {}
   local win, buf
-  if o.cmd then
-    vim.cmd(o.cmd)
-    win = vim.api.nvim_get_current_win()
+  if o.split then
     buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_win_set_buf(win, buf)
+    win = vim.api.nvim_open_win(buf, true, { split = o.split, win = o.toplevel and -1 or 0 })
+  elseif o.tab then
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_open_tabpage(buf, true, { after = #vim.api.nvim_list_tabpages() })
+    win = vim.api.nvim_get_current_win()
   else
     win = vim.api.nvim_get_current_win()
     buf = vim.api.nvim_get_current_buf()
@@ -285,7 +289,7 @@ function M.pane(o)
   for k, v in pairs(o.bo or {}) do
     vim.bo[buf][k] = v
   end
-  local wo = vim.tbl_extend("force", { number = false, relativenumber = false }, o.wo or {})
+  local wo = vim.tbl_extend("force", { number = false, relativenumber = false, winfixbuf = true }, o.wo or {})
   if o.width then
     wo.winfixwidth = true
   end

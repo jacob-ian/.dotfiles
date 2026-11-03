@@ -341,9 +341,8 @@ function M.view(opts)
   -- Open the tab and paint the loader first; resolving the PR and fetching the
   -- conversation both happen async, so the view shows instantly and the spinner
   -- keeps animating during any round trip.
-  vim.cmd "tabnew"
-  pv_tab = vim.api.nvim_get_current_tabpage()
   local conv = ui.pane {
+    tab = true,
     bo = { filetype = "markdown" },
     wo = {
       wrap = true,
@@ -356,6 +355,7 @@ function M.view(opts)
     },
   }
   local win, buf = conv.win, conv.buf
+  pv_tab = vim.api.nvim_win_get_tabpage(win)
 
   -- wide enough that a typical "◷ Reviewers · 1 approved · 1 awaiting"
   -- title survives whole, but never more than a third of a narrow screen.
@@ -366,9 +366,15 @@ function M.view(opts)
   -- window motion (<C-w>hjkl, resize, close) just works; they die with the
   -- conversation, whichever way it goes.
   local panes = {
-    reviewers = ui.pane { cmd = "botright vsplit", label = "reviewers", width = side_width, wo = { wrap = false } },
+    reviewers = ui.pane {
+      split = "right",
+      toplevel = true,
+      label = "reviewers",
+      width = side_width,
+      wo = { wrap = false },
+    },
   }
-  panes.checks = ui.pane { cmd = "belowright split", label = "checks", wo = { wrap = false } }
+  panes.checks = ui.pane { split = "below", label = "checks", wo = { wrap = false } }
   ui.panegroup { owner = conv, panes = { conv, panes.reviewers, panes.checks } }
   for _, pane in pairs(panes) do
     -- q works even before the first render binds the full spec.
