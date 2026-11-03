@@ -1,6 +1,9 @@
 package tmuxctl_test
 
 import (
+	"os/exec"
+	"path/filepath"
+	"slices"
 	"testing"
 
 	"jmux/internal/tmuxctl"
@@ -17,5 +20,41 @@ func TestShellQuote(t *testing.T) {
 		if got := tmuxctl.ShellQuote(in); got != want {
 			t.Errorf("ShellQuote(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestSessionDirs drives a private tmux server (its own socket under
+// TMUX_TMPDIR, with TMUX cleared so the client doesn't follow the socket of
+// the tmux this test may be running inside) and checks that stamped sessions
+// report their stamp and unstamped ones fall back to the pane path.
+func TestSessionDirs(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	t.Setenv("TMUX", "")
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("tmux", args...).CombinedOutput(); err != nil {
+			t.Fatalf("tmux %v: %v\n%s", args, err, out)
+		}
+	}
+	stamped := t.TempDir()
+	// tmux reports pane paths symlink-resolved (/var -> /private/var on macOS).
+	unstamped, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	run("new-session", "-d", "-s", "stamped", "-c", stamped)
+	t.Cleanup(func() { exec.Command("tmux", "kill-server").Run() })
+	run("set-option", "-t", "stamped", "@jmux_dir", "/stamped/elsewhere")
+	run("new-session", "-d", "-s", "unstamped", "-c", unstamped)
+
+	got := tmuxctl.SessionDirs()
+	slices.Sort(got)
+	want := []string{"/stamped/elsewhere", unstamped}
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("SessionDirs() = %q, want %q", got, want)
 	}
 }

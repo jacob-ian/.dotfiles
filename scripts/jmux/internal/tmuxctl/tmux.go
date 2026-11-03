@@ -3,7 +3,6 @@ package tmuxctl
 import (
 	"os"
 	"os/exec"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -109,10 +108,6 @@ func WindowNames(session string) []string {
 		return nil
 	}
 	return strings.Split(strings.TrimSpace(string(out)), "\n")
-}
-
-func HasWindow(session, window string) bool {
-	return slices.Contains(WindowNames(session), window)
 }
 
 // CountWindows returns the number of windows in session named exactly window.

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -158,4 +160,81 @@ func initTestRepo(t *testing.T) string {
 	run("update-ref", "refs/remotes/origin/remote-only", "HEAD")
 	run("update-ref", "refs/remotes/origin/main", "HEAD")
 	return dir
+}
+
+// divergedRepo builds a repo whose feature branch has two commits main lacks
+// and main one commit feature lacks, returning its path.
+func divergedRepo(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q", "-b", "main")
+	run("commit", "-q", "--allow-empty", "-m", "base")
+	run("checkout", "-q", "-b", "feature")
+	run("commit", "-q", "--allow-empty", "-m", "feature one")
+	run("commit", "-q", "--allow-empty", "-m", "feature two")
+	run("checkout", "-q", "main")
+	run("commit", "-q", "--allow-empty", "-m", "main only")
+	run("checkout", "-q", "feature")
+	return dir
+}
+
+func TestAheadBehind(t *testing.T) {
+	dir := divergedRepo(t)
+	tests := map[string]struct {
+		ref           string
+		ahead, behind int
+		ok            bool
+	}{
+		"diverged from main": {ref: "main", ahead: 2, behind: 1, ok: true},
+		"same commit":        {ref: "feature", ok: true},
+		"unknown ref":        {ref: "origin/main"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			ahead, behind, ok := AheadBehind(dir, tt.ref)
+			if ahead != tt.ahead || behind != tt.behind || ok != tt.ok {
+				t.Errorf("AheadBehind(%q) = (%d, %d, %v), want (%d, %d, %v)", tt.ref, ahead, behind, ok, tt.ahead, tt.behind, tt.ok)
+			}
+		})
+	}
+}
+
+func TestLogOneline(t *testing.T) {
+	dir := divergedRepo(t)
+	tests := map[string]struct {
+		revRange string
+		n        int
+		want     []string
+	}{
+		"unique commits newest first": {revRange: "main..HEAD", n: 10, want: []string{"feature two", "feature one"}},
+		"limit applies":               {revRange: "main..HEAD", n: 1, want: []string{"feature two"}},
+		"nothing unique":              {revRange: "feature..HEAD", n: 10},
+		"unknown ref is empty":        {revRange: "origin/main..HEAD", n: 10},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			out := LogOneline(dir, tt.revRange, tt.n)
+			var got []string
+			for line := range strings.SplitSeq(out, "\n") {
+				if _, subject, ok := strings.Cut(line, " "); ok {
+					got = append(got, subject)
+				}
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("LogOneline(%q, %d) subjects = %q, want %q", tt.revRange, tt.n, got, tt.want)
+			}
+		})
+	}
 }

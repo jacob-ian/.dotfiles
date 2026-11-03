@@ -67,14 +67,6 @@ func CommonDir(dir string) string {
 
 // Toplevel returns the root of the worktree containing dir, or "" when dir
 // isn't inside one.
-func Toplevel(dir string) string {
-	out, err := gitOut(dir, "rev-parse", "--show-toplevel")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out)
-}
-
 // RemoteBranches lists `origin/`-stripped remote branch names, omitting HEAD.
 func RemoteBranches(bareRoot string) ([]string, error) {
 	out, err := gitOut(bareRoot, "branch", "-r")

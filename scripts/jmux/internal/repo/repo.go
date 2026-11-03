@@ -129,6 +129,23 @@ func FindBareRoot(dir string) string {
 	}
 }
 
+// WorkRoot returns the working tree containing dir: the nearest ancestor
+// holding a .git entry (a directory for a checkout, a file for a linked
+// worktree), or "" outside any repo. A pure walk, so hot paths like the
+// claude hook don't pay for a git process on every event.
+func WorkRoot(dir string) string {
+	for cur := dir; ; {
+		if _, err := os.Lstat(filepath.Join(cur, ".git")); err == nil {
+			return cur
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return ""
+		}
+		cur = parent
+	}
+}
+
 // adminEntry pairs a worktree admin directory under `<bare>/worktrees/<name>`
 // with the resolved working tree directory it points at (read from `gitdir`).
 type adminEntry struct {

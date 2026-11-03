@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -27,6 +28,11 @@ func RunPreview(args []string) {
 	}
 
 	bareRoot := repo.FindBareRoot(*path)
+
+	// The live pane needs no git answer, so it's captured alongside the git
+	// fan-out rather than after it.
+	live := make(chan string, 1)
+	go func() { live <- livePane(session.Name(*path)) }()
 
 	var (
 		branch        string
@@ -69,20 +75,17 @@ func RunPreview(args []string) {
 	logOutput := ""
 
 	if defaultBranch != "" {
-		// no remote (scratch): compare against the local default instead.
+		// Compare against the remote default, else (no remote: scratch) the
+		// local one. The failed comparison is the existence check, which
+		// saves a rev-parse round trip on every preview.
 		ref := "origin/" + defaultBranch
-		if !gitctl.RefExists(*path, ref) {
+		var ahead, behind int
+		var ok bool
+		ahead, behind, logOutput, ok = compare(*path, ref)
+		if !ok {
 			ref = defaultBranch
+			ahead, behind, logOutput, ok = compare(*path, ref)
 		}
-		var (
-			ahead, behind int
-			ok            bool
-		)
-		var wg2 sync.WaitGroup
-		wg2.Add(2)
-		go func() { defer wg2.Done(); ahead, behind, ok = gitctl.AheadBehind(*path, ref) }()
-		go func() { defer wg2.Done(); logOutput = gitctl.LogOneline(*path, ref+"..HEAD", 10) }()
-		wg2.Wait()
 
 		if !ok {
 			verdict = "no upstream comparison"
@@ -112,25 +115,10 @@ func RunPreview(args []string) {
 	}
 	fmt.Println()
 
-	// For an open session, show a live pane instead of git detail: claude if
-	// it's running, otherwise the nvim editor view. nvim is an alt-screen TUI,
-	// so capture only the visible pane (no scrollback).
-	sessionName := session.Name(*path)
-	if tmuxctl.HasSession(sessionName) {
-		if tmuxctl.HasWindow(sessionName, "claude") {
-			if capture := tmuxctl.CapturePane(sessionName+":claude", 40); capture != "" {
-				fmt.Println("claude:")
-				fmt.Println(capture)
-				return
-			}
-		}
-		if tmuxctl.HasWindow(sessionName, nvimctl.WindowName) {
-			if capture := tmuxctl.CapturePane(sessionName+":"+nvimctl.WindowName, 0); capture != "" {
-				fmt.Println("nvim:")
-				fmt.Println(capture)
-				return
-			}
-		}
+	// For an open session, show a live pane instead of git detail.
+	if pane := <-live; pane != "" {
+		fmt.Println(pane)
+		return
 	}
 
 	if dirty {
@@ -143,4 +131,34 @@ func RunPreview(args []string) {
 		fmt.Println("commits from HEAD:")
 		fmt.Println(logOutput)
 	}
+}
+
+// compare runs the ahead/behind count and the unique-commit log against ref
+// in parallel; ok is false when ref doesn't resolve.
+func compare(path, ref string) (ahead, behind int, log string, ok bool) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); ahead, behind, ok = gitctl.AheadBehind(path, ref) }()
+	go func() { defer wg.Done(); log = gitctl.LogOneline(path, ref+"..HEAD", 10) }()
+	wg.Wait()
+	return ahead, behind, log, ok
+}
+
+// livePane captures the workspace's session for the preview: the claude
+// window if it's running, otherwise the nvim editor (an alt-screen TUI, so
+// only the visible pane). One list-windows call answers both "is there a
+// session" and "which windows"; "" when there's nothing to show.
+func livePane(sessionName string) string {
+	windows := tmuxctl.WindowNames(sessionName)
+	if slices.Contains(windows, "claude") {
+		if capture := tmuxctl.CapturePane(sessionName+":claude", 40); capture != "" {
+			return "claude:\n" + capture
+		}
+	}
+	if slices.Contains(windows, nvimctl.WindowName) {
+		if capture := tmuxctl.CapturePane(sessionName+":"+nvimctl.WindowName, 0); capture != "" {
+			return "nvim:\n" + capture
+		}
+	}
+	return ""
 }

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"jmux/internal/fzfutil"
-	"jmux/internal/gitctl"
 	"jmux/internal/notify"
+	"jmux/internal/repo"
 	"jmux/internal/session"
 	"jmux/internal/statusbox"
 	"jmux/internal/tag"
@@ -193,7 +193,7 @@ func status(in hookInput) bool {
 	}
 	// Badges key on workspace paths, but claude's cwd may be a subdirectory —
 	// map it to the worktree root the overview actually lists.
-	path := gitctl.Toplevel(in.CWD)
+	path := repo.WorkRoot(in.CWD)
 	if path == "" {
 		path = in.CWD
 	}

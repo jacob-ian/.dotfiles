@@ -108,6 +108,37 @@ func TestBareRepoWorktrees(t *testing.T) {
 	})
 }
 
+func TestWorkRoot(t *testing.T) {
+	root := t.TempDir()
+	checkout := filepath.Join(root, "checkout")
+	if err := os.MkdirAll(filepath.Join(checkout, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(checkout, "pkg", "deep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(root, "linked")
+	if err := os.MkdirAll(linked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(linked, ".git"), []byte("gitdir: /elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := map[string]struct{ dir, want string }{
+		"checkout root":               {dir: checkout, want: checkout},
+		"nested in checkout":          {dir: filepath.Join(checkout, "pkg", "deep"), want: checkout},
+		"linked worktree (.git file)": {dir: linked, want: linked},
+		"outside any repo":            {dir: root, want: ""},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := WorkRoot(tt.dir); got != tt.want {
+				t.Errorf("WorkRoot(%q) = %q, want %q", tt.dir, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDefaultBranchName(t *testing.T) {
 	tests := map[string]struct {
 		head string

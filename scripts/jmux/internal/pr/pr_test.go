@@ -2,8 +2,11 @@ package pr
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
+	"jmux/internal/repo"
 	"jmux/internal/tag"
 )
 
@@ -140,5 +143,46 @@ func TestTagRenders(t *testing.T) {
 	got := tag.New(tagKind, "", tagData{Number: 42}).Text()
 	if got != "\uf407 #42" {
 		t.Errorf("pr tag Text() = %q, want the glyph and #42", got)
+	}
+}
+
+func TestFindLocalRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	bare := func(name, originURL string) string {
+		t.Helper()
+		dir := filepath.Join(root, name)
+		for _, args := range [][]string{
+			{"init", "-q", "--bare", dir},
+			{"-C", dir, "remote", "add", "origin", originURL},
+		} {
+			if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+		}
+		return dir
+	}
+	named := bare("widgets", "git@github.com:acme/widgets.git")
+	renamed := bare("legacy-clone", "https://github.com/acme/gadgets.git")
+	bare("decoy", "git@github.com:other/widgets.git")
+	cfg := repo.Config{ScanRoots: []string{root}}
+
+	tests := map[string]struct {
+		slug string
+		want string
+	}{
+		"clone named after the repo": {slug: "acme/widgets", want: named},
+		"differently named clone":    {slug: "acme/gadgets", want: renamed},
+		"slug case is ignored":       {slug: "ACME/Widgets", want: named},
+		"no local clone":             {slug: "acme/nothing"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := findLocalRepo(cfg, tt.slug); got != tt.want {
+				t.Errorf("findLocalRepo(%q) = %q, want %q", tt.slug, got, tt.want)
+			}
+		})
 	}
 }
