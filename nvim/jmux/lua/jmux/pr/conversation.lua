@@ -1,8 +1,5 @@
--- The conversation as a pure model, same pane-ready shape as
--- jmux.pr.reviewers/checks: header lines (title/byline with the merge
--- summary), the description block, and the time-ordered blocks of comments,
--- reviews and inline threads — plus the row-intent maps (reactions, subjects,
--- jumps) a renderer keys actions off.
+-- The conversation as a pure model: header, description, and time-ordered
+-- blocks of comments, reviews and inline threads.
 
 local merge = require "jmux.pr.merge"
 local reactions = require "jmux.pr.reactions"
@@ -13,12 +10,8 @@ local reltime = util.reltime
 
 local M = {}
 
--- The conversation's selections in the main query. PR_FIELDS covers the node
--- scalars and description; the three connection field lists are also what
--- view's pagination re-requests per page.
 M.PR_FIELDS = (
   "id title number state createdAt author{login __typename} body url changedFiles additions deletions"
-  .. " assignees(first:1){nodes{login}}"
   .. " timelineItems(last:5, itemTypes:[REVIEW_REQUESTED_EVENT, READY_FOR_REVIEW_EVENT]){nodes{"
   .. " ... on ReviewRequestedEvent{actor{login __typename}} ... on ReadyForReviewEvent{actor{login __typename}} }}"
   .. " %s"
@@ -30,19 +23,13 @@ M.THREAD_FIELDS = ("id isResolved isOutdated path line comments(first:100){ node
 )
 
 -- model turns the PR node into { header, header_marks, pr, blocks, reactions,
--- subjects, jumps }. Each block is { id, header, body, kids, body_marks? }; a
--- review's inline threads are its kids (each kid { id, header, lines }).
--- reactions backs the K hover (reactable node ids, fetched reactor lines
--- memoize onto entries), subjects backs the + picker (a thread reacts to its
--- root comment), and jumps backs <CR> (the code a thread comments on).
+-- subjects, jumps }; a review's inline threads are its kids.
 function M.model(pr)
   local function who(n)
     return vim.tbl_get(n, "author", "login") or "?"
   end
-  -- byline names the human driving a bot-authored PR — the newest non-bot
-  -- actor to request review or mark it ready (CODEOWNERS requests come from
-  -- the bot itself), else the first assignee — with the bot noted. A human
-  -- author is just themselves.
+  -- byline names the human driving a bot-authored PR. Bot actors are skipped
+  -- because CODEOWNERS review requests come from the bot itself.
   local function byline(p)
     local author = who(p)
     if vim.tbl_get(p, "author", "__typename") ~= "Bot" then
@@ -61,8 +48,7 @@ function M.model(pr)
     end
     return author
   end
-  -- GitHub returns bodies with CRLF endings; strip the \r so it doesn't render
-  -- as a trailing ^M on every line.
+  -- GitHub returns bodies with CRLF endings.
   local function split(text)
     return vim.split(vim.trim((text or ""):gsub("\r", "")), "\n")
   end
@@ -93,7 +79,6 @@ function M.model(pr)
 
   local rx_by_id, subjects, jumps = {}, {}, {}
 
-  -- the PR description is its own collapsible block, above the conversation.
   local pr_header = ("@%s · opened · %s"):format(byline(pr), reltime(pr.createdAt or ""))
   local pr_rx = reactions.line(pr)
   if pr_rx then
@@ -112,7 +97,6 @@ function M.model(pr)
     kids = {},
   }
 
-  -- group inline threads under the review that opened them.
   local by_review, orphans = {}, {}
   for _, t in ipairs(vim.tbl_get(pr, "reviewThreads", "nodes") or {}) do
     local rid = vim.tbl_get(t, "comments", "nodes", 1, "pullRequestReview", "id")
@@ -129,17 +113,13 @@ function M.model(pr)
       loc = loc .. ":" .. tostring(t.line)
     end
     local comments = vim.tbl_get(t, "comments", "nodes") or {}
-    -- header: author/time · status; the location sits beneath it, then the body
-    -- (replies marked ↳).
     local status_str = t.isResolved and "✓ resolved" or "● open"
     if t.isOutdated then
       status_str = status_str .. " · outdated"
     end
     local lines = { ("`%s`"):format(loc) }
-    -- the root's reactions ride on the kid's header; replies get a bold
-    -- author line (line_marks) carrying theirs the same way. line_subjects
-    -- maps each line to its comment, so + reacts to the message under the
-    -- cursor rather than always the root.
+    -- line_subjects maps each line to its comment, so + reacts to the message
+    -- under the cursor rather than the root.
     local line_marks, line_subjects = {}, {}
     for i, c in ipairs(comments) do
       local first = #lines + 1
@@ -156,12 +136,9 @@ function M.model(pr)
       lines[#lines + 1] = ""
       if nilable(c.id) then
         local subj = { id = c.id, mine = reactions.mine(c) }
-        -- excluding the trailing blank keeps the separator neutral ground.
         for l = first, #lines - 1 do
           line_subjects[l] = subj
         end
-        -- reacted messages are K-hoverable individually, keyed by comment id
-        -- (the thread's own id keys the aggregated hover).
         if reactions.line(c) then
           rx_by_id[c.id] = { items = { { id = c.id } } }
         end
@@ -174,8 +151,6 @@ function M.model(pr)
     if rx then
       header_str = header_str .. " · " .. rx
     end
-    -- the whole thread's reactors hover on the kid's row, replies labelled by
-    -- author so their reactions stay attributable.
     local items = {}
     for i, c in ipairs(comments) do
       if reactions.line(c) and nilable(c.id) then
@@ -200,7 +175,6 @@ function M.model(pr)
     }
   end
 
-  -- time-ordered conversation (ISO-8601 sorts chronologically as a string).
   local blocks = {}
   for _, c in ipairs(vim.tbl_get(pr, "comments", "nodes") or {}) do
     local header_str = ("@%s · %s"):format(who(c), reltime(c.createdAt or ""))
@@ -226,8 +200,6 @@ function M.model(pr)
   for _, r in ipairs(vim.tbl_get(pr, "reviews", "nodes") or {}) do
     local rt = (r.id and by_review[r.id]) or {}
     local verdict = tostring(r.state or ""):upper()
-    -- show a review when it carries a body, inline threads, or a verdict — the
-    -- last so a bare "Approve" / "Request changes" still shows who weighed in.
     if vim.trim(r.body or "") ~= "" or #rt > 0 or verdict == "APPROVED" or verdict == "CHANGES_REQUESTED" then
       local kids = {}
       for _, t in ipairs(rt) do
@@ -257,7 +229,6 @@ function M.model(pr)
   table.sort(blocks, function(a, b)
     return a.at < b.at
   end)
-  -- threads not tied to a shown review become their own top-level blocks.
   for _, t in ipairs(orphans) do
     local k = thread_kid(t)
     blocks[#blocks + 1] = {

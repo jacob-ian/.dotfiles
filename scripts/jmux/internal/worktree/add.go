@@ -16,9 +16,7 @@ import (
 	"jmux/internal/spinner"
 )
 
-// AddWorktree runs the branch picker for bareRoot, creates the worktree, copies
-// env files from the default branch, and opens a session with claude + install
-// windows. Returns nil when the picker is cancelled.
+// AddWorktree picks a branch for bareRoot, creates its worktree, and opens a session.
 func AddWorktree(bareRoot string) error {
 	branches, err := gitctl.RemoteBranches(bareRoot)
 	if err != nil {
@@ -42,24 +40,19 @@ func AddWorktree(bareRoot string) error {
 	worktreePath := filepath.Join(bareRoot, branchName)
 	createBranch := !gitctl.RefExists(bareRoot, branchName)
 	if err := spinner.Run(fmt.Sprintf("creating %s…", branchName), func(phase chan<- string) error {
-		// Refresh the default branch so a new branch starts from the latest (not a
-		// stale local HEAD) and a later PR diff resolves against an up-to-date base.
-		// Best effort: a failed fetch (e.g. offline) shouldn't stop the add.
+		// Best effort: a failed fetch (offline) must not stop the add.
 		base := ""
 		if def := gitctl.DefaultBranch(bareRoot); def != "" {
 			phase <- "fetching " + def + "…"
 			_ = gitctl.FetchBranch(bareRoot, def)
 			base = "origin/" + def
-			// The new branch bases on origin/<def> regardless; this only keeps the
-			// default-branch checkout itself fresh.
 			if mainWt := filepath.Join(bareRoot, def); repo.IsDir(mainWt) {
 				phase <- "updating " + def + "…"
 				_ = gitctl.FastForward(mainWt, base)
 			}
 		}
-		// A typed name can be a remote branch the bare repo hasn't fetched yet (a
-		// bot's PR branch, a teammate's push): check out that branch rather than
-		// shadowing it with a fresh one off the default.
+		// A typed name may be a remote branch not yet fetched: check it out rather
+		// than shadowing it with a fresh branch off the default.
 		if createBranch {
 			phase <- "fetching " + branchName + "…"
 			if gitctl.FetchBranch(bareRoot, branchName) == nil {
@@ -94,7 +87,8 @@ func AddWorktree(bareRoot string) error {
 	})
 }
 
-// CopyEnvFiles copies any .env* file from the default-branch worktree into newPath.
+// CopyEnvFiles copies the default checkout's gitignored local config (.env*,
+// claude's settings.local.json) into newPath.
 func CopyEnvFiles(bareRoot, newPath string) {
 	defaultBranch := gitctl.DefaultBranch(bareRoot)
 	if defaultBranch == "" {
@@ -119,8 +113,6 @@ func CopyEnvFiles(bareRoot, newPath string) {
 		dst := filepath.Join(newPath, e.Name())
 		copyFile(src, dst)
 	}
-	// Claude's per-checkout permissions are gitignored like env files, so a
-	// fresh worktree would re-prompt for everything without them.
 	local := filepath.Join(".claude", "settings.local.json")
 	if _, err := os.Stat(filepath.Join(mainWt, local)); err == nil {
 		if err := os.MkdirAll(filepath.Join(newPath, ".claude"), 0o755); err == nil {
@@ -147,8 +139,7 @@ func copyFile(src, dst string) {
 	io.Copy(out, in)
 }
 
-// DetectInstallCmd returns the dependency-install command for dir based on its
-// lockfile, or "" when dir needs no install step.
+// DetectInstallCmd returns dir's dependency-install command from its lockfile, or "".
 func DetectInstallCmd(dir string) string {
 	if _, err := os.Stat(filepath.Join(dir, "package.json")); err != nil {
 		return ""

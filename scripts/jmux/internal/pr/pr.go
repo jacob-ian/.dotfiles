@@ -1,6 +1,5 @@
 // Package pr checks a GitHub pull request out into a worktree and opens a
-// review session. A PR is just a branch, so it reuses the worktree + session
-// machinery of `jmux worktree add`, sourcing PRs from `gh`.
+// review session.
 package pr
 
 import (
@@ -33,8 +32,7 @@ type tagData struct {
 
 var registerOnce sync.Once
 
-// Register wires this package's workspace-tag renderer; idempotent so main
-// and tests can both call it. \uf407 is nf-oct-git_pull_request.
+// Register wires this package's workspace-tag renderer. \uf407 is nf-oct-git_pull_request.
 func Register() {
 	registerOnce.Do(func() {
 		tag.Register(tagKind, func(data json.RawMessage) (string, tag.Color) {
@@ -47,16 +45,12 @@ func Register() {
 	})
 }
 
-// errNoGH is returned by every command that needs the gh CLI on PATH.
 var errNoGH = errors.New("gh CLI not found — install the GitHub CLI to review PRs")
 
-// errNoBareRepos marks a "nothing to work with" outcome that commands show as
-// plain info rather than a red error.
+// errNoBareRepos is shown as plain info rather than a red error.
 var errNoBareRepos = errors.New("no bare repos found")
 
-// RunRepo handles `jmux pr <dir>`: list one repo's open PRs and review the
-// choice. dir picks the repo ("" or "." = current); the global queue is
-// RunAssigned.
+// RunRepo handles `jmux pr <dir>`: pick one of the repo's open PRs and review it.
 func RunRepo(cfg repo.Config, dir string) error {
 	if !ghctl.Available() {
 		return errNoGH
@@ -113,9 +107,8 @@ func RunNumber(cfg repo.Config, num int) error {
 	return review(bareRoot, p)
 }
 
-// pickPR opens the PR picker: start:reload fills the list asynchronously behind
-// fzf's spinner so the open doesn't block on gh, and the load event swaps the
-// "loading…" prompt back. ctrl-r reloads via refreshCmd.
+// pickPR opens the PR picker; start:reload fills the list behind fzf's spinner
+// so opening doesn't block on gh.
 func pickPR(prompt, itemsCmd, refreshCmd string) (string, error) {
 	return fzfutil.Pick(nil, fzfutil.Options{
 		Prompt: "loading… ",
@@ -133,8 +126,8 @@ func pickPR(prompt, itemsCmd, refreshCmd string) (string, error) {
 	})
 }
 
-// resolveHeadRef returns a picker row's hidden head-branch field, falling back
-// to a gh lookup for rows that predate the field.
+// resolveHeadRef reads the row's hidden head-branch field, falling back to gh
+// for cached rows that predate it.
 func resolveHeadRef(sel, slug string, num int) (string, error) {
 	if ref := rowHeadRef(sel); ref != "" {
 		return ref, nil
@@ -146,13 +139,11 @@ func resolveHeadRef(sel, slug string, num int) (string, error) {
 	return ref, nil
 }
 
-// prEditorCmd opens nvim with the PR conversation view (`pv`) shown: a once-only VimEnter
-// hook fires after startup, so the lazy plugin is loaded by the time it runs.
+// prEditorCmd opens nvim on the PR conversation view; VimEnter runs after the
+// lazy plugin is loaded.
 const prEditorCmd = `nvim -c "autocmd VimEnter * ++once lua require('jmux').pr.view()"`
 
-// review checks the PR out into a worktree and opens its session (nvim with the
-// diff, a paired claude window, the install window), showing setup progress in
-// a spinner.
+// review checks the PR out into a worktree and opens its session.
 func review(bareRoot string, p ghctl.PR) error {
 	var path string
 	err := spinner.Run(fmt.Sprintf("opening PR #%d…", p.Number), func(phase chan<- string) (err error) {
@@ -170,17 +161,12 @@ func review(bareRoot string, p ghctl.PR) error {
 	})
 }
 
-// checkoutWorktree returns the PR's head-branch worktree, fetching and creating
-// it (tracking origin/<branch>) if absent or reusing an existing one. Env files
-// are copied across as for any feature worktree.
+// checkoutWorktree returns the PR's head-branch worktree, creating it if absent.
 func checkoutWorktree(bareRoot string, p ghctl.PR, phase chan<- string) (string, error) {
 	branch := p.HeadRefName
 
-	// Refresh the PR's base branch (even on the reuse paths below) so the diff's
-	// base...HEAD resolves against an up-to-date base. baseRefName is the PR's
-	// actual target, which isn't always the repo default (stacked or
-	// release-branch PRs); fall back to the default branch when we don't know it.
-	// Best effort: a failed fetch (e.g. offline) shouldn't stop the PR opening.
+	// The base is fetched even when the worktree is reused so the diff's
+	// base...HEAD is current; a failed fetch (offline) must not stop the open.
 	base := p.BaseRefName
 	if base == "" {
 		base = gitctl.DefaultBranch(bareRoot)
@@ -210,9 +196,8 @@ func checkoutWorktree(bareRoot string, p ghctl.PR, phase chan<- string) (string,
 	return path, nil
 }
 
-// resolveRepoSlug resolves the bare repo containing dir (cwd when "") — or one
-// the user picks — plus its origin "owner/repo" slug. A cancelled picker
-// returns empty results with a nil error.
+// resolveRepoSlug returns the bare repo containing dir (cwd when "", picked when
+// none) and its "owner/repo" slug; a cancelled pick is empty with a nil error.
 func resolveRepoSlug(cfg repo.Config, dir string) (bareRoot, slug string, err error) {
 	bareRoot, err = resolveBareRoot(cfg, dir)
 	if err != nil || bareRoot == "" {
@@ -224,8 +209,6 @@ func resolveRepoSlug(cfg repo.Config, dir string) (bareRoot, slug string, err er
 	return bareRoot, slug, nil
 }
 
-// resolveBareRoot returns the bare repo containing start (cwd when start is ""),
-// or one the user picks. A cancelled picker returns "" with a nil error.
 func resolveBareRoot(cfg repo.Config, start string) (string, error) {
 	if start == "" {
 		cwd, err := os.Getwd()
@@ -249,7 +232,7 @@ func resolveBareRoot(cfg repo.Config, start string) (string, error) {
 	return repo.TrimSlash(sel), nil
 }
 
-// formatRow renders a picker row: "owner/repo#12  [draft] Title  ·  author".
+// formatRow renders "owner/repo#12  [draft] Title  ·  author".
 func formatRow(slug string, num int, draft bool, title, login string) string {
 	marker := ""
 	if draft {
@@ -258,8 +241,6 @@ func formatRow(slug string, num int, draft bool, title, login string) string {
 	return fmt.Sprintf("%s#%d  %s%s  ·  %s", slug, num, marker, title, login)
 }
 
-// byline is a row's trailing name: the human driving a bot-authored PR with
-// the bot noted, or just the author.
 func byline(author, owner string) string {
 	if owner == "" {
 		return author
@@ -267,14 +248,14 @@ func byline(author, owner string) string {
 	return owner + " via " + author
 }
 
-// formatItemsRow appends the head and base branches as hidden tab fields (fzf
-// shows only column 1) so selection can read them back without a gh lookup.
+// formatItemsRow appends the head and base branches as hidden tab fields so
+// selection can read them back without a gh lookup.
 func formatItemsRow(slug string, num int, draft bool, title, login, headRef, baseRef string) string {
 	return formatRow(slug, num, draft, title, login) + "\t" + headRef + "\t" + baseRef
 }
 
-// rowField returns the n-th tab-separated field of a picker row (0 = visible
-// column), or "" when absent — tolerating older rows that carry fewer fields.
+// rowField returns the n-th tab-separated field, or "" for older cached rows
+// that carry fewer fields.
 func rowField(line string, n int) string {
 	parts := strings.Split(line, "\t")
 	if n < len(parts) {

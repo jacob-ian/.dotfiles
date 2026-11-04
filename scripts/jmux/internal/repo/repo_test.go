@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// fakeBare creates a directory that looks like a bare repo's `worktrees/`
-// parent. It returns the bare-root path; admin entries are added via writeAdmin.
 func fakeBare(t *testing.T) string {
 	t.Helper()
 	bare := t.TempDir()
@@ -18,8 +16,6 @@ func fakeBare(t *testing.T) string {
 	return bare
 }
 
-// writeAdmin creates a `<bare>/worktrees/<name>/gitdir` file pointing at
-// gitdirPath (typically `<worktreePath>/.git`). Returns the admin dir path.
 func writeAdmin(t *testing.T, bare, name, gitdirPath string) string {
 	t.Helper()
 	adminDir := filepath.Join(bare, "worktrees", name)
@@ -60,7 +56,6 @@ func TestAdminDirFor(t *testing.T) {
 
 	t.Run("admin entry with missing gitdir is skipped", func(t *testing.T) {
 		dir := fakeBare(t)
-		// Admin dir exists but no gitdir file.
 		if err := os.MkdirAll(filepath.Join(dir, "worktrees", "broken"), 0o755); err != nil {
 			t.Fatal(err)
 		}

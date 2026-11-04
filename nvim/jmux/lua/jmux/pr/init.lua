@@ -1,11 +1,6 @@
--- Lightweight GitHub PR review. Stage inline comments from diffview selections
--- into a pending review, then submit once with a verdict; replies to existing
--- threads post immediately. Replaces octo for the review flow. Works in a jmux
--- PR worktree, where the checked-out branch is the PR's head, so `gh` resolves
--- the PR for every call with no number to pass.
---
--- The implementation is layered under pr/: util → gh → ui/state → diff →
--- review/view. This facade re-exports the public surface the keymaps bind.
+-- GitHub PR review: stage inline comments from diffview into a pending review
+-- and submit once with a verdict. Runs in a jmux PR worktree, so `gh` resolves
+-- the PR from the checked-out branch.
 
 local agent = require "jmux.pr.agent"
 local diff = require "jmux.pr.diff"
@@ -17,7 +12,6 @@ return {
   suggest = diff.suggest,
   diff = diff.diff,
   review = review.review,
-  discard = review.discard,
   view = view.view,
   browser = view.browser,
   agent_review = agent.review,

@@ -1,5 +1,4 @@
--- Merge readiness as a pure model: the byline summary chip and the fields
--- pv's m/M keys decide with. Same pane-ready shape as the other models.
+-- Merge readiness as a pure model.
 
 local util = require "jmux.pr.util"
 
@@ -7,24 +6,21 @@ local nilable = util.nilable
 
 local M = {}
 
--- FIELDS is the PR selection this model reads.
 M.FIELDS = [[isDraft mergeable reviewDecision mergeStateStatus
       autoMergeRequest{ enabledAt }]]
 
--- allowlist the repo's default merge method to a literal gh flag, so crafted
--- API data can never inject an arbitrary argument.
+-- Only these literal flags reach gh, so API data can't inject an argument.
 local FLAGS = { merge = "--merge", squash = "--squash", rebase = "--rebase" }
 
--- summary distils review + merge state into a one-line readiness chip
--- { icon, hl, text } for an open PR, or nil for merged/closed cases where
--- the status line already says it all.
+-- summary distils review and merge state into a readiness chip
+-- { icon, hl, text }, or nil unless the PR is open.
 ---@return { icon: string, hl: string, text: string }?
 function M.summary(pr)
   if tostring(pr.state or ""):upper() ~= "OPEN" then
     return nil
   end
-  -- unresolved threads block the merge when the branch requires resolution; that
-  -- rule isn't readable without push access, so surface the count regardless.
+  -- the required-resolution rule isn't readable without push access, so the
+  -- count is always shown.
   local unresolved = 0
   for _, t in ipairs(vim.tbl_get(pr, "reviewThreads", "nodes") or {}) do
     if not t.isResolved then
@@ -54,8 +50,6 @@ function M.summary(pr)
   elseif decision == "APPROVED" then
     icon, hl, state_str = "✓", "DiagnosticOk", "approved"
   end
-  -- approval counts live in the reviewers pane, so the summary carries only
-  -- what that pane can't: thread resolution and merge state.
   local parts = {}
   if unresolved > 0 then
     parts[#parts + 1] = unresolved .. " unresolved"
@@ -67,9 +61,8 @@ function M.summary(pr)
   return { icon = icon, hl = hl, text = table.concat(parts, " · ") }
 end
 
--- model resolves what the merge keys need: how/flag from the repo's default
--- method (nil flag = no safe method to run), whether GitHub reports the PR
--- ready (nothing left to wait for), and whether auto-merge is already armed.
+-- model resolves what the merge keys need; flag is nil when there's no safe
+-- method to run.
 ---@param method string? the repository's viewerDefaultMergeMethod
 ---@return { how: string?, flag: string?, ready: boolean, armed: boolean }
 function M.model(pr, method)

@@ -16,10 +16,8 @@ import (
 	"jmux/internal/worktree"
 )
 
-// RunPreview prints a one-screen summary of the workspace at --path. Invoked by
-// fzf on every cursor move, so it must be fast and never error to stderr; the
-// git calls are fanned out in goroutines so wall-clock is bounded by the
-// slowest call rather than their sum.
+// RunPreview prints a one-screen summary of the workspace at --path. fzf runs
+// it on every cursor move, so git calls are fanned out in parallel.
 func RunPreview(args []string) {
 	fs := flag.NewFlagSet("workspace preview", flag.ContinueOnError)
 	path := fs.String("path", "", "Workspace path to summarise")
@@ -29,8 +27,6 @@ func RunPreview(args []string) {
 
 	bareRoot := repo.FindBareRoot(*path)
 
-	// The live pane needs no git answer, so it's captured alongside the git
-	// fan-out rather than after it.
 	live := make(chan string, 1)
 	go func() { live <- livePane(session.Name(*path)) }()
 
@@ -75,9 +71,8 @@ func RunPreview(args []string) {
 	logOutput := ""
 
 	if defaultBranch != "" {
-		// Compare against the remote default, else (no remote: scratch) the
-		// local one. The failed comparison is the existence check, which
-		// saves a rev-parse round trip on every preview.
+		// The failed comparison doubles as the ref-existence check, saving a
+		// rev-parse per preview; scratch has no remote so falls to the local default.
 		ref := "origin/" + defaultBranch
 		var ahead, behind int
 		var ok bool
@@ -115,7 +110,6 @@ func RunPreview(args []string) {
 	}
 	fmt.Println()
 
-	// For an open session, show a live pane instead of git detail.
 	if pane := <-live; pane != "" {
 		fmt.Println(pane)
 		return
@@ -133,8 +127,6 @@ func RunPreview(args []string) {
 	}
 }
 
-// compare runs the ahead/behind count and the unique-commit log against ref
-// in parallel; ok is false when ref doesn't resolve.
 func compare(path, ref string) (ahead, behind int, log string, ok bool) {
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -144,10 +136,8 @@ func compare(path, ref string) (ahead, behind int, log string, ok bool) {
 	return ahead, behind, log, ok
 }
 
-// livePane captures the workspace's session for the preview: the claude
-// window if it's running, otherwise the nvim editor (an alt-screen TUI, so
-// only the visible pane). One list-windows call answers both "is there a
-// session" and "which windows"; "" when there's nothing to show.
+// livePane captures the session's claude window, else its nvim window (an
+// alt-screen TUI, so only the visible pane); "" when there is no session.
 func livePane(sessionName string) string {
 	windows := tmuxctl.WindowNames(sessionName)
 	if slices.Contains(windows, "claude") {

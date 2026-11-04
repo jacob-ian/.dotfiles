@@ -1,8 +1,4 @@
--- The pv view: a tab of three panes — the conversation (description,
--- comments, reviews, inline threads) beside reviewers and checks panes fed
--- by their pure models — with refresh, reply, reactions, reviewer requests,
--- description editing, and merging. Panes are plain windows: <C-w> motions
--- move between them.
+-- The pv view: a tab with the conversation beside reviewers and checks panes.
 
 local checks = require "jmux.pr.checks"
 local conversation = require "jmux.pr.conversation"
@@ -16,32 +12,20 @@ local ui = require "jmux.pr.ui"
 local util = require "jmux.pr.util"
 
 local nilable = util.nilable
-local reltime = util.reltime
 
 local M = {}
 
--- pv_tab is the `pv` view tab, tracked so re-invoking focuses the open tab
--- instead of stacking a duplicate. pv_refresh refetches into that tab, for
--- callers whose action just changed the conversation (e.g. a submitted review).
 local pv_tab
 local pv_refresh
--- The hint bar starts collapsed (contextual hints only); ? expands the full
--- key list. Module-owned so the preference outlives each render.
+-- module-owned so the ? preference outlives each render.
 local hint_state = { hidden = true }
 
--- watch holds the poll timer that keeps pv fresh while checks run or an
--- auto-merge is armed; it dies with the tab or the state it waited for.
+-- watch is the poll timer that runs while checks run or an auto-merge is armed.
 local watch = ui.slot(function(t)
   t:stop()
   t:close()
 end)
 
--- VIEW_QUERY stitches the models' field fragments into one request: each
--- model owns the selection it reads (conversation also lends its connection
--- field lists to the pagination below); view owns only the wiring — viewer,
--- repo scalars, mine/assignee bits, and the pageInfo plumbing. The three
--- conversation connections page at GitHub's 100 cap; fetch_all chases their
--- cursors so a busy PR renders whole.
 local VIEW_QUERY = ([[
 query($owner:String!,$repo:String!,$number:Int!){
   viewer{ login }
@@ -68,7 +52,6 @@ query($owner:String!,$repo:String!,$number:Int!){
   checks.FIELDS
 )
 
--- page_query fetches one more page of a single conversation connection.
 local function page_query(key, fields)
   return ([[
 query($owner:String!,$repo:String!,$number:Int!,$after:String!){
@@ -86,10 +69,8 @@ local CONNECTIONS = {
   { key = "reviewThreads", fields = conversation.THREAD_FIELDS },
 }
 
--- fetch_all runs VIEW_QUERY, then chases each conversation connection's
--- cursors — connections in parallel, pages within one in sequence — merging
--- every page's nodes before handing the whole response to cb. A failed tail
--- page renders what was gathered rather than failing the view.
+-- fetch_all runs VIEW_QUERY then pages each connection past GitHub's 100 cap;
+-- a failed tail page renders what was gathered.
 local function fetch_all(vars, cb)
   gh.graphql(VIEW_QUERY, vars, function(data, err)
     local pr = data and vim.tbl_get(data, "data", "repository", "pullRequest")
@@ -129,9 +110,6 @@ local function fetch_all(vars, cb)
   end)
 end
 
--- build_model composes the three pure models from the VIEW_QUERY response:
--- the conversation (header, description, time-ordered blocks + row-intent
--- maps) and the side panes' reviewers/checks (nil when the PR has neither).
 local function build_model(data)
   local pr = vim.tbl_get(data, "data", "repository", "pullRequest")
   if type(pr) ~= "table" then
@@ -143,9 +121,6 @@ local function build_model(data)
   return m
 end
 
--- REVIEWERS_QUERY lists the repo's assignable users — the set that can be
--- requested for review — for the `R` picker. 100 is plenty for our repos; a
--- larger org would need pagination.
 local REVIEWERS_QUERY = [[
 query($owner:String!,$repo:String!){
   repository(owner:$owner,name:$repo){
@@ -153,20 +128,15 @@ query($owner:String!,$repo:String!){
   }
 }]]
 
--- TEAMS_QUERY lists the owning org's teams (requestable as reviewers). It's
--- best-effort: a user-owned repo has no organization (and read:org may be
--- missing), so the call can fail — the picker then just offers users.
+-- Best-effort: a user-owned repo has no organization, so this can fail and
+-- the picker then offers only users.
 local TEAMS_QUERY = [[
 query($owner:String!){
   organization(login:$owner){ teams(first:100){ nodes{ slug name } } }
 }]]
 
--- request_review picks reviewers — assignable users or org teams — and adds
--- them via one `gh pr edit`. The author and anyone/any team already requested
--- are filtered out (excluded by login, excludedTeams by slug). Uses snacks'
--- picker directly rather than vim.ui.select so several reviewers can be
--- Tab-marked and confirmed together (<CR> on an unmarked item still single-picks).
--- on_done runs after success so the caller can refresh.
+-- request_review picks users or teams and requests them in one gh call. It
+-- uses snacks' picker directly because vim.ui.select can't multi-select.
 local function request_review(pr, excluded, excludedTeams, on_done)
   local owner = gh.owner_repo(pr.slug)
   local stop = ui.spin "fetching reviewers…"
@@ -182,8 +152,6 @@ local function request_review(pr, excluded, excludedTeams, on_done)
     end
     local who = #labels > 3 and (#labels .. " reviewers") or table.concat(labels, ", ")
     ui.act("requesting " .. who .. "…", function(done)
-      -- --add-reviewer takes a comma-separated list, so any number of picks is
-      -- still one gh call.
       vim.system(
         { "gh", "pr", "edit", tostring(pr.number), "--repo", pr.slug, "--add-reviewer", table.concat(values, ",") },
         { text = true },
@@ -212,8 +180,6 @@ local function request_review(pr, excluded, excludedTeams, on_done)
       format = "text",
       layout = { preset = "select" },
       confirm = function(picker)
-        -- fallback keeps the single-pick flow: <CR> with nothing marked acts
-        -- on the item under the cursor.
         local chosen = picker:selected { fallback = true }
         picker:close()
         request(chosen)
@@ -221,17 +187,12 @@ local function request_review(pr, excluded, excludedTeams, on_done)
     }
   end
 
-  -- users and teams fetch concurrently — neither depends on the other, so the
-  -- picker's wait is the slower call, not their sum. Failures degrade to the
-  -- empty list, so both always land and the picker always opens.
   local users_r, teams_r
   local function maybe_pick()
     if not (users_r and teams_r) then
       return
     end
     stop()
-    -- text is what the picker shows and matches on; label is the short name
-    -- used in notifications.
     local items = {}
     for _, u in ipairs(users_r) do
       if u.login and not excluded[u.login] then
@@ -272,14 +233,10 @@ local function request_review(pr, excluded, excludedTeams, on_done)
   end)
 end
 
--- edit_description opens the PR body in the multiline editor (prefilled with the
--- current text) and writes it back with `gh pr edit` on :w. on_done runs after a
--- successful save so the caller can refresh. gh rejects the edit if you lack
--- permission. An empty buffer is a no-op (prompt_multiline won't save it), so the
--- description can't be cleared from here — edit on the web for that.
+-- edit_description edits the PR body in the multiline prompt and saves it on
+-- :w. An empty buffer never saves, so the description can't be cleared here.
 local function edit_description(pr, body, on_done)
-  -- GitHub returns the body with CRLF endings; strip the \r so the edit buffer
-  -- doesn't show a trailing ^M on every line.
+  -- GitHub returns the body with CRLF endings.
   body = (body or ""):gsub("\r", "")
   ui.prompt_multiline(("edit #%d description"):format(pr.number), function(text)
     ui.act("saving description…", function(done)
@@ -301,8 +258,7 @@ local function edit_description(pr, body, on_done)
   end, body ~= "" and body or nil, nil, " :w save · :q close ")
 end
 
--- edit_title prompts with the current title prefilled and saves via
--- `gh pr edit`; cancel or an unchanged/empty title is a no-op.
+-- edit_title prompts for a new title; cancel, empty or unchanged is a no-op.
 local function edit_title(pr, current, on_done)
   vim.ui.input({ prompt = "title> ", default = current }, function(text)
     if text == nil or vim.trim(text) == "" or text == current then
@@ -327,9 +283,7 @@ local function edit_title(pr, current, on_done)
   end)
 end
 
--- view renders the full PR conversation — body, comments, reviews, inline review
--- threads, and checks — into a markdown tab. Fetched async (a "Loading…" stub
--- shows first) so opening is instant; q closes it.
+-- view opens (or focuses) the PR conversation tab.
 function M.view(opts)
   if pv_tab and vim.api.nvim_tabpage_is_valid(pv_tab) then
     vim.api.nvim_set_current_tabpage(pv_tab)
@@ -338,9 +292,6 @@ function M.view(opts)
     end
     return
   end
-  -- Open the tab and paint the loader first; resolving the PR and fetching the
-  -- conversation both happen async, so the view shows instantly and the spinner
-  -- keeps animating during any round trip.
   local conv = ui.pane {
     tab = true,
     bo = { filetype = "markdown" },
@@ -349,22 +300,16 @@ function M.view(opts)
       linebreak = true,
       breakindent = true,
       conceallevel = 2,
-      -- concealed even on the cursor line: this is a read-only view, so
-      -- revealing raw syntax on hover just makes lines jump around.
+      -- read-only view, so revealing raw syntax on the cursor line only jumps.
       concealcursor = "nvic",
     },
   }
   local win, buf = conv.win, conv.buf
   pv_tab = vim.api.nvim_win_get_tabpage(win)
 
-  -- wide enough that a typical "◷ Reviewers · 1 approved · 1 awaiting"
-  -- title survives whole, but never more than a third of a narrow screen.
   local function side_width()
     return math.min(42, math.floor(vim.o.columns / 3))
   end
-  -- The side column: reviewers over checks, plain splits so every native
-  -- window motion (<C-w>hjkl, resize, close) just works; they die with the
-  -- conversation, whichever way it goes.
   local panes = {
     reviewers = ui.pane {
       split = "right",
@@ -377,7 +322,6 @@ function M.view(opts)
   panes.checks = ui.pane { split = "below", label = "checks", wo = { wrap = false } }
   ui.panegroup { owner = conv, panes = { conv, panes.reviewers, panes.checks } }
   for _, pane in pairs(panes) do
-    -- q works even before the first render binds the full spec.
     vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = pane.buf, nowait = true, desc = "close" })
   end
   vim.api.nvim_set_current_win(win)
@@ -398,9 +342,6 @@ function M.view(opts)
   end)
   vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = buf, nowait = true, desc = "close" })
 
-  -- Draw the first frame synchronously and force a redraw so the loader shows the
-  -- instant the tab opens, rather than waiting for the first timer tick; the
-  -- spinner animates it from there.
   local function draw_loader(frame)
     if not vim.api.nvim_buf_is_valid(buf) then
       return
@@ -410,6 +351,7 @@ function M.view(opts)
     vim.bo[buf].modifiable = false
   end
   draw_loader(ui.SPINNER[1])
+  -- show the loader before the first timer tick.
   vim.cmd "redraw"
   local stop_loader = ui.spinner(draw_loader)
 
@@ -425,26 +367,16 @@ function M.view(opts)
     end
     local owner, repo = gh.owner_repo(pr.slug)
 
-    -- the PR description starts open; everything else collapsed. Hoisted above
-    -- fetch_and_render so expand/collapse state survives a merge-triggered refresh.
+    -- outside fetch_and_render so expand state survives a refresh.
     local expanded = { pr = true }
 
-    -- start_watch is defined after fetch_and_render (its tick refetches) but
-    -- wired into the keys below, hence the forward declaration.
     local start_watch
 
-    -- re-runnable so a successful merge can refresh the view in place. stop_spin,
-    -- when passed, halts a merge spinner the instant the refreshed data arrives.
     local function fetch_and_render(stop_spin, cached)
-      -- remember the cursor line so a refresh keeps your place across the
-      -- re-render (expand state is preserved, so the line stays meaningful).
       local prev_line = (vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_cursor(win)[1]) or 1
 
-      -- finish renders one decoded response into the view and wires its keymaps.
-      -- The render path is identical for a cached open and a live fetch — both
-      -- hand over the decoded table; `age` (the cache's age in seconds, nil for a
-      -- live fetch) is shown in the bar so a stale copy is obvious and signposts
-      -- the <C-r> refresh.
+      -- finish renders one response and wires the keys; age is the cache's age
+      -- in seconds, nil for a live fetch.
       local function finish(data, err2, age)
         vim.schedule(function()
           stop_loader()
@@ -457,16 +389,10 @@ function M.view(opts)
           if not data then
             return fill { "", "  failed to load PR:", "", "  " .. (err2 or "") }
           end
-          -- a live fetch (age nil) refreshes the on-disk cache; a cached open
-          -- (age set) renders without rewriting what it just read.
           if not age then
             state.write_view_cache(vim.json.encode(data))
           end
 
-          -- Collapsible tree: header → PR description → checks → conversation. Each
-          -- item shows a ▸/▾ header; expanding a review reveals its body and inline
-          -- threads, which expand in turn. Re-rendered on toggle; check-icon marks are
-          -- repositioned since the description above them changes height.
           local model = build_model(data)
           local ns = vim.api.nvim_create_namespace "jmux_pr_view"
           local rows_by_id, id_by_row, jump_by_row, reviewer_by_row, check_by_row, subject_by_row =
@@ -476,8 +402,7 @@ function M.view(opts)
             local lines = vim.list_extend({}, model.header)
             rows_by_id, id_by_row, jump_by_row, reviewer_by_row, check_by_row, subject_by_row = {}, {}, {}, {}, {}, {}
             local marks = {}
-            -- indent body lines under their title (blank lines stay blank so markdown
-            -- paragraph breaks survive); any body_marks shift with the indent.
+            -- blank lines stay blank so markdown paragraph breaks survive.
             local function add_body(src, indent, body_marks)
               local start = #lines
               for _, l in ipairs(src) do
@@ -503,13 +428,9 @@ function M.view(opts)
                 }
               end
               if expanded[b.id] then
-                -- an expanded thread's first body line is its `path:line`,
-                -- <CR>'s jump target.
                 if model.jumps[b.id] then
                   jump_by_row[row + 1] = b.id
                 end
-                -- body rows react to their own message: a thread's per-line
-                -- subjects (replies differ from the root), else the block's.
                 local bsubj = model.subjects[b.id]
                 for i = 1, #b.body do
                   local s = (b.line_subjects and b.line_subjects[i]) or bsubj
@@ -532,8 +453,8 @@ function M.view(opts)
                         subject_by_row[krow + i] = s
                       end
                     end
-                    -- three spaces, not four — a 4-space indent after a blank
-                    -- line is an indented code block to markdown.
+                    -- three spaces: a four-space indent after a blank line is a
+                    -- markdown code block.
                     add_body(k.lines, "   ", k.line_marks)
                   end
                 end
@@ -550,7 +471,6 @@ function M.view(opts)
 
             fill(lines)
             vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-            -- header marks sit at fixed top rows; block marks at their rendered rows.
             for _, m in ipairs(model.header_marks or {}) do
               marks[#marks + 1] = m
             end
@@ -562,8 +482,6 @@ function M.view(opts)
               })
             end
 
-            -- the side panes re-fill from their models on every render, and
-            -- the reviewers rows map for R (entry i on 0-indexed row i - 1).
             panes.reviewers.fill(model.reviewers)
             panes.checks.fill(model.checks)
             reviewer_by_row, check_by_row = {}, {}
@@ -575,9 +493,8 @@ function M.view(opts)
             end
           end
 
-          -- resolve the window from the keypress, not the captured `win`: the buffer
-          -- can outlive its original window (e.g. :split then close the first), and
-          -- a stale win id would throw E5108.
+          -- the buffer can outlive the captured win (:split then close the
+          -- first), so every key resolves the window from the keypress.
           local function toggle()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= buf then
@@ -594,8 +511,6 @@ function M.view(opts)
 
           render()
 
-          -- <CR> on a thread's `path:line` opens the diff there; elsewhere it
-          -- toggles like <Tab>.
           local function toggle_or_jump()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= buf then
@@ -614,17 +529,14 @@ function M.view(opts)
             fetch_and_render(ui.spin "refreshing…")
           end
 
-          -- who_reacted shows the reactor hover. Logins aren't in the main
-          -- query (node limit), so they fetch on demand, memoized for the
-          -- render's lifetime; the hover only pops if the cursor hasn't moved.
+          -- who_reacted fetches reactor logins on demand (they're not in the
+          -- main query) and memoizes them for the render's lifetime.
           local function who_reacted()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= buf then
               return
             end
             local row = vim.api.nvim_win_get_cursor(w)[1] - 1
-            -- a message row hovers that message's reactors; a header row the
-            -- block's (a thread header aggregates the whole thread).
             local subj, id = subject_by_row[row], id_by_row[row]
             local entry = (subj and model.reactions[subj.id]) or (id and model.reactions[id])
             if not entry then
@@ -668,11 +580,6 @@ function M.view(opts)
             end)
           end
 
-          -- + reacts via the emoji picker: every reaction is a toggle (the
-          -- picker marks the ones already yours). `+` echoes GitHub's
-          -- smiley-plus button.
-          -- body rows resolve to their own message's subject; header rows to
-          -- the block/thread's (a thread header reacts to its root comment).
           local function subject_under_cursor()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= buf then
@@ -719,9 +626,6 @@ function M.view(opts)
             end)
           end
 
-          -- R requests a reviewer: pick from the repo's assignable users, skipping
-          -- the author and anyone already requested, then refresh so the new
-          -- "awaiting" line shows. gh rejects the request if you lack permission.
           local prnode = vim.tbl_get(data, "data", "repository", "pullRequest")
           local viewer = nilable(vim.tbl_get(data, "data", "viewer", "login"))
           local excluded = { [viewer or ""] = true }
@@ -740,8 +644,7 @@ function M.view(opts)
               end
             end
           end
-          -- threads keyed by id: the row resolvers run per cursor move for
-          -- the contextual hints, so no linear scans there.
+          -- keyed by id: the row resolvers run on every cursor move.
           local thread_by_id = {}
           for _, t in ipairs(vim.tbl_get(prnode or {}, "reviewThreads", "nodes") or {}) do
             if t.id then
@@ -749,8 +652,6 @@ function M.view(opts)
             end
           end
 
-          -- cursor_row is the 0-indexed buffer row under the cursor, nil when
-          -- focus is elsewhere; the row resolvers below key off it.
           local function cursor_row()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= buf then
@@ -759,15 +660,12 @@ function M.view(opts)
             return vim.api.nvim_win_get_cursor(w)[1] - 1
           end
 
-          -- thread_under_cursor resolves the cursor row to its reviewThreads
-          -- node (threads are the kids whose id is the GraphQL thread id).
           local function thread_under_cursor()
             local row = cursor_row()
             local id = row and id_by_row[row]
             return id and thread_by_id[id] or nil
           end
 
-          -- replies post immediately, then the view refreshes.
           local function reply()
             local t = thread_under_cursor()
             if not t then
@@ -784,8 +682,6 @@ function M.view(opts)
             end)
           end
 
-          -- check_under_cursor resolves a checks-pane row to its entry, when
-          -- that check has a details page to open.
           local function check_under_cursor()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= panes.checks.buf then
@@ -795,7 +691,6 @@ function M.view(opts)
             return e and e.url and e or nil
           end
 
-          -- reviewer_under_cursor resolves a reviewers-pane row to its entry.
           local function reviewer_under_cursor()
             local w = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_buf(w) ~= panes.reviewers.buf then
@@ -804,8 +699,6 @@ function M.view(opts)
             return reviewer_by_row[vim.api.nvim_win_get_cursor(w)[1] - 1]
           end
 
-          -- edit_target says what `i` edits at the cursor: the title on the
-          -- two header rows, the description anywhere in the pr block.
           local function edit_target()
             local row = cursor_row()
             if not row then
@@ -819,9 +712,7 @@ function M.view(opts)
             end
           end
 
-          -- R on a reviewer's line re-requests that reviewer directly;
-          -- anywhere else it opens the request picker. Awaiting rows no-op —
-          -- GitHub already lists them as requested.
+          -- on a reviewer's row R re-requests them; elsewhere it opens the picker.
           local function request()
             local e = reviewer_under_cursor()
             if not e then
@@ -854,7 +745,6 @@ function M.view(opts)
             end)
           end
 
-          -- x toggles the thread's resolved state.
           local function resolve()
             local t = thread_under_cursor()
             if not t then
@@ -865,9 +755,7 @@ function M.view(opts)
             end)
           end
 
-          -- mine: the PR is yours to act on — you authored it or are assigned. Gates
-          -- editing the description (E) and merging (m/M) so they only show when
-          -- usable.
+          -- mine gates editing and merging: authored or assigned.
           local mine = prnode and prnode.viewerDidAuthor
           if prnode and not mine then
             for _, a in ipairs(vim.tbl_get(prnode, "assignees", "nodes") or {}) do
@@ -878,14 +766,11 @@ function M.view(opts)
             end
           end
 
-          -- merging needs an open PR that's yours and a merge model with a safe
-          -- gh flag; ready merges now, anything else arms auto-merge.
           local mst = merge.model(prnode, nilable(vim.tbl_get(data, "data", "repository", "viewerDefaultMergeMethod")))
           local how, flag, ready, armed = mst.how, mst.flag, mst.ready, mst.armed
           local pr_state = tostring(nilable(prnode.state) or ""):upper()
           local mergeable = mine and flag and pr_state == "OPEN"
 
-          -- gh_merge runs `gh pr merge` with extra flags, confirming first.
           local function gh_merge(prompt, label, extra, on_ok)
             ui.confirm(prompt, function()
               ui.act(label, function(done)
@@ -902,7 +787,6 @@ function M.view(opts)
             end)
           end
 
-          -- admin bypasses branch protection (failing checks, unresolved threads).
           local function do_merge(admin)
             local label = admin and (how .. ", admin") or how
             gh_merge(("merge #%d via %s?"):format(pr.number, label), ("merging #%d…"):format(pr.number), {
@@ -915,8 +799,8 @@ function M.view(opts)
             end)
           end
 
-          -- arm_auto enables GitHub's server-side auto-merge, then watches so
-          -- the merge is noticed and the workspace prompt still fires.
+          -- arm_auto enables server-side auto-merge, then watches so the merge
+          -- is noticed and the workspace prompt still fires.
           local function arm_auto()
             gh_merge(
               ("auto-merge #%d via %s when ready?"):format(pr.number, how),
@@ -930,9 +814,7 @@ function M.view(opts)
             )
           end
 
-          -- What the watcher was waiting for, evaluated on every render: a
-          -- merge (armed or manual elsewhere) fires the same prompt as m; a
-          -- watch without auto-merge stops when the checks settle.
+          -- what the watcher waited for, evaluated on every render.
           if watch.value then
             local running = model.checks and model.checks.running or 0
             local failed = model.checks and model.checks.failed or 0
@@ -951,18 +833,13 @@ function M.view(opts)
               end
             end
           elseif armed and pr_state == "OPEN" then
-            -- an armed PR (from a previous session or the web) is worth
-            -- watching as soon as pv sees it.
             start_watch()
           end
 
-          -- the view's keys: spec order is bar order, `when` gates the ones
-          -- that need the PR to be yours (and open, for merging), and `ctx`
-          -- marks the ones the collapsed bar shows for the cursor's row.
+          -- spec order is bar order.
           local keys = ui.keyspec {
             {
               lhs = "m",
-              -- merge when GitHub says ready, otherwise arm auto-merge.
               rhs = function()
                 if ready then
                   do_merge(false)
@@ -1124,8 +1001,6 @@ function M.view(opts)
             { lhs = "q", rhs = "<cmd>tabclose<cr>", hint = "close", desc = "close" },
           }
 
-          -- a cached paint flags its age so it's clear the data may be stale
-          -- and <C-r> will refetch; a live fetch (age nil) shows no marker.
           local bar = ui.hintbar {
             keys = keys,
             set_hints = set_hints,
@@ -1134,8 +1009,6 @@ function M.view(opts)
               return age and { ("%%#Comment#cached %s ago"):format(util.short_age(age)) } or {}
             end,
           }
-          -- each buffer gets the global keys (pane = nil) plus its own pane's.
-          -- The bar tracks the cursor in all three.
           local function for_pane(name)
             return function(k)
               return k.pane == nil or k.pane == name
@@ -1162,9 +1035,7 @@ function M.view(opts)
       end
     end
 
-    -- The watcher refetches every 15s while the tab lives; each render then
-    -- decides whether the awaited state arrived (see finish). Silent — no
-    -- spinner per tick, the bar would flicker.
+    -- silent refetch every 15s: a spinner per tick would flicker the bar.
     start_watch = function()
       if watch.value then
         return
@@ -1184,9 +1055,6 @@ function M.view(opts)
       watch.set(t)
     end
 
-    -- Paint from the on-disk cache when present so the view opens with no network
-    -- round trip; <C-r> refetches and rewrites it. Fall through to a live fetch
-    -- only when there's no cache yet.
     local cached_data, cached_age = state.read_view_cache()
     if cached_data then
       fetch_and_render(nil, { data = cached_data, age = cached_age })
@@ -1196,8 +1064,7 @@ function M.view(opts)
   end)
 end
 
--- browser opens the current branch's PR on github.com. Async so launching the
--- browser doesn't block nvim; only failures are surfaced.
+-- browser opens the current branch's PR on github.com.
 function M.browser()
   vim.system({ "gh", "pr", "view", "--web" }, {}, function(res)
     if res.code ~= 0 then

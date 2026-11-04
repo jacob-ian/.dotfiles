@@ -133,12 +133,6 @@ detached
 	}
 }
 
-// initTestRepo creates a tempdir git repo with:
-//   - a `main` branch (local + at refs/remotes/origin/main)
-//   - a `local-only` local branch
-//   - a `remote-only` ref under refs/remotes/origin/
-//
-// Author/committer identity is set via env to avoid depending on user gitconfig.
 func initTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -162,8 +156,6 @@ func initTestRepo(t *testing.T) string {
 	return dir
 }
 
-// divergedRepo builds a repo whose feature branch has two commits main lacks
-// and main one commit feature lacks, returning its path.
 func divergedRepo(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {

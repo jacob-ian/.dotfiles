@@ -1,5 +1,4 @@
--- GitHub's reaction vocabulary and queries, shared by the conversation model
--- (rendering counts) and pv's interactions (the + picker and K hover).
+-- GitHub's reaction vocabulary and queries.
 
 local util = require "jmux.pr.util"
 
@@ -10,13 +9,10 @@ local M = {}
 ---@alias jmux.pr.ReactionGroup { content: string, viewerHasReacted: boolean?, users: { totalCount: integer, nodes: { login: string? }[]? } }
 ---@alias jmux.pr.Reactable { reactionGroups: jmux.pr.ReactionGroup[]? }
 
--- FIELDS is the reactionGroups selection a reactable carries in the main
--- query: counts only — bare totalCounts cost nothing against GitHub's 500k
--- node limit, while logins under threads × comments × users multiply past
--- it. Logins come from REACTORS_QUERY on demand.
+-- Counts only: logins under threads × comments × users blow past GitHub's
+-- 500k node limit, so REACTORS_QUERY fetches them on demand.
 M.FIELDS = "reactionGroups{ content viewerHasReacted users{ totalCount } }"
 
--- REACTORS_QUERY resolves who reacted, on demand for the K hover.
 M.REACTORS_QUERY = [[
 query($ids:[ID!]!){
   nodes(ids:$ids){
@@ -25,8 +21,6 @@ query($ids:[ID!]!){
   }
 }]]
 
--- ADD_MUTATION / REMOVE_MUTATION set and unset the viewer's reaction on any
--- Reactable node, for the + react picker.
 M.ADD_MUTATION = [[
 mutation($subject:ID!,$content:ReactionContent!){
   addReaction(input:{subjectId:$subject,content:$content}){ clientMutationId }
@@ -36,8 +30,6 @@ mutation($subject:ID!,$content:ReactionContent!){
   removeReaction(input:{subjectId:$subject,content:$content}){ clientMutationId }
 }]]
 
--- EMOJI maps GitHub's ReactionContent enum to the emoji GitHub renders;
--- ORDER fixes the react picker's listing to GitHub's own.
 M.EMOJI = {
   THUMBS_UP = "👍",
   THUMBS_DOWN = "👎",
@@ -48,10 +40,10 @@ M.EMOJI = {
   ROCKET = "🚀",
   EYES = "👀",
 }
+-- ORDER is GitHub's own listing order.
 M.ORDER = { "THUMBS_UP", "THUMBS_DOWN", "LAUGH", "HOORAY", "CONFUSED", "HEART", "ROCKET", "EYES" }
 
--- line renders a node's reactions as "👍 2 · 🎉 1", or nil when nothing has
--- reacted (including nodes fetched before reactions were queried).
+-- line renders a node's reactions as "👍 2 · 🎉 1", or nil when none.
 ---@param n jmux.pr.Reactable
 ---@return string?
 function M.line(n)
@@ -67,8 +59,7 @@ function M.line(n)
   end
 end
 
--- mine collects the reaction contents the viewer has already given a node,
--- so the react picker offers those as removals.
+-- mine is the set of reaction contents the viewer has given n.
 ---@param n jmux.pr.Reactable
 ---@return table<string, boolean>
 function M.mine(n)
@@ -81,9 +72,8 @@ function M.mine(n)
   return mine
 end
 
--- who lists a node's reactions with their reactors, one line per emoji
--- ("👍 @alice @bob"), or nil when nothing has reacted. Reactors beyond the
--- reactor query's page collapse to "+n more".
+-- who lists reactions with their reactors, one line per emoji, or nil when
+-- none; reactors beyond the fetched page collapse to "+n more".
 ---@param n jmux.pr.Reactable
 ---@return string[]?
 function M.who(n)

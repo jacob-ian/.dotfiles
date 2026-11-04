@@ -11,8 +11,6 @@ import (
 	"jmux/internal/worktree"
 )
 
-// scratchRepo builds a remoteless bare repo with HEAD `history`, a history
-// checkout holding old/x.md, and a session worktree; ScratchRoot points at it.
 func scratchRepo(t *testing.T, session string) (bare, wt, history string, git func(dir string, args ...string) string) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {

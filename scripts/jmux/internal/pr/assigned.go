@@ -13,10 +13,8 @@ import (
 	"jmux/internal/tmuxctl"
 )
 
-// RunAssigned handles `jmux pr`: the cross-repo review queue of PRs that request
-// your review or are assigned to you. Unlike `jmux pr <dir>` it isn't tied to
-// one repo — it searches every repo, then maps the chosen PR back to a local
-// clone to check out as usual.
+// RunAssigned handles `jmux pr`: the cross-repo queue of PRs that request your
+// review or are assigned to you, mapped back to a local clone on pick.
 func RunAssigned(cfg repo.Config) error {
 	if !ghctl.Available() {
 		return errNoGH
@@ -35,7 +33,6 @@ func RunAssigned(cfg repo.Config) error {
 	return reviewSelection(cfg, slug, num, sel)
 }
 
-// reviewSelection maps a picked cross-repo PR to its local clone and reviews it.
 func reviewSelection(cfg repo.Config, slug string, num int, sel string) error {
 	bareRoot := findLocalRepo(cfg, slug)
 	if bareRoot == "" {
@@ -48,10 +45,8 @@ func reviewSelection(cfg repo.Config, slug string, num int, sel string) error {
 	return review(bareRoot, ghctl.PR{Number: num, HeadRefName: headRef, BaseRefName: rowBaseRef(sel)})
 }
 
-// findLocalRepo returns the bare repo whose origin remote is nameWithOwner, or
-// "" if no local clone matches. Each check is a git call, so clones named
-// after the repo are tried first: the usual case costs one call, not one
-// per clone.
+// findLocalRepo returns the bare repo whose origin is nameWithOwner. Each check
+// is a git call, so clones named after the repo are tried first.
 func findLocalRepo(cfg repo.Config, nameWithOwner string) string {
 	_, name, _ := strings.Cut(nameWithOwner, "/")
 	bares := cfg.BareRepos()
@@ -66,8 +61,7 @@ func findLocalRepo(cfg repo.Config, nameWithOwner string) string {
 	return ""
 }
 
-// parseRepoNumber extracts "owner/repo" and the number from a row's first field
-// ("owner/repo#12").
+// parseRepoNumber splits a row's leading "owner/repo#12" field.
 func parseRepoNumber(line string) (string, int, bool) {
 	field := strings.TrimSpace(line)
 	if i := strings.IndexAny(field, " \t"); i >= 0 {

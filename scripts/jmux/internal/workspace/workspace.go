@@ -1,6 +1,5 @@
-// Package workspace is the overview of places you're actively working — every
-// open tmux session unioned with every feature worktree — with bindings to add
-// (ctrl-t) and remove (ctrl-x) them.
+// Package workspace is the overview picker: every open tmux session unioned
+// with every feature worktree.
 package workspace
 
 import (
@@ -22,8 +21,6 @@ import (
 	"jmux/internal/worktree"
 )
 
-// workspaces returns the overview rows: feature worktrees plus the directories
-// of any open sessions, deduped by resolved path.
 func workspaces(cfg repo.Config) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -46,12 +43,8 @@ func workspaces(cfg repo.Config) []string {
 	return out
 }
 
-// displayRows renders each path as an fzf row "<display>\t<path>": the path
-// followed by its colour-rendered badges. Bindings act on the hidden path field
-// (column 2), so badges never leak into a path. Pane-carrying badges whose pane
-// has died are dropped (their source is gone but never fired a cleanup event),
-// and when several survive for one path each gets a "@window" label so
-// concurrent claude agents are tellable apart.
+// displayRows renders each path as "<path + badges>\t<path>". Badges whose pane
+// has died are dropped, since their source never fired a cleanup event.
 func displayRows(cfg repo.Config, dirs []string) []string {
 	tagged := tag.All()
 	panes := tmuxctl.PaneWindows()
@@ -68,9 +61,6 @@ func displayRows(cfg repo.Config, dirs []string) []string {
 			}
 			live = append(live, b)
 		}
-		// Namespace order is arbitrary for pane-carrying badges (session ids);
-		// order them by window index instead, matching the tmux status line.
-		// Pane-less badges sort as -1, keeping them first in namespace order.
 		slices.SortStableFunc(live, func(a, b tag.Tag) int {
 			return cmp.Compare(windowIndex(a, panes), windowIndex(b, panes))
 		})
@@ -90,8 +80,7 @@ func displayRows(cfg repo.Config, dirs []string) []string {
 	return rows
 }
 
-// windowIndex returns b's window index for sorting, or -1 for tags without a
-// pane (or whose index doesn't parse), so they sort ahead of pane tags.
+// windowIndex orders badges like the tmux status line; pane-less tags sort first.
 func windowIndex(b tag.Tag, panes map[string]string) int {
 	if b.Pane == "" {
 		return -1
@@ -103,15 +92,12 @@ func windowIndex(b tag.Tag, panes map[string]string) int {
 	return n
 }
 
-// rowPath returns the hidden path field of a workspace row (the text after the
-// tab), falling back to the whole line for rows without one.
-// RunItems handles `jmux fzf workspace items`: print the overview rows for the
-// picker's reload bindings.
+// RunItems handles `jmux fzf workspace items`, printing rows for fzf's reload bindings.
 func RunItems(cfg repo.Config) {
 	fmt.Println(strings.Join(displayRows(cfg, workspaces(cfg)), "\n"))
 }
 
-// RunPicker handles `jmux workspace`: the fzf overview.
+// RunPicker handles `jmux workspace`.
 func RunPicker(cfg repo.Config) error {
 	dirs := workspaces(cfg)
 	if len(dirs) == 0 {
@@ -141,8 +127,7 @@ func RunPicker(cfg repo.Config) error {
 	return session.Open(dir, session.OpenOptions{Dir: cfg.WorkDir(dir)})
 }
 
-// RunAdd handles `jmux workspace add`: pick a bare repo, then run the worktree
-// branch flow against it.
+// RunAdd handles `jmux workspace add`.
 func RunAdd(cfg repo.Config) error {
 	repos := cfg.BareRepos()
 	if len(repos) == 0 {
@@ -156,10 +141,8 @@ func RunAdd(cfg repo.Config) error {
 	return worktree.AddWorktree(repo.TrimSlash(sel))
 }
 
-// RunRemove handles `jmux workspace remove --path P [--quiet]`. A worktree-backed
-// workspace is removed (worktree + session); any other workspace just has its
-// session closed — the directory is never deleted. --quiet suppresses the
-// success messages; failures still propagate.
+// RunRemove handles `jmux workspace remove --path P [--quiet]`. Worktrees are
+// removed; any other workspace only has its session closed.
 func RunRemove(cfg repo.Config, args []string) error {
 	fs := flag.NewFlagSet("workspace remove", flag.ExitOnError)
 	pathArg := fs.String("path", "", "Workspace path to remove")
@@ -190,8 +173,7 @@ func RunRemove(cfg repo.Config, args []string) error {
 		return nil
 	}
 	// Killing the session takes claude down without a SessionEnd hook, so its
-	// badges would outlive it — the directory stays, so path pruning never
-	// catches them either. The multibox has the same staleness problem.
+	// badges would outlive it.
 	tag.UnsetPrefix(path, "claude")
 	session.Kill(name)
 	statusbox.Publish()

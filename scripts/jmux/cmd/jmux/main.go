@@ -16,11 +16,7 @@ import (
 	"jmux/internal/workspace"
 )
 
-// main reports command failures (the sole notify.Error point) and maps them to
-// the exit code. Commands report their own notify.Info-level outcomes.
 func main() {
-	// Tag renderers and notice sources wire here, not in init, so the
-	// binary's badge and notification vocabulary is explicit.
 	claudectl.Register()
 	pr.Register()
 
@@ -97,8 +93,7 @@ func runPR(cfg repo.Config, args []string) error {
 	return pr.RunRepo(cfg, args[0])
 }
 
-// runClaude handles `jmux claude`: hook/focus are jmux's own subcommands;
-// anything else passes through as arguments to the claude binary.
+// runClaude handles `jmux claude`; anything but hook/focus passes through to claude.
 func runClaude(args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
@@ -114,8 +109,6 @@ func runClaude(args []string) error {
 	return nil
 }
 
-// runStatusline handles `jmux statusline`: render republishes the multibox;
-// click is the status-line mouse binding's dispatch, not for humans.
 func runStatusline(args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
@@ -129,9 +122,8 @@ func runStatusline(args []string) error {
 	return badUsage("jmux statusline: expected render or click <range>")
 }
 
-// runFzf dispatches `jmux fzf <picker> items|preview` — plumbing invoked by
-// fzf bindings, not humans. Void by design: stdout belongs to fzf, so these
-// report locally rather than propagate.
+// runFzf dispatches the plumbing fzf bindings call. stdout belongs to fzf, so
+// these report locally rather than return errors.
 func runFzf(cfg repo.Config, args []string) error {
 	if len(args) >= 2 {
 		switch args[0] + " " + args[1] {
@@ -155,9 +147,8 @@ func runFzf(cfg repo.Config, args []string) error {
 	return badUsage("jmux fzf: unknown command %q", strings.Join(args, " "))
 }
 
-// badUsage prints the complaint and usage to stderr and exits 1 directly:
-// argument mistakes are made at a terminal, where stderr beats a status-line
-// notification.
+// badUsage exits via stderr rather than the status line: argument mistakes
+// happen at a terminal.
 func badUsage(format string, args ...any) error {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	usage()

@@ -1,6 +1,5 @@
-// Package clone implements `jmux repo clone`: clone a repo bare under a scan
-// root and establish the layout the rest of jmux assumes — fetch refspec,
-// origin/HEAD, and a worktree for the default branch.
+// Package clone implements `jmux repo clone`: a bare clone under a scan root
+// with the fetch refspec, origin/HEAD and default-branch worktree jmux assumes.
 package clone
 
 import (
@@ -18,8 +17,7 @@ import (
 	"jmux/internal/worktree"
 )
 
-// Run handles `jmux repo clone <url>`: pick a scan root, clone into it, and
-// open a session on the default-branch worktree.
+// Run handles `jmux repo clone <url>`.
 func Run(cfg repo.Config, url string) error {
 	name := repoName(url)
 	if name == "" {
@@ -50,7 +48,6 @@ func Run(cfg repo.Config, url string) error {
 	})
 }
 
-// clone bare-clones url to dest and returns the default-branch worktree path.
 func clone(url, dest string) (string, error) {
 	if _, err := os.Stat(dest); err == nil {
 		return "", fmt.Errorf("%s already exists", dest)
@@ -79,8 +76,6 @@ func clone(url, dest string) (string, error) {
 	return wtPath, err
 }
 
-// repoName derives the repo directory name from a clone URL (scp, https, or
-// ssh:// forms).
 func repoName(url string) string {
 	s := strings.TrimSuffix(strings.TrimRight(url, "/"), ".git")
 	if i := strings.LastIndexAny(s, "/:"); i >= 0 {

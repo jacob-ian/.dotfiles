@@ -9,8 +9,6 @@ import (
 	"jmux/internal/repo"
 )
 
-// The tests register their own kind so they exercise the store and registry
-// without depending on any real producer's presentation.
 func init() {
 	Register("test", func(data json.RawMessage) (string, Color) {
 		var d struct {
@@ -27,8 +25,7 @@ func testTag(label string) Tag {
 	return New("test", "", map[string]string{"label": label})
 }
 
-// withCacheDir points os.UserCacheDir at a temp dir for the test, covering both
-// the linux ($XDG_CACHE_HOME) and darwin ($HOME/Library/Caches) resolutions.
+// withCacheDir redirects os.UserCacheDir on both linux (XDG_CACHE_HOME) and darwin (HOME).
 func withCacheDir(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
@@ -77,10 +74,10 @@ func TestAllOrdersByNamespace(t *testing.T) {
 func TestSetPrunesMissingDirs(t *testing.T) {
 	withCacheDir(t)
 	live := t.TempDir()
-	gone := filepath.Join(t.TempDir(), "removed-worktree") // never created
+	gone := filepath.Join(t.TempDir(), "removed-worktree")
 
-	Set(gone, "test", testTag("stale")) // tags a path that doesn't exist on disk
-	Set(live, "test", testTag("live"))  // this write prunes the missing entry
+	Set(gone, "test", testTag("stale"))
+	Set(live, "test", testTag("live"))
 
 	all := All()
 	if _, ok := all[repo.Resolve(gone)]; ok {
@@ -95,7 +92,6 @@ func TestLegacyEntriesAreSkippedAndPruned(t *testing.T) {
 	withCacheDir(t)
 	dir := t.TempDir()
 
-	// a pre-semantic store entry: rendered text, no kind.
 	legacy := map[string]map[string]map[string]string{
 		repo.Resolve(dir): {"claude": {"text": "✻ working", "color": "green"}},
 	}
@@ -105,7 +101,6 @@ func TestLegacyEntriesAreSkippedAndPruned(t *testing.T) {
 		t.Fatalf("All() shows %d paths for a legacy-only store, want 0", n)
 	}
 
-	// any write prunes the kindless entry from disk.
 	Set(dir, "test", testTag("fresh"))
 	s := store{}
 	cachefile.Read(storeFile, &s)

@@ -12,16 +12,13 @@ import (
 	"jmux/internal/notify"
 )
 
-// cacheTTL bounds how long `jmux pr` serves the cached list before refetching on
-// open. ctrl-r in the picker forces a refresh regardless of age.
 const cacheTTL = 5 * time.Minute
 
 const cacheFile = "prs.json"
 
-// orgEnv is a comma-separated org whitelist for `jmux pr`; unset means all orgs.
+// orgEnv is a comma-separated org allowlist; unset means all orgs.
 const orgEnv = "JMUX_PR_ORGS"
 
-// allowedOrgs parses orgEnv into owner names; nil means no restriction.
 func allowedOrgs() []string {
 	raw := strings.TrimSpace(os.Getenv(orgEnv))
 	if raw == "" {
@@ -41,8 +38,6 @@ type prCache struct {
 	Results   []ghctl.SearchResult `json:"results"`
 }
 
-// readCache returns the cached results and their age. ok is false when no
-// readable, well-formed cache exists.
 func readCache() (results []ghctl.SearchResult, age time.Duration, ok bool) {
 	var c prCache
 	if !cachefile.Read(cacheFile, &c) {
@@ -51,8 +46,6 @@ func readCache() (results []ghctl.SearchResult, age time.Duration, ok bool) {
 	return c.Results, time.Since(c.FetchedAt), true
 }
 
-// loadResults returns the PR list, fetching from GitHub and refreshing the cache
-// when forced, when no cache exists, or when it's older than cacheTTL.
 func loadResults(refresh bool) ([]ghctl.SearchResult, error) {
 	if !refresh {
 		if results, age, ok := readCache(); ok && age < cacheTTL {
@@ -67,7 +60,6 @@ func loadResults(refresh bool) ([]ghctl.SearchResult, error) {
 	return results, nil
 }
 
-// formatRows renders the picker rows for results.
 func formatRows(results []ghctl.SearchResult) []string {
 	items := make([]string, len(results))
 	for i, r := range results {
@@ -76,10 +68,9 @@ func formatRows(results []ghctl.SearchResult) []string {
 	return items
 }
 
-// RunItems handles `jmux fzf pr items [--refresh|--repo <slug>]`: print the
-// picker rows to stdout for fzf's reload bindings. On a refresh error it falls
-// back to the cached rows so the picker keeps its current list rather than
-// clearing.
+// RunItems handles `jmux fzf pr items [--refresh|--repo <slug>]`, printing the
+// picker rows for fzf's reload bindings. A failed refresh keeps the cached rows
+// so the picker doesn't clear.
 func RunItems(args []string) {
 	if len(args) >= 2 && args[0] == "--repo" {
 		if err := printRepoItems(args[1]); err != nil {
@@ -100,8 +91,6 @@ func RunItems(args []string) {
 	}
 }
 
-// printRepoItems prints one repo's open-PR rows to stdout for the per-repo
-// picker's reload binding.
 func printRepoItems(slug string) error {
 	prs, err := ghctl.ListPRs(slug)
 	if err != nil {

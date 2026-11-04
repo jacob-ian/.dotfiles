@@ -1,18 +1,13 @@
--- Per-worktree persistence for the pr modules. Everything lives in the
--- worktree's own git dir (.git/worktrees/<name>/ for a linked worktree): that
--- scopes each file to the one PR this worktree tracks, hides it from
--- `git status`, and lets `git worktree remove` clean it up with everything else.
+-- Per-worktree persistence for the pr modules, kept in the worktree's git dir
+-- so it's hidden from `git status` and removed with the worktree.
 
 local util = require "jmux.pr.util"
 
 local M = {}
 
--- pending holds staged comments in GitHub's review-comment shape. One nvim
--- instance maps to one PR worktree, so module-level state is sufficient.
+-- pending holds staged comments in GitHub's review-comment shape.
 M.pending = {}
 
--- Two pending stores: the PR review (submitted to GitHub) and the agent
--- review (sent to the paired claude). The open commands switch stores.
 M.PR_STORE = "jmux-review.json"
 M.AGENT_STORE = "jmux-agent-review.json"
 local store = M.PR_STORE
@@ -22,8 +17,7 @@ local function state_file()
   return dir and (dir .. "/" .. store) or nil
 end
 
--- save writes M.pending through on every mutation (crash-safe; the payload is
--- tiny). An empty review removes the file rather than leaving an empty stub.
+-- save writes M.pending to disk; an empty review removes the file.
 function M.save()
   local f = state_file()
   if not f then
@@ -38,7 +32,7 @@ end
 
 local loaded = false
 
--- use switches the active pending store; the next load reads that store's file.
+-- use switches the active pending store.
 function M.use(file)
   if store == file then
     return
@@ -48,10 +42,8 @@ function M.use(file)
   loaded = false
 end
 
--- load restores a persisted review the first time the module is touched in a
--- session. The stored HEAD sha is compared against the current one: comments are
--- anchored to line numbers on a specific commit, so a rebase/amend since the
--- last session may have shifted them, which is worth a warning.
+-- load restores the persisted review once per session, warning when HEAD has
+-- moved since it was staged (line anchors may have shifted).
 function M.load()
   if loaded then
     return
@@ -66,9 +58,6 @@ function M.load()
     return
   end
   M.pending = data.comments
-  -- Only speak up when it matters: comments are anchored to line numbers on a
-  -- specific commit, so a rebase/amend since they were staged may have shifted
-  -- them. A clean restore is silent — the count shows on the next stage/submit.
   local head = util.sh { "git", "rev-parse", "HEAD" }
   if data.sha and head and data.sha ~= head then
     vim.notify(
@@ -83,24 +72,20 @@ function M.load()
   end
 end
 
--- discard drops all staged comments, in memory and on disk. The loaded flag is
--- forced so a later stage in the same session can't resurrect the cleared review.
+-- discard drops all staged comments; marking loaded stops a later load from
+-- resurrecting them.
 function M.discard()
   loaded = true
   M.pending = {}
   M.save()
 end
 
--- The PR conversation (pv) is cached here too, so reopening the view paints
--- instantly from disk instead of waiting on the GraphQL round trip; <C-r> in the
--- view refetches and rewrites it.
 local function view_cache_file()
   local dir = util.git_dir()
   return dir and (dir .. "/jmux-pr-view.json") or nil
 end
 
--- write_view_cache stores the VIEW_QUERY response as JSON, so reading it back
--- decodes to exactly what a live fetch would and the render path is identical.
+-- write_view_cache stores the raw conversation response for instant reopen.
 function M.write_view_cache(json)
   local f = view_cache_file()
   if f then
@@ -108,13 +93,8 @@ function M.write_view_cache(json)
   end
 end
 
--- read_view_cache returns the decoded cached response and its age in seconds, or
--- nil when there's no readable, decodable cache. Decoding here (rather than
--- handing the render path raw JSON to re-parse) avoids a second full decode of
--- the conversation payload on the main thread. An undecodable cache returns nil
--- so the open falls through to a live fetch. Age comes from the file mtime and
--- is shown in the view's bar so a stale cache is obvious (and a reminder that
--- <C-r> refreshes it).
+-- read_view_cache returns the decoded cached response and its age in seconds,
+-- or nil.
 function M.read_view_cache()
   local f = view_cache_file()
   if not f or vim.fn.filereadable(f) == 0 then
@@ -127,9 +107,7 @@ function M.read_view_cache()
   return data, os.time() - vim.fn.getftime(f)
 end
 
--- clear_view_cache drops the cached conversation so the next pv refetches — used
--- after posting a reply or submitting a review, which the stale cache wouldn't
--- yet reflect.
+-- clear_view_cache forces the next view open to refetch.
 function M.clear_view_cache()
   local f = view_cache_file()
   if f then

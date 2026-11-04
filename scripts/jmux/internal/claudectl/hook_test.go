@@ -10,14 +10,12 @@ import (
 	"jmux/internal/tag"
 )
 
-// TestMain wires the claude tag renderer, as main does for the binary.
 func TestMain(m *testing.M) {
 	Register()
 	os.Exit(m.Run())
 }
 
-// withCacheDir points os.UserCacheDir at a temp dir for the test, covering both
-// the linux ($XDG_CACHE_HOME) and darwin ($HOME/Library/Caches) resolutions.
+// withCacheDir redirects os.UserCacheDir on both linux and darwin.
 func withCacheDir(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
@@ -89,9 +87,6 @@ func TestStatusPerSession(t *testing.T) {
 	}
 }
 
-// Answered events fire per tool call, so once the badge says working they
-// must report no change (skipping the tag write and the republish); from any
-// other state they transition to working and report a change.
 func TestAnsweredEventsSkipWhenAlreadyWorking(t *testing.T) {
 	withCacheDir(t)
 	dir := t.TempDir()
@@ -138,7 +133,6 @@ func TestNoticesFromTags(t *testing.T) {
 		t.Errorf("notices = %+v, want one for %%1 labelled euc-web", got)
 	}
 
-	// Paneless, dead-pane, and non-claude tags never notice.
 	got = noticesFromTags(map[string][]tag.Tag{"/w": {
 		waitingTag("", tA),
 		waitingTag("%9", tA),
@@ -148,7 +142,6 @@ func TestNoticesFromTags(t *testing.T) {
 		t.Errorf("notices = %+v, want none", got)
 	}
 
-	// A newer quiet session in the same pane supersedes a stale claim.
 	got = noticesFromTags(map[string][]tag.Tag{"/w": {
 		waitingTag("%1", tA), workingTag("%1", tB),
 	}}, panes)
@@ -156,7 +149,6 @@ func TestNoticesFromTags(t *testing.T) {
 		t.Errorf("notices = %+v, want the stale claim superseded", got)
 	}
 
-	// And the reverse: a newer claim wins over an older quiet session.
 	got = noticesFromTags(map[string][]tag.Tag{"/w": {
 		workingTag("%2", tA), waitingTag("%2", tB),
 	}}, panes)

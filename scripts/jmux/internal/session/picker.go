@@ -5,8 +5,7 @@ import (
 	"jmux/internal/repo"
 )
 
-// RunPicker handles `jmux` (the default subcommand): picks a session dir and
-// opens it.
+// RunPicker handles bare `jmux`: pick a project dir and open its session.
 func RunPicker(cfg repo.Config) error {
 	dirs := cfg.ProjectDirs()
 	if len(dirs) == 0 {

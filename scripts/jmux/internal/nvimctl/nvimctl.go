@@ -9,19 +9,12 @@ import (
 	"syscall"
 )
 
-// WindowName is the tmux window the editor runs in. It's the contract between
-// opening a session (which creates the window) and anything that finds the
-// editor later (e.g. the workspace preview).
+// WindowName is the tmux window the editor runs in.
 const WindowName = "nvim"
 
-// Processes returns the PIDs of the Neovim editor process trees anchored under
-// the given root PIDs (e.g. tmux pane PIDs): each editor reachable from a root,
-// plus its descendants (the language servers it spawned). Call before the roots
-// are killed, while the trees are still attached.
-//
-// Neovim 0.12 runs the editor as a detached `nvim --embed` process in its own
-// group, so a kill aimed at a pane leaves it — and its language servers —
-// behind; returning the whole tree lets callers reap it.
+// Processes returns the editor process trees under the given root PIDs, each
+// editor plus its language servers. Neovim 0.12 runs the editor as a detached
+// `nvim --embed` in its own group, so killing a pane leaves it behind.
 func Processes(roots []int) []int {
 	if len(roots) == 0 {
 		return nil
@@ -31,7 +24,6 @@ func Processes(roots []int) []int {
 		anchor[r] = true
 	}
 
-	// One ps snapshot: pid↔ppid graph plus the embed cores.
 	ps, err := exec.Command("ps", "-axo", "pid=,ppid=,command=").Output()
 	if err != nil {
 		return nil
@@ -56,12 +48,9 @@ func Processes(roots []int) []int {
 		}
 	}
 
-	// Keep cores whose ancestry reaches an anchor (capped walk tolerates a shell
-	// between anchor and TUI), and with each core its descendant LSPs.
 	var reap []int
-	// Never reap our own subtree: a workspace remove spawned from inside the
-	// editor is a descendant of the very embed it's reaping, and killing it
-	// here would abort the teardown it's running.
+	// Never reap our own subtree: a remove run from inside the editor descends
+	// from the embed it's reaping.
 	self := os.Getpid()
 	seen := map[int]bool{}
 	var collect func(pid int)
@@ -86,8 +75,7 @@ func Processes(roots []int) []int {
 	return reap
 }
 
-// Reap SIGKILLs the given PIDs. A Neovim editor ignores SIGTERM (it expects its
-// UI to drive shutdown), so SIGKILL is what reaps it.
+// Reap SIGKILLs the given PIDs; a Neovim editor ignores SIGTERM.
 func Reap(pids []int) {
 	for _, pid := range pids {
 		_ = syscall.Kill(pid, syscall.SIGKILL)

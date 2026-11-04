@@ -13,8 +13,6 @@ import (
 	"jmux/internal/tmuxctl"
 )
 
-// fakeBareRepo creates a directory that repo detects as a bare repo (HEAD file
-// + refs/ subdir, no .git). Returns the bare-root path.
 func fakeBareRepo(t *testing.T, path string) string {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(path, "refs"), 0o755); err != nil {
@@ -80,9 +78,6 @@ func TestName(t *testing.T) {
 	}
 }
 
-// TestKillReapsNvimCore checks end-to-end that Kill takes down the detached
-// nvim --embed core, not just the tmux session. Skips unless tmux and nvim are
-// both present.
 func TestKillReapsNvimCore(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not installed")

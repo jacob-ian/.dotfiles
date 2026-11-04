@@ -1,6 +1,4 @@
--- The latest commit's status checks as a pure model, shaped like
--- jmux.pr.reviewers: pv renders it as a collapsible block, a future
--- dashboard pane can render the same lines/marks.
+-- The latest commit's status checks as a pure model.
 
 local util = require "jmux.pr.util"
 
@@ -8,15 +6,12 @@ local nilable = util.nilable
 
 local M = {}
 
--- FIELDS is the PR selection this model reads: the latest commit's rollup.
 M.FIELDS = [[commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:100){ nodes{
         __typename
         ... on CheckRun{ name conclusion status startedAt completedAt detailsUrl }
         ... on StatusContext{ context state targetUrl }
       } } } } } }]]
 
--- check_mark maps a status-check node to (icon, highlight): green tick passed,
--- red cross failed, yellow dot running, muted circle skipped/neutral.
 local function check_mark(node)
   local state = nilable(node.conclusion) or nilable(node.state)
   if not state then
@@ -33,11 +28,8 @@ local function check_mark(node)
   return "✗", "DiagnosticError"
 end
 
--- model distils the PR node's statusCheckRollup into { header, header_mark,
--- lines, marks, entries }, or nil when the PR has no checks. The header
--- summarises ("1 failed" / "2 running" / "all passed") with the worst
--- state's icon; entries[i] describes lines[i]'s check (name, url) for
--- renderers that act on a check row.
+-- model distils the latest commit's check rollup into pane lines, or nil when
+-- the PR has no checks.
 function M.model(pr)
   local checks = vim.tbl_get(pr, "commits", "nodes", 1, "commit", "statusCheckRollup", "contexts", "nodes")
   if type(checks) ~= "table" or #checks == 0 then

@@ -1,6 +1,5 @@
-// Package cachefile reads and writes JSON files under the user cache dir
-// (<cache>/jmux). Writes go through temp-then-rename so a concurrent jmux
-// process never reads a half-written file.
+// Package cachefile reads and writes JSON under <cache>/jmux. Writes are
+// temp-then-rename so a concurrent jmux never reads a half-written file.
 package cachefile
 
 import (
@@ -17,8 +16,7 @@ func path(name string) (string, error) {
 	return filepath.Join(dir, "jmux", name), nil
 }
 
-// Read unmarshals the named cache file into v, reporting whether a readable,
-// well-formed file was found.
+// Read reports whether a well-formed cache file was found.
 func Read(name string, v any) bool {
 	p, err := path(name)
 	if err != nil {
@@ -31,8 +29,7 @@ func Read(name string, v any) bool {
 	return json.Unmarshal(data, v) == nil
 }
 
-// Write marshals v to the named cache file. Best-effort: on failure the cache
-// is simply stale or absent next read.
+// Write is best-effort: on failure the cache is stale or absent next read.
 func Write(name string, v any) {
 	p, err := path(name)
 	if err != nil {

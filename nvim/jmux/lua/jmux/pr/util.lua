@@ -1,5 +1,4 @@
--- Shared plumbing for the pr modules: shell, JSON-null handling, git dir
--- resolution, and the compact time formatting used across the views.
+-- Shared plumbing for the pr modules.
 
 local M = {}
 
@@ -19,12 +18,8 @@ function M.nilable(v)
   return v
 end
 
--- git_dir resolves the worktree's absolute git dir once per session. One nvim
--- instance maps to one PR worktree, so the path never changes under us — the same
--- invariant that lets gh cache the PR identity. Memoizing it keeps the per-PR
--- state files off a blocking `git rev-parse` spawn on every read/write/clear,
--- including the view's instant-paint open path. Only a hit is memoized: a miss
--- can heal (git init, cd) within the session.
+-- git_dir memoizes the worktree's git dir; one nvim maps to one worktree, so it
+-- never changes. Only a hit is memoized, since a miss can heal within the session.
 local git_dir
 function M.git_dir()
   if not git_dir then
@@ -33,10 +28,8 @@ function M.git_dir()
   return git_dir
 end
 
--- prompt_remove_workspace offers to remove the current workspace (worktree +
--- tmux session) via a detached `jmux workspace remove` — the session kill takes
--- this nvim down with it, so on "yes" nothing after the call runs. on_keep runs
--- when the user declines or cancels.
+-- prompt_remove_workspace offers to remove the current workspace. The detached
+-- remove kills this nvim's session, so on "yes" nothing after the call runs.
 function M.prompt_remove_workspace(on_keep)
   local keep = on_keep or function() end
   local root = M.sh { "git", "rev-parse", "--show-toplevel" }
@@ -52,17 +45,13 @@ function M.prompt_remove_workspace(on_keep)
   end, keep)
 end
 
--- span_str renders a comment's line span as "12" or "12-15". Accepts both the
--- stored comment shape (start_line nil for a single line) and the target shape
--- (start_line always set, == line for a single line).
+-- span_str renders a comment's line span as "12" or "12-15".
 function M.span_str(cm)
   local s = cm.start_line
   return (s and s ~= cm.line) and string.format("%d-%d", s, cm.line) or tostring(cm.line)
 end
 
--- days_from_civil counts days from 1970-01-01 to a proleptic Gregorian date
--- (Howard Hinnant's algorithm). Shifts the year to start in March so leap days
--- fall at the end and the month-length table collapses to a linear formula.
+-- days_from_civil counts days from 1970-01-01 (Howard Hinnant's algorithm).
 local function days_from_civil(y, m, d)
   if m <= 2 then
     y = y - 1
@@ -75,10 +64,8 @@ local function days_from_civil(y, m, d)
   return era * 146097 + doe - 719468
 end
 
--- iso_epoch converts an ISO-8601 UTC timestamp to a Unix epoch. Lua has no
--- timegm and os.time reads a broken-down table as local time, with DST applied
--- per-date, so going through it leaks the local zone into the result. Pure
--- civil-date arithmetic sidesteps the zone entirely.
+-- iso_epoch converts an ISO-8601 UTC timestamp to a Unix epoch without os.time,
+-- which has no timegm and would apply the local zone.
 local function iso_epoch(iso)
   local y, mo, d, h, mi, s = tostring(iso):match "(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)"
   if not y then

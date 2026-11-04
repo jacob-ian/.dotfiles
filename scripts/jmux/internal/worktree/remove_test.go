@@ -32,9 +32,6 @@ func TestIsManagedWorktree(t *testing.T) {
 	}
 }
 
-// initBareWithWorktrees builds jmux's bare-repo layout: a `--bare` clone with
-// `main` and `feature` worktrees checked out beneath it. It returns the bare
-// root and an unrelated plain (non-bare) repo path.
 func initBareWithWorktrees(t *testing.T) (bare, plain string) {
 	t.Helper()
 	env := append(os.Environ(),
@@ -50,9 +47,7 @@ func initBareWithWorktrees(t *testing.T) (bare, plain string) {
 		}
 	}
 
-	// Resolve symlinks: on macOS t.TempDir() lives under /tmp -> /private/tmp,
-	// and git records worktree gitdir paths in canonical form. Production picker
-	// rows are likewise canonical, so match that here.
+	// git records worktree paths symlink-resolved (/tmp -> /private/tmp on macOS).
 	root := t.TempDir()
 	if real, err := filepath.EvalSymlinks(root); err == nil {
 		root = real

@@ -7,15 +7,11 @@ import (
 	"sync"
 )
 
-// Config is where jmux looks for repos. Paths are absolute; roots that don't
-// exist on a machine are skipped, so one Default serves every machine.
+// Config is where jmux looks for repos; roots missing on a machine are skipped.
 type Config struct {
-	// ScanRoots are the parent directories under which repos and worktrees live.
-	ScanRoots []string
-	// AdditionalDirs are non-repo directories included in the default picker.
+	ScanRoots      []string
 	AdditionalDirs []string
-	// ScratchRoot is the bare repo of dated scratch sessions (see package
-	// scratch). It sits outside the scan roots so it works without them.
+	// ScratchRoot is the bare repo of dated scratch sessions.
 	ScratchRoot string
 }
 
@@ -33,8 +29,7 @@ func (c Config) IsScratch(path string) bool {
 	return p == root || strings.HasPrefix(p, root+string(filepath.Separator))
 }
 
-// Marker is the picker prefix for scratch rows; other rows get the same width
-// so paths stay aligned.
+// Marker is the picker prefix for scratch rows, padded on other rows so paths align.
 func (c Config) Marker(path string) string {
 	if c.IsScratch(path) {
 		return "✎ "
@@ -42,9 +37,8 @@ func (c Config) Marker(path string) string {
 	return "  "
 }
 
-// WorkDir is where a session's windows start: a scratch worktree's dated
-// directory (worktree/<name>, the session's own files) when it exists,
-// otherwise dir itself.
+// WorkDir is where a session's windows start: a scratch worktree's nested dated
+// directory when it exists, else dir.
 func (c Config) WorkDir(dir string) string {
 	if c.IsScratch(dir) {
 		if nested := filepath.Join(dir, filepath.Base(dir)); IsDir(nested) {
@@ -54,7 +48,6 @@ func (c Config) WorkDir(dir string) string {
 	return dir
 }
 
-// BareRepos returns the bare-repo roots found directly under the scan roots.
 func (c Config) BareRepos() []string {
 	return ScanReposParallel(c.ScanRoots, func(dir string) []string {
 		if isBareRepo(dir) {
@@ -64,16 +57,12 @@ func (c Config) BareRepos() []string {
 	})
 }
 
-// FeatureWorktrees lists every non-default worktree across the scan roots and
-// the scratch repo.
 func (c Config) FeatureWorktrees() []string {
 	out := ScanReposParallel(c.ScanRoots, FeatureWorktrees)
 	return append(out, FeatureWorktrees(c.ScratchRoot)...)
 }
 
-// ProjectDirs lists everything the default picker offers: every worktree under
-// the scan roots, the additional dirs and roots themselves, and the scratch
-// repo's worktrees.
+// ProjectDirs lists everything the default picker offers.
 func (c Config) ProjectDirs() []string {
 	dirs := ScanReposParallel(c.ScanRoots, ProjectDirs)
 	for _, d := range append(append([]string{}, c.AdditionalDirs...), c.ScanRoots...) {
@@ -87,8 +76,7 @@ func (c Config) ProjectDirs() []string {
 	return dirs
 }
 
-// DefaultBranchName reads bare's HEAD file directly (this package stays
-// git-free); "" when missing or detached.
+// DefaultBranchName reads bare's HEAD file; "" when missing or detached.
 func DefaultBranchName(bare string) string {
 	data, err := os.ReadFile(filepath.Join(bare, "HEAD"))
 	if err != nil {
@@ -101,7 +89,6 @@ func DefaultBranchName(bare string) string {
 	return ref
 }
 
-// isBareRepo reports whether dir is a bare repo root (HEAD + refs/, no .git).
 func isBareRepo(dir string) bool {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		return false
@@ -129,10 +116,8 @@ func FindBareRoot(dir string) string {
 	}
 }
 
-// WorkRoot returns the working tree containing dir: the nearest ancestor
-// holding a .git entry (a directory for a checkout, a file for a linked
-// worktree), or "" outside any repo. A pure walk, so hot paths like the
-// claude hook don't pay for a git process on every event.
+// WorkRoot returns the working tree containing dir, or "" outside any repo.
+// A pure walk so the claude hook doesn't spawn git on every event.
 func WorkRoot(dir string) string {
 	for cur := dir; ; {
 		if _, err := os.Lstat(filepath.Join(cur, ".git")); err == nil {
@@ -146,15 +131,11 @@ func WorkRoot(dir string) string {
 	}
 }
 
-// adminEntry pairs a worktree admin directory under `<bare>/worktrees/<name>`
-// with the resolved working tree directory it points at (read from `gitdir`).
 type adminEntry struct {
 	adminDir string
 	gitdir   string
 }
 
-// readAdmins enumerates worktree admin entries under `<bare>/worktrees/`,
-// skipping any that lack a readable `gitdir` pointer file.
 func readAdmins(bare string) []adminEntry {
 	worktreesDir := filepath.Join(bare, "worktrees")
 	entries, err := os.ReadDir(worktreesDir)
@@ -179,9 +160,7 @@ func readAdmins(bare string) []adminEntry {
 	return out
 }
 
-// AdminDirFor returns the path of the worktree admin entry under
-// `<bare>/worktrees/` whose gitdir resolves to worktreePath. Returns ""
-// if no matching admin entry is found.
+// AdminDirFor returns the `<bare>/worktrees/<name>` entry for worktreePath, or "".
 func AdminDirFor(bare, worktreePath string) string {
 	want, err := filepath.Abs(worktreePath)
 	if err != nil {
@@ -199,9 +178,9 @@ func AdminDirFor(bare, worktreePath string) string {
 	return ""
 }
 
-// BareRepoWorktrees lists bare's working trees; skipDefault drops the checkout
-// named by HEAD, and main/master regardless (some bare HEADs point at a branch
-// that was never checked out, e.g. develop, with master as the real default).
+// BareRepoWorktrees lists bare's working trees. skipDefault drops the HEAD
+// branch and also main/master, since some bare HEADs name a branch that was
+// never checked out.
 func BareRepoWorktrees(bare string, skipDefault bool) []string {
 	def := DefaultBranchName(bare)
 	var out []string
@@ -280,10 +259,8 @@ func TrimSlash(s string) string {
 	return strings.TrimRight(s, "/")
 }
 
-// Resolve returns the absolute, symlink-resolved form of p, so paths that name
-// the same directory compare equal. A path that doesn't exist yet resolves its
-// nearest existing ancestor and keeps the rest, so a to-be-created worktree
-// compares equal to its eventual real path.
+// Resolve returns the absolute, symlink-resolved form of p. A path that doesn't
+// exist yet resolves through its nearest existing ancestor.
 func Resolve(p string) string {
 	abs, err := filepath.Abs(p)
 	if err != nil {

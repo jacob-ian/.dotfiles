@@ -1,5 +1,4 @@
-// Package prompt renders the preset opening prompts offered when a workspace
-// is created, from ~/.config/jmux/prompts.yaml.
+// Package prompt renders the preset opening prompts from ~/.config/jmux/prompts.yaml.
 package prompt
 
 import (
@@ -17,26 +16,22 @@ import (
 	"jmux/internal/fzfutil"
 )
 
-// Config is the prompts file: skills per language (the "common" entry joins
-// every language), and named prompt templates that can reference .Repo,
-// .Language and .Skills.
+// Config is the prompts file: skills per language ("common" joins every
+// language) and named templates over .Repo, .Language and .Skills.
 type Config struct {
 	Skills  map[string][]string `yaml:"skills"`
 	Prompts map[string]string   `yaml:"prompts"`
 }
 
-// Path is the prompts file, in the dotfiles so it follows the user between
-// machines; skills that aren't installed on a machine are dropped at render.
 func Path() string {
 	return os.ExpandEnv("$HOME/.config/jmux/prompts.yaml")
 }
 
-// SkillsDir is where claude keeps user skills, one directory per skill.
 func SkillsDir() string {
 	return os.ExpandEnv("$HOME/.claude/skills")
 }
 
-// Load reads the prompts file; a missing file is an empty Config, not an error.
+// Load reads the prompts file; a missing file is an empty Config.
 func Load(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -52,7 +47,6 @@ func Load(path string) (Config, error) {
 	return c, nil
 }
 
-// Names lists the prompt names in a stable order.
 func (c Config) Names() []string {
 	names := make([]string, 0, len(c.Prompts))
 	for n := range c.Prompts {
@@ -62,8 +56,7 @@ func (c Config) Names() []string {
 	return names
 }
 
-// Pick offers the prompts with "none" first, so a bare enter skips. Returns
-// "" when nothing was chosen.
+// Pick offers the prompts with "none" first so a bare enter skips; "" when none chosen.
 func Pick(c Config) string {
 	items := append([]string{"none"}, c.Names()...)
 	sel, err := fzfutil.Pick(items, fzfutil.Options{Prompt: "prompt> "})
@@ -73,9 +66,7 @@ func Pick(c Config) string {
 	return sel
 }
 
-// Language guesses the worktree's primary language from its manifest files.
-// A package.json depending on react or react-native is "react" rather than
-// "ts", so frontend skills only load for frontend repos.
+// Language guesses dir's primary language from its manifest files.
 func Language(dir string) string {
 	if usesReact(filepath.Join(dir, "package.json")) {
 		return "react"
@@ -87,7 +78,6 @@ func Language(dir string) string {
 		{"go", []string{"go.mod"}},
 		{"ts", []string{"package.json"}},
 		{"python", []string{"pyproject.toml", "requirements.txt"}},
-		// infra repos keep .tf files under modules/ and projects/, not the root.
 		{"terraform", []string{"*.tf", "*/*.tf", "*/*/*.tf"}},
 	} {
 		for _, m := range l.markers {
@@ -99,9 +89,8 @@ func Language(dir string) string {
 	return ""
 }
 
-// usesReact reports whether packageJSON, or any workspace package it declares
-// (monorepos keep react in packages/*, not the root), depends on react or
-// react-native.
+// usesReact checks packageJSON and its workspace packages for a react or
+// react-native dependency.
 func usesReact(packageJSON string) bool {
 	data, err := os.ReadFile(packageJSON)
 	if err != nil {
@@ -134,8 +123,7 @@ func usesReact(packageJSON string) bool {
 	return false
 }
 
-// workspaceGlobs reads package.json's workspaces field in either of its forms:
-// a list of globs, or {"packages": [...]}.
+// workspaceGlobs accepts both workspaces forms: a list, or {"packages": [...]}.
 func workspaceGlobs(raw json.RawMessage) []string {
 	var list []string
 	if json.Unmarshal(raw, &list) == nil {
@@ -150,18 +138,15 @@ func workspaceGlobs(raw json.RawMessage) []string {
 	return nil
 }
 
-// Data is what a prompt template sees.
+// Data is what a prompt template sees; Skills is a ", "-joined list for prose.
 type Data struct {
 	Repo     string
 	Language string
-	// Skills is the language's list, filtered to those installed, joined with
-	// ", " for use in prose.
-	Skills string
+	Skills   string
 }
 
-// Render fills the named prompt for the worktree at dir. Skills missing from
-// skillsDir are dropped so one prompts file serves machines with different
-// skill sets.
+// Render fills the named prompt for dir, dropping skills not installed under
+// skillsDir so one prompts file serves every machine.
 func (c Config) Render(name, repo, dir, skillsDir string) (string, error) {
 	text, ok := c.Prompts[name]
 	if !ok {

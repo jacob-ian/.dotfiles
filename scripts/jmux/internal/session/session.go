@@ -12,8 +12,7 @@ import (
 	"jmux/internal/tmuxctl"
 )
 
-// Name derives dir's tmux session name: repo_branch for a worktree under a
-// bare repo, parent_base otherwise, with tmux-hostile characters replaced.
+// Name derives dir's tmux session name: repo_branch for a worktree, parent_base otherwise.
 func Name(dir string) string {
 	if bareRoot := repo.FindBareRoot(dir); bareRoot != "" && bareRoot != dir {
 		rel, err := filepath.Rel(bareRoot, dir)
@@ -29,9 +28,7 @@ func Name(dir string) string {
 	return strings.ReplaceAll(parent+"_"+base, ".", "_")
 }
 
-// DisplayName derives dir's human label: repo:branch for a worktree under a
-// bare repo (slashes in the branch kept, so it reads like a git ref), the
-// directory's base name otherwise.
+// DisplayName is dir's human label: repo:branch for a worktree, its base name otherwise.
 func DisplayName(dir string) string {
 	if bareRoot := repo.FindBareRoot(dir); bareRoot != "" && bareRoot != dir {
 		rel, err := filepath.Rel(bareRoot, dir)
@@ -45,16 +42,14 @@ func DisplayName(dir string) string {
 
 type OpenOptions struct {
 	WithClaude bool
-	// InstallCmd, if non-empty, runs in a detached "install" window. The shell
-	// wrapper pauses on failure so the user can read the error.
+	// InstallCmd, if non-empty, runs in a detached "install" window.
 	InstallCmd string
-	// EditorCmd overrides the editor-window command; empty means plain "nvim".
+	// EditorCmd overrides the editor-window command; empty means "nvim".
 	EditorCmd string
-	// Prompt, if non-empty, is claude's opening message in the claude window.
+	// Prompt, if non-empty, is claude's opening message.
 	Prompt string
-	// Dir is where the windows start when it should differ from dir (a scratch
-	// session's dated directory); the session keeps dir's name and stamp so
-	// pickers and remove still see the worktree.
+	// Dir is where the windows start when it differs from dir; the session is
+	// still named and stamped after dir.
 	Dir string
 }
 
@@ -73,8 +68,6 @@ func Open(dir string, opts OpenOptions) error {
 		if err := tmuxctl.NewSession(name, cwd, nvimctl.WindowName, editorCmd); err != nil {
 			return fmt.Errorf("create session %q: %w", name, err)
 		}
-		// Stamp the originating dir so the workspace overview can map sessions
-		// back to directories without reverse-engineering the session name.
 		tmuxctl.SetSessionOption(name, "@jmux_dir", dir)
 		if opts.WithClaude {
 			claudeCmd := "jmux claude"
@@ -100,13 +93,10 @@ func Open(dir string, opts OpenOptions) error {
 	return tmuxctl.Attach(name)
 }
 
-// Kill terminates the named tmux session. When it's the session we're currently
-// inside, killing it directly would SIGHUP this process before any follow-up
-// (e.g. an fzf reload) can run, so the kill is detached to a process that
-// survives our death.
+// Kill terminates the named tmux session. Killing our own session would SIGHUP
+// this process before any follow-up (an fzf reload) runs, so that kill is
+// detached, and the editors are reaped first for the same reason.
 func Kill(name string) {
-	// Reap the editors before kill-session: that kill is detached when it's our
-	// own session, so doing it after risks being SIGHUP'd first and leaking them.
 	nvimctl.Reap(nvimctl.Processes(tmuxctl.PanePIDs(name)))
 	if tmuxctl.CurrentSession() == name {
 		cmd := exec.Command("tmux", "kill-session", "-t="+name)

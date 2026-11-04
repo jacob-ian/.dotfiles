@@ -1,7 +1,5 @@
--- Everything in the diffview tab: mapping diffview windows to GitHub sides,
--- gutter signs for pending comments and existing review threads, the thread
--- peek float with immediate replies, staging comments/suggestions, and opening
--- the PR diff itself.
+-- The diffview tab: GitHub-side mapping, gutter signs, thread peeks, comment
+-- staging, and opening the PR diff.
 
 local gh = require "jmux.pr.gh"
 local state = require "jmux.pr.state"
@@ -10,21 +8,14 @@ local util = require "jmux.pr.util"
 
 local M = {}
 
--- pd_tab is the tabpage that `pd` opened the review diff in. Signs are scoped to
--- it so PR comments don't bleed into unrelated diffviews (neogit, ad-hoc :Diff…).
--- Tracked so re-invoking focuses the open tab instead of stacking a duplicate.
--- pd_mode says which review the tab holds ("pr" or "agent") — the two share the
--- slot, so opening one closes the other.
+-- pd_tab scopes signs and keys to our diffview tab, not neogit's or ad-hoc
+-- ones. pd_mode is "pr" or "agent"; the two share the tab.
 local pd_tab
 local pd_mode
--- the diff tab's hint bar; cleared when the view closes.
 local title = ui.title_slot()
 
--- Handlers KEYS closes over, defined with their machinery below.
 local refresh_threads, open_thread_under_cursor, goto_thread, goto_base
 
--- refresh re-runs the mode's data fetch and rebuilds the file list — in agent
--- mode that also picks up files created since the view opened.
 local function refresh()
   if pd_mode == "agent" then
     util.sh { "git", "add", "--intent-to-add", "--all" }
@@ -34,9 +25,8 @@ local function refresh()
   vim.cmd "DiffviewRefresh"
 end
 
--- KEYS is the single spec for the diff windows' review keys: decorate_one
--- applies it through the lease, and its hints compose the tab title's bar.
--- panel = true entries also bind in the file panel.
+-- KEYS is the diff windows' review keys; panel = true entries also bind in
+-- the file panel.
 local KEYS = ui.keyspec {
   {
     mode = "n",
@@ -79,7 +69,6 @@ local KEYS = ui.keyspec {
     mode = "n",
     lhs = "<C-s>",
     panel = true,
-    -- the mode's submit; lazy requires avoid module cycles.
     rhs = function()
       if pd_mode == "agent" then
         require("jmux.pr.agent").send()
@@ -103,9 +92,7 @@ local KEYS = ui.keyspec {
   },
 }
 
--- diff_view returns the active diffview's { entry, layout }, or nil + reason when
--- diffview isn't loaded or no diff is open. Shared by everything that needs to map
--- diffview windows to GitHub sides (target's selection, decorate_diff's signs).
+-- diff_view returns the active diffview's { entry, layout }, or nil + reason.
 local function diff_view()
   local ok, lib = pcall(require, "diffview.lib")
   if not ok then
@@ -118,10 +105,8 @@ local function diff_view()
   return { entry = view.cur_entry, layout = view.cur_layout }
 end
 
--- target resolves the {path, side, start_line, line} for the current diffview
--- selection, or nil + reason when the cursor isn't in a reviewable diff window.
--- Diffview's right (new) buffer shows the head file, so its line numbers map
--- straight to GitHub's RIGHT side; the left buffer maps to LEFT/oldpath.
+-- target resolves the current diffview selection to {path, side, start_line,
+-- line}, or nil + reason. Diffview's right buffer is GitHub's RIGHT side.
 local function target()
   local v, err = diff_view()
   if not v then
@@ -162,10 +147,9 @@ local function target()
   return { path = path, side = side, start_line = sline, line = eline }
 end
 
--- file_tab picks the tab goto_base edits in: the last-used tab (where
--- 'tabclose' will return to) while it shows a plain file buffer, else the
--- first other tab that does. Jmux and neogit tabs hold scratch buffers, so
--- an :edit there would replace their view.
+-- file_tab picks the tab goto_base edits in: the last-used tab, else the first
+-- other one, provided it shows a plain file buffer (jmux and neogit tabs hold
+-- scratch buffers an :edit would replace).
 local function file_tab()
   local function plain(tab)
     local win = vim.api.nvim_tabpage_get_win(tab)
@@ -184,9 +168,8 @@ local function file_tab()
   end
 end
 
--- goto_base opens the diffed file in the base tab at the cursor line. LEFT
--- lines belong to the old revision, so their numbers don't map to the
--- working tree — declined, like the review panel's jump.
+-- goto_base opens the diffed file in a base tab at the cursor line. LEFT
+-- lines don't map to the working tree, so they're declined.
 goto_base = function()
   local t, err = target()
   if not t then
@@ -206,8 +189,7 @@ goto_base = function()
   vim.cmd "normal! zz"
 end
 
--- cursor_diff resolves the current diff window to (path, side, buf, line), or nil
--- when the cursor isn't in a reviewable diff window.
+-- cursor_diff resolves the current diff window to (path, side, buf, line).
 local function cursor_diff()
   local v = diff_view()
   if not v then
@@ -223,19 +205,14 @@ local function cursor_diff()
   return nil
 end
 
--- Everything drawn or bound on diffview's windows targets real file buffers,
--- so it's applied through a lease and revoked when the view closes.
+-- Diff windows are real file buffers, so decorations go through a lease and
+-- are revoked when the view closes.
 local lease = ui.lease()
 
--- Pending comments mark themselves in the diff gutter with a sign at the line
--- each one starts on. SIGN is the glyph (nf-fa-comment); change the codepoint to
--- taste. Built via nr2char so the source stays plain ASCII.
 local SIGN_NS = vim.api.nvim_create_namespace "jmux_pr_signs"
 local SIGN = vim.fn.nr2char(0xf075)
 
--- place_signs (re)draws the signs for one diff buffer: clears ours, then marks
--- every pending comment whose path/side match this buffer. Diffview shows the
--- whole file, so a comment's line maps straight to the buffer line.
+-- place_signs redraws the pending-comment signs for one diff buffer.
 local function place_signs(buf, path, side)
   if not (buf and vim.api.nvim_buf_is_valid(buf)) then
     return
@@ -259,22 +236,16 @@ local function place_signs(buf, path, side)
   end
 end
 
--- threads holds existing review threads fetched for the PR; K on a thread sign
--- floats it. THREAD_SIGN marks an open discussion in the gutter (distinct from
--- your own SIGN); RESOLVED_SIGN dims resolved ones to a tick.
 local THREAD_NS = vim.api.nvim_create_namespace "jmux_pr_threads"
 local THREAD_SIGN = vim.fn.nr2char(0xf086)
 local RESOLVED_SIGN = vim.fn.nr2char(0xf00c)
 local threads = {}
 local FLOAT_NS = vim.api.nvim_create_namespace "jmux_pr_thread_float"
--- the occupant is a snacks.win; its close is idempotent.
 local thread_float = ui.slot(function(w)
   w:close()
 end)
 
--- THREADS_QUERY pulls review threads via GraphQL — REST's pulls/comments carries
--- no resolution state. reviewThreads are already grouped and flag isResolved; a
--- null line means the thread no longer maps to the current diff (outdated).
+-- GraphQL, since REST's pulls/comments carries no resolution state.
 local THREADS_QUERY = [[
 query($owner:String!,$repo:String!,$number:Int!){
   repository(owner:$owner,name:$repo){
@@ -289,10 +260,8 @@ query($owner:String!,$repo:String!,$number:Int!){
   }
 }]]
 
--- parse_threads reads the decoded reviewThreads response into our thread shape.
--- Threads arrive pre-grouped; a null line means the thread no longer maps to the
--- current diff (outdated, usually resolved) and is dropped — pv still has the
--- full conversation.
+-- parse_threads reads the reviewThreads response into our thread shape. A null
+-- line means the thread is outdated for this diff, so it's dropped.
 local function parse_threads(data)
   local nodes = vim.tbl_get(data, "data", "repository", "pullRequest", "reviewThreads", "nodes")
   if type(nodes) ~= "table" then
@@ -323,13 +292,9 @@ local function parse_threads(data)
   return out
 end
 
--- decorate_diff is defined at the end of the decoration chain but used by
--- refresh_threads, so it's forward-declared.
 local decorate_diff
 
--- refresh_threads refetches the PR's review threads and redraws the diff signs.
--- Fully async, so it never gates anything — signs layer in when the request
--- returns. Used on diff open and after posting a reply.
+-- refresh_threads refetches the PR's review threads and redraws the signs.
 refresh_threads = function()
   local pr = gh.pr_info()
   if not pr then
@@ -345,12 +310,9 @@ refresh_threads = function()
   end)
 end
 
--- REPLY_MUTATION posts a reply to a review thread. The thread node id is
--- globally unique, so no owner/repo/number is needed. pullRequestReviewId is
--- deliberately omitted: without it the reply posts immediately rather than
--- joining a pending review — except when the viewer already has one open
--- (e.g. started on the web), which GitHub attaches to; the returned comment
--- state exposes that so it can be surfaced.
+-- pullRequestReviewId is omitted so the reply posts immediately; GitHub still
+-- attaches it to a pending review the viewer already has open, which the
+-- returned comment state exposes.
 local REPLY_MUTATION = [[
 mutation($thread:ID!,$body:String!){
   addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$thread,body:$body}){
@@ -367,8 +329,7 @@ mutation($thread:ID!){
   unresolveReviewThread(input:{threadId:$thread}){ thread{ isResolved } }
 }]]
 
--- resolve_thread toggles t's resolved state ({ id, resolved }) and runs
--- on_done on success. The stale pv cache drops like after a reply.
+-- resolve_thread toggles t's resolved state and runs on_done on success.
 function M.resolve_thread(t, on_done)
   ui.act(t.resolved and "unresolving…" or "resolving…", function(done)
     gh.graphql(t.resolved and UNRESOLVE_MUTATION or RESOLVE_MUTATION, { thread = t.id }, done)
@@ -380,11 +341,8 @@ function M.resolve_thread(t, on_done)
   end)
 end
 
--- reply_to_thread opens the editor for a reply to thread t and posts it on :w.
--- Unlike comments, replies don't stage: they're conversational, so they go up
--- immediately. The prompt closes itself on success and stays open on failure so
--- the text survives a retry; on_done runs after success so callers refresh what
--- they show. ui.spin animates the loader while the post is in flight.
+-- reply_to_thread opens the editor for a reply to t and posts it on :w; the
+-- prompt stays open on failure so the text survives a retry.
 function M.reply_to_thread(t, on_done)
   if not t.id then
     vim.notify("thread has no id to reply to", vim.log.levels.WARN)
@@ -412,7 +370,6 @@ function M.reply_to_thread(t, on_done)
         if pbuf and vim.api.nvim_buf_is_valid(pbuf) then
           pcall(vim.api.nvim_buf_delete, pbuf, { force = true })
         end
-        -- the reply changes the conversation, so a cached pv would be stale.
         state.clear_view_cache()
         local comment_state = vim.tbl_get(data, "data", "addPullRequestReviewThreadReply", "comment", "state")
         if comment_state == "PENDING" then
@@ -433,9 +390,7 @@ function M.reply_to_thread(t, on_done)
   )
 end
 
--- open_thread_float pops a bordered peek of the thread near the cursor: a header
--- per comment (author · age, replies marked ↳) over its markdown body. Focused so
--- a long thread scrolls; q/<Esc> or moving away closes it, r replies.
+-- open_thread_float peeks the thread in a float near the cursor.
 local function open_thread_float(t)
   local lines, headers = {}, {}
   for i, c in ipairs(t.comments) do
@@ -449,7 +404,6 @@ local function open_thread_float(t)
     end
   end
 
-  -- a comfortable reading column; wrap long bodies rather than widen the float.
   local width = math.min(64, math.floor(vim.o.columns * 0.8))
   local rows = 0
   for _, l in ipairs(lines) do
@@ -470,7 +424,6 @@ local function open_thread_float(t)
     text = lines,
     bo = { filetype = "markdown", bufhidden = "wipe" },
     wo = { wrap = true, linebreak = true },
-    -- through the slot, not snacks' own close, so slot state stays truthful.
     keys = {
       q = thread_float.clear,
       ["<Esc>"] = thread_float.clear,
@@ -492,8 +445,7 @@ local function open_thread_float(t)
   vim.api.nvim_create_autocmd("WinLeave", { buffer = win.buf, once = true, callback = thread_float.clear })
 end
 
--- place_threads (re)draws this buffer's thread gutter signs; K on one opens the
--- thread in a float.
+-- place_threads redraws this buffer's thread signs.
 local function place_threads(buf, path, side)
   if not (buf and vim.api.nvim_buf_is_valid(buf)) then
     return
@@ -506,8 +458,6 @@ local function place_threads(buf, path, side)
   local last = vim.api.nvim_buf_line_count(buf)
   for _, t in ipairs(threads) do
     if t.path == path and t.side == side and t.line and t.line >= 1 and t.line <= last then
-      -- traffic-light vs your own Info-blue pending signs: open threads warn
-      -- (need attention), resolved go green-tick (settled).
       pcall(vim.api.nvim_buf_set_extmark, buf, THREAD_NS, t.line - 1, 0, {
         sign_text = t.resolved and RESOLVED_SIGN or THREAD_SIGN,
         sign_hl_group = t.resolved and "DiagnosticSignOk" or "DiagnosticSignWarn",
@@ -516,8 +466,6 @@ local function place_threads(buf, path, side)
   end
 end
 
--- open_thread_under_cursor floats the thread anchored on the cursor line, or does
--- nothing when there isn't one (K's only job in the diff is to peek a thread).
 open_thread_under_cursor = function()
   local path, side, _, line = cursor_diff()
   if not path then
@@ -531,8 +479,7 @@ open_thread_under_cursor = function()
   end
 end
 
--- goto_thread moves to the next (dir 1) or previous (dir -1) thread in the current
--- file, floating it on arrival.
+-- goto_thread moves to the next (dir 1) or previous (dir -1) thread in the file.
 goto_thread = function(dir)
   local path, side, _, line = cursor_diff()
   if not path then
@@ -563,9 +510,7 @@ goto_thread = function(dir)
   open_thread_float(target_t)
 end
 
--- decorate_one draws both your pending signs and the existing-thread signs for
--- one diff window, and binds the review keys on its buffer. Idempotent —
--- re-run on every diffview event.
+-- decorate_one signs one diff window and binds the review keys on its buffer.
 local function decorate_one(win, path, side)
   if not (win and vim.api.nvim_win_is_valid(win)) then
     return
@@ -573,24 +518,19 @@ local function decorate_one(win, path, side)
   local buf = vim.api.nvim_win_get_buf(win)
   place_signs(buf, path, side)
   place_threads(buf, path, side)
-  -- diff windows split from pv inherit its local number settings; put the
-  -- globals back. Windows die with the view, so nothing to revoke.
+  -- diff windows split from pv inherit its local number settings.
   for _, opt in ipairs { "number", "relativenumber" } do
     vim.api.nvim_set_option_value(opt, vim.api.nvim_get_option_value(opt, { scope = "global" }), { win = win })
   end
   KEYS.apply(buf, lease.map)
 end
 
--- decorate_diff signs the current diffview file's two windows (RIGHT = new/main,
--- LEFT = old). A no-op unless the pd-opened diff tab is current. Driven by
--- diffview's own events so the signs follow file navigation and reappear when the
--- view is re-entered.
+-- decorate_diff signs the current file's two windows; a no-op unless our tab
+-- is current.
 decorate_diff = function()
   if not pd_tab or vim.api.nvim_get_current_tabpage() ~= pd_tab then
     return
   end
-  -- tab-wide keys (panel = true) also bind in the file panel, so e.g. <C-r>
-  -- there doesn't fall through to redo.
   local ok, lib = pcall(require, "diffview.lib")
   local view = ok and lib.get_current_view() or nil
   local pbuf = view and view.panel and view.panel.bufid
@@ -614,10 +554,8 @@ decorate_diff = function()
   end
 end
 
--- stage_comment opens the editor for the target span (prefilled with `initial`
--- when given) and stages the result in state.pending, updating in place on
--- re-save rather than queuing a duplicate. When `lang` is set, the prompt's
--- suggestion block is syntax-highlighted live in that language.
+-- stage_comment opens the editor for the target span and stages the result,
+-- updating in place on re-save.
 local function stage_comment(t, label, initial, lang)
   local span = util.span_str(t)
   local staged
@@ -649,8 +587,7 @@ local function stage_comment(t, label, initial, lang)
   end, initial, on_open)
 end
 
--- add_comment stages an inline comment on the selected line(s). Bind in normal
--- and visual mode; a visual selection becomes a multi-line comment.
+-- add_comment stages an inline comment on the selected line(s).
 function M.add_comment()
   state.load()
   local t, reason = target()
@@ -661,9 +598,7 @@ function M.add_comment()
   stage_comment(t, "comment")
 end
 
--- suggest stages a GitHub suggestion on the selected line(s): a comment prefilled
--- with a ```suggestion block holding the current code, ready to edit into the
--- proposed change. Suggestions only apply to the new side, so LEFT is declined.
+-- suggest stages a GitHub suggestion on the selected line(s).
 function M.suggest()
   state.load()
   local t, reason = target()
@@ -679,11 +614,8 @@ function M.suggest()
   stage_comment(t, "suggestion", "```suggestion\n" .. table.concat(lines, "\n") .. "\n```", ui.lang_of(t.path))
 end
 
--- ensure_base makes sure the PR base commit is present in the local object store.
--- baseRefOid is GitHub's current tip of the base branch, which advances whenever
--- anything merges into it; if we haven't fetched since, that SHA is absent and
--- DiffviewOpen fails with "not a valid object name". GitHub serves fetch-by-sha,
--- so pull just that one commit on demand. Returns true once the base is available.
+-- ensure_base fetches the PR base commit when it's missing locally; GitHub's
+-- base tip advances with every merge, and GitHub serves fetch-by-sha.
 local function ensure_base(base)
   if util.sh { "git", "cat-file", "-e", base .. "^{commit}" } then
     return true
@@ -695,13 +627,9 @@ local function ensure_base(base)
   return false, err
 end
 
--- diff opens the PR's changes — base...HEAD, the merge-base range GitHub shows —
--- in diffview, where pending comments appear as gutter signs. load() first so a
--- restored review decorates on open.
 -- focus_main puts the cursor in the head-side diff window, polling briefly
--- since diffview loads entries async.
+-- since diffview loads entries async; it never steals focus from another tab.
 local function focus_main(tries)
-  -- polling, so the user may have tabbed away — never steal focus back.
   if not pd_tab or vim.api.nvim_get_current_tabpage() ~= pd_tab then
     return
   end
@@ -719,9 +647,8 @@ local function focus_main(tries)
   end
 end
 
--- claim_tab switches the pending store and takes over the diff tab slot:
--- focuses it when it already holds `mode`'s review (returning false), closes
--- the other review's tab otherwise.
+-- claim_tab takes over the diff tab for mode: false when it already holds
+-- that review, else closes the other review's tab.
 local function claim_tab(mode, store)
   state.use(store)
   if pd_tab and vim.api.nvim_tabpage_is_valid(pd_tab) then
@@ -735,6 +662,7 @@ local function claim_tab(mode, store)
   return true
 end
 
+-- diff opens the PR's changes (merge-base...HEAD, as GitHub shows them).
 function M.diff(selected)
   if not claim_tab("pr", state.PR_STORE) then
     return
@@ -744,8 +672,8 @@ function M.diff(selected)
     vim.notify(err or "could not resolve PR base", vim.log.levels.ERROR)
     return
   end
-  -- not pr.base: that cached base-tip sha can sit behind a local rebase's
-  -- fork point, pulling upstream commits into the diff.
+  -- not pr.base: the cached base-tip sha can sit behind a local rebase's fork
+  -- point, pulling upstream commits into the diff.
   local base = pr.baseRef and util.sh { "git", "merge-base", "HEAD", "origin/" .. pr.baseRef } or nil
   if not base then
     base = pr.base
@@ -760,13 +688,8 @@ function M.diff(selected)
     cmd = cmd .. " --selected-file=" .. vim.fn.fnameescape(selected)
   end
   vim.cmd(cmd)
-  -- :DiffviewOpen lands us in the new diff tab; remember it so only this view
-  -- gets comment signs.
   pd_tab = vim.api.nvim_get_current_tabpage()
   title.set(vim.api.nvim_get_current_buf(), "jmux pr diff", KEYS.hints())
-  -- Defer restoring the saved review (its git calls) off the open path, then
-  -- draw signs. place_signs is idempotent, so any event-driven decorate that
-  -- raced ahead with an empty review is simply corrected here.
   vim.schedule(function()
     state.load()
     decorate_diff()
@@ -775,8 +698,8 @@ function M.diff(selected)
   focus_main()
 end
 
--- review_worktree opens the working tree's changes against HEAD with the same
--- comment staging as a PR diff — the pre-PR agent review. No PR, so no threads.
+-- review_worktree opens the working tree against HEAD with comment staging,
+-- for the agent review.
 function M.review_worktree()
   if not util.git_dir() then
     vim.notify("not in a git repo — agent review needs a HEAD to diff against", vim.log.levels.WARN)
@@ -786,8 +709,7 @@ function M.review_worktree()
     return
   end
   threads = {}
-  -- intent-to-add so untracked files show in the HEAD diff (paths only,
-  -- nothing becomes committable).
+  -- intent-to-add so untracked files show in the HEAD diff.
   util.sh { "git", "add", "--intent-to-add", "--all" }
   vim.cmd "DiffviewOpen HEAD"
   pd_tab = vim.api.nvim_get_current_tabpage()
@@ -799,9 +721,8 @@ function M.review_worktree()
   focus_main()
 end
 
--- jump_to_line places the cursor on line in path's head-side diff window.
--- Diffview selects and loads entries asynchronously, so this polls briefly;
--- of the windows showing path, the last is the head side (right of the base).
+-- jump_to_line places the cursor in path's head-side window, polling since
+-- diffview loads entries async; the last window showing path is the head side.
 local function jump_to_line(path, line, tries)
   if not line then
     return
@@ -830,8 +751,7 @@ local function jump_to_line(path, line, tries)
   end
 end
 
--- open_at opens (or focuses) the PR diff with path selected and the cursor
--- on line's head-side row — pv's jump from an inline thread to its code.
+-- open_at opens or focuses the PR diff at path:line.
 function M.open_at(path, line)
   if pd_tab and vim.api.nvim_tabpage_is_valid(pd_tab) then
     vim.api.nvim_set_current_tabpage(pd_tab)
@@ -845,9 +765,6 @@ function M.open_at(path, line)
   jump_to_line(path, line)
 end
 
--- Keep the diff gutter in sync with pending comments as the user navigates
--- diffview files and re-enters the view. A cleared augroup keeps re-sourcing the
--- module (dev reload) idempotent rather than stacking duplicate callbacks.
 local group = vim.api.nvim_create_augroup("jmux_pr", { clear = true })
 vim.api.nvim_create_autocmd("User", {
   group = group,
@@ -855,11 +772,8 @@ vim.api.nvim_create_autocmd("User", {
   callback = vim.schedule_wrap(decorate_diff),
 })
 
--- The lease holds everything applied to real file buffers (a diff's RIGHT
--- side is the buffer on disk); revoking it when the view closes keeps signs
--- and review keys from outliving the diff in normal windows. Diffview fires
--- this for every view it closes, neogit's included, so only act once our tab
--- is gone (diffview closes the tab before emitting).
+-- Diffview fires this for every view it closes, neogit's included, so only act
+-- once our tab is gone (diffview closes the tab before emitting).
 vim.api.nvim_create_autocmd("User", {
   group = group,
   pattern = "DiffviewViewClosed",

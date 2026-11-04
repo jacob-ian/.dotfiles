@@ -8,23 +8,16 @@ local util = require "jmux.pr.util"
 
 local M = {}
 
--- CONTEXT is how many lines of code to show either side of a comment's span in
--- the submit preview.
 local CONTEXT = 2
 
--- ADD_REVIEW_MUTATION submits the whole review in one call: the verdict (event),
--- optional summary, and every staged comment as a draft thread. One mutation
--- keeps the submit atomic — there's no intermediate pending review to orphan on
--- a partial failure.
+-- One mutation keeps the submit atomic: no pending review to orphan on a
+-- partial failure.
 local ADD_REVIEW_MUTATION = [[
 mutation($input:AddPullRequestReviewInput!){
   addPullRequestReview(input:$input){ pullRequestReview{ id } }
 }]]
 
--- post_review submits the pending comments as one review with the chosen verdict
--- and optional summary body, then calls on_done(true) on success or on_done(false)
--- after notifying the failure. Async, and the payload is serialized up front, so
--- a later edit to state.pending can't change what's already in flight.
+-- post_review submits the pending comments as one review and calls on_done(ok).
 local function post_review(c, event, body, on_done)
   if not c.id then
     vim.notify("submit failed: PR node id not resolved (gh too old?)", vim.log.levels.ERROR)
@@ -60,12 +53,9 @@ local function post_review(c, event, body, on_done)
   end)
 end
 
--- build_preview reads each pending comment's surrounding code and returns a list
--- of blocks: { left = {header, rows={num,text,selected} | unavailable}, lang,
--- right = {header, body} }. rows carry ±CONTEXT lines around the comment span,
--- read from the head SHA for RIGHT comments and the base SHA for LEFT.
+-- build_preview returns a block per pending comment: the commented code with
+-- CONTEXT lines around it on the left, the comment body on the right.
 local function build_preview(c)
-  -- cache file content per rev:path so multiple comments on one file read once.
   local cache = {}
   local function rev_lines(rev, path)
     if not rev then
@@ -76,7 +66,7 @@ local function build_preview(c)
     if hit then
       return hit.lines, hit.err
     end
-    -- systemlist (not sh) so leading indentation on the first/last line survives.
+    -- systemlist rather than sh so leading indentation survives.
     local lines = vim.fn.systemlist { "git", "show", key }
     if vim.v.shell_error ~= 0 then
       cache[key] = { err = vim.trim(table.concat(lines, " ")) }
@@ -90,7 +80,6 @@ local function build_preview(c)
     return {
       {
         left = { header = "▌ no inline comments staged", rows = {} },
-        -- mirror the header on the right; there's nothing to pair below it.
         right = { header = "▌ no inline comments staged", body = {} },
       },
     }
@@ -125,17 +114,9 @@ local function build_preview(c)
   return blocks
 end
 
--- render flattens the blocks into the two column buffers and decorates the left
--- one with extmarks: an inline line-number/▸ gutter, full syntax highlighting on
--- the commented lines, and a muted overlay on the surrounding context. Keeping
--- the buffer text as pure code (gutter is virtual) is what lets the treesitter
--- column offsets line up. Sections are padded so both columns stay aligned under
--- scrollbind.
--- render returns locs (left-buffer row → code {path, side, line}, for <CR>) and
--- owner (row → index of the owning comment in state.pending, shared by both
--- columns since they're padded to the same per-block row range, for d).
--- Re-runnable: it clears its own namespace first so it can redraw after a
--- comment is removed.
+-- render fills both column buffers, padded so they stay aligned under
+-- scrollbind. The gutter is virtual text so treesitter column offsets line up.
+-- Returns locs (left row → code location) and owner (row → pending index).
 local function render(blocks, lbuf, rbuf)
   local ns = vim.api.nvim_create_namespace "jmux_pr_preview"
   vim.api.nvim_buf_clear_namespace(lbuf, ns, 0, -1)
@@ -143,7 +124,7 @@ local function render(blocks, lbuf, rbuf)
 
   for bi, b in ipairs(blocks) do
     local lsec, lmeta = { b.left.header }, { { header = true } }
-    local lbase = #left -- buffer row (0-indexed) the header will land on
+    local lbase = #left
     if b.left.unavailable then
       lsec[2] = "  ‹code unavailable: " .. b.left.unavailable .. "›"
       lmeta[2] = { muted = true }
@@ -159,7 +140,6 @@ local function render(blocks, lbuf, rbuf)
       rsec[#rsec + 1] = "  " .. line
     end
 
-    -- pad the shorter column, then a blank separator row to each.
     local h = math.max(#lsec, #rsec)
     while #lsec < h do
       lsec[#lsec + 1], lmeta[#lmeta + 1] = "", false
@@ -175,8 +155,6 @@ local function render(blocks, lbuf, rbuf)
     end
     vim.list_extend(right, rsec)
     b.lbase = lbase
-    -- every row of this block (header, code, padding, separator) belongs to
-    -- comment bi, so d works from anywhere in the hunk in either column.
     for row = lbase, #left - 1 do
       owner[row] = bi
     end
@@ -191,7 +169,6 @@ local function render(blocks, lbuf, rbuf)
     vim.bo[buf].modifiable = false
   end
 
-  -- per-line gutter + muting (selected lines stay normal for syntax to show).
   local locs = {}
   for row = 0, #left - 1 do
     local m = meta[row + 1]
@@ -211,7 +188,6 @@ local function render(blocks, lbuf, rbuf)
     end
   end
 
-  -- syntax-highlight each block's commented span (contiguous, so one parse).
   for _, b in ipairs(blocks) do
     if b.lang and b.left.rows then
       local lo, texts
@@ -223,7 +199,6 @@ local function render(blocks, lbuf, rbuf)
         end
       end
       if lo then
-        -- header sits at b.lbase, so row j of rows is at b.lbase + j.
         ui.ts_highlight(lbuf, ns, b.lang, table.concat(texts, "\n"), b.lbase + lo)
       end
     end
@@ -232,15 +207,11 @@ local function render(blocks, lbuf, rbuf)
   return locs, owner
 end
 
--- review opens a two-column preview of the pending review — code on the left,
--- comments on the right — then a/c/r choose a verdict (with an optional summary)
--- and submit it; q cancels. Shown in a throwaway tab so the diffview stays put.
+-- review opens the two-column preview of the pending review in its own tab;
+-- a/c/r choose a verdict and submit, q cancels.
 function M.review()
-  -- this panel submits to GitHub, so it only ever reads the PR store.
   state.use(state.PR_STORE)
   state.load()
-  -- The preview is built entirely from local git: HEAD for RIGHT-side code, and
-  -- base (one gh call) only when a LEFT-side comment actually needs it.
   local sha = util.sh { "git", "rev-parse", "HEAD" }
   local base
   for _, cm in ipairs(state.pending) do
@@ -252,22 +223,15 @@ function M.review()
   end
 
   local blocks = build_preview { sha = sha, base = base }
-  -- root makes <CR> jumps work regardless of cwd; nil falls back to the
-  -- repo-relative path, which still resolves when cwd is the worktree root.
   local root = util.sh { "git", "rev-parse", "--show-toplevel" }
 
   local left = ui.pane { tab = true, wo = { scrollbind = true, wrap = false } }
   local right = ui.pane { split = "right", wo = { scrollbind = true, wrap = true, linebreak = true } }
   local lwin, lbuf, rwin, rbuf = left.win, left.buf, right.win, right.buf
-  -- peers: either pane dying closes the other, so a stray <C-w>c can't
-  -- strand half the preview.
   local group = ui.panegroup { panes = { left, right } }
 
   local locs, owner = render(blocks, lbuf, rbuf)
 
-  -- Row 1 (tabline, full width): title + the review-level commands that work
-  -- from either pane. The bar's own spin animates the submit loader —
-  -- tab-scoped, so frames never paint over other tabs.
   local _, restore, _, bar_spin = ui.set_tab_title(lbuf, "jmux review", {
     ui.key_hint("a", "approve"),
     ui.key_hint("c", "comment"),
@@ -276,7 +240,6 @@ function M.review()
     ui.key_hint("q", "cancel"),
   })
 
-  -- Row 2 (winbar, per pane): the actions specific to each side.
   local function winbar(win, wb)
     vim.api.nvim_set_option_value("winbar", wb, { scope = "local", win = win })
   end
@@ -285,10 +248,7 @@ function M.review()
   vim.api.nvim_set_current_win(lwin)
   vim.cmd "syncbind"
 
-  -- stop_spin is set while a submit is in flight (it stops the tabline
-  -- loader); its presence also marks the preview busy, so a second submit is
-  -- refused. Teardown stops it too, so a killed preview can't leave the
-  -- loader running.
+  -- stop_spin is set while a submit is in flight and doubles as the busy flag.
   local stop_spin
   left.on_close.add(restore)
   left.on_close.add(function()
@@ -298,9 +258,8 @@ function M.review()
   end)
   local close = group.close
 
-  -- goto_code closes the preview and jumps to the file/line under the cursor.
-  -- RIGHT lines map to the head, which is the working tree; LEFT (old) lines
-  -- have no working-tree counterpart, so they're declined.
+  -- goto_code jumps to the file/line under the cursor. LEFT lines have no
+  -- working-tree counterpart, so they're declined.
   local function goto_code()
     local loc = locs[vim.api.nvim_win_get_cursor(lwin)[1] - 1]
     if not loc then
@@ -316,9 +275,6 @@ function M.review()
     vim.cmd "normal! zz"
   end
 
-  -- delete_under_cursor drops the comment whose hunk the cursor is in (either
-  -- column), persists, and redraws the remaining hunks in place. Closing once
-  -- the last one goes.
   local function delete_under_cursor()
     if #state.pending == 0 then
       return
@@ -350,12 +306,9 @@ function M.review()
       return
     end
     vim.ui.input({ prompt = ("%s — summary (optional)> "):format(event) }, function(body)
-      -- nil body means the input was cancelled; leave the preview open.
       if body == nil then
         return
       end
-      -- Resolve the PR identity only now, at the moment of submit — a cache miss
-      -- round trip is hidden behind the user having just typed the summary.
       local pr, err = gh.pr_info()
       if not pr then
         vim.notify(err, vim.log.levels.ERROR)
@@ -364,10 +317,6 @@ function M.review()
       local n = #state.pending
       vim.notify(("submitting %s…"):format(event))
 
-      -- Animate the bar's loader while the submit is in flight (the call is
-      -- async, so the editor stays responsive). stop_spin tears it down —
-      -- restoring the command bar for a retry — and doubles as the busy flag
-      -- the guard above checks.
       local spin_stop = bar_spin(("submitting %s…"):format(event))
       stop_spin = function()
         stop_spin = nil
@@ -382,12 +331,8 @@ function M.review()
           return
         end
         state.discard()
-        -- the submitted review changes the conversation, so drop the pv cache;
-        -- the reopened view refetches rather than painting a copy without it.
         state.clear_view_cache()
         vim.notify(string.format("submitted %s with %d comment(s)", event, n))
-        -- the diff stays open behind the remove prompt; it only closes once
-        -- the workspace is kept (a removal takes the whole nvim down anyway).
         if event == "APPROVE" then
           util.prompt_remove_workspace(function()
             close()
@@ -413,7 +358,6 @@ function M.review()
       choose "REQUEST_CHANGES"
     end, opt)
     vim.keymap.set("n", "d", delete_under_cursor, opt)
-    -- D discards the whole review; confirm since it can't be undone.
     vim.keymap.set("n", "D", function()
       vim.ui.select({ "no", "yes" }, { prompt = "discard all pending comments?" }, function(choice)
         if choice == "yes" then
@@ -424,7 +368,6 @@ function M.review()
     end, opt)
     vim.keymap.set("n", "q", close, opt)
   end
-  -- only the code column knows a file/line under the cursor.
   vim.keymap.set("n", "<CR>", goto_code, { buffer = lbuf, nowait = true })
 end
 

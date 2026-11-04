@@ -68,9 +68,8 @@ func TestOwner(t *testing.T) {
 	}
 }
 
-// The search response shape as GitHub returns it, so a renamed field in the
-// query or a mistyped struct tag fails here rather than silently dropping
-// the byline.
+// Decodes the response shape GitHub actually returns, so a renamed field or
+// mistyped struct tag fails here rather than silently dropping the byline.
 func TestSearchBlockDecodesLiveShape(t *testing.T) {
 	raw := `{"prs": {"nodes": [
 	  {"number": 3205, "title": "Add events", "isDraft": false, "headRefName": "gertrude/en-8616", "baseRefName": "main",

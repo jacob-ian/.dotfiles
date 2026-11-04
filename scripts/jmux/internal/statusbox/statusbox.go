@@ -1,12 +1,5 @@
 // Package statusbox renders the tmux status-line multibox: the newest
-// undismissed notice as a clickable notification, a summary count once
-// everything is dismissed, nothing when nothing claims attention. A notice
-// kind is an event type wiring a Source (derive its current notices) and a
-// Handler (act on a clicked one). Render and click both derive from scratch,
-// so the persisted state carries only data, never actions, and dismissals
-// self-invalidate by comparison against truth. The box is published to a
-// global tmux user option that status-right references, so one render
-// reaches every session.
+// undismissed notice as a clickable notification, a summary once all are dismissed.
 package statusbox
 
 import (
@@ -20,11 +13,8 @@ import (
 	"jmux/internal/tmuxctl"
 )
 
-// boxOption is the tmux user option the status line references via
-// #{E:@jmux_statusbox}; rangeContent/rangeX are the user-range names the
-// MouseDown1Status binding dispatches on. tmux caps range arguments at 15
-// bytes; only the displayed notification carries ranges, so fixed names
-// suffice and a click resolves through the persisted display entry.
+// tmux caps range names at 15 bytes, so the ranges are fixed names and a
+// click resolves through the persisted display entry.
 const (
 	boxOption    = "@jmux_statusbox"
 	rangeContent = "jmux-content"
@@ -33,15 +23,14 @@ const (
 
 const stateFile = "statusbox.json"
 
-// Notice is one item claiming the user's attention — pure data (it persists
-// to the state file whole); behavior lives in the kind's Handler.
+// Notice is one item claiming attention; behaviour lives in the kind's Handler.
 type Notice struct {
-	Kind   string    `json:"kind"`             // event type, e.g. "claude.needs_input"; stamped by collect, never by sources
-	ID     string    `json:"id"`               // identity within the kind (claude: pane id); Kind+ID is the notice's key
-	Label  string    `json:"label,omitempty"`  // display text; escaped and truncated at render time
-	Verb   string    `json:"verb,omitempty"`   // singular claim, e.g. "needs input"
-	Plural string    `json:"plural,omitempty"` // summary form for counts above one; empty reuses Verb
-	Since  time.Time `json:"since,omitzero"`   // when the claim last renewed; zero never renews, so dismissals stick
+	Kind   string    `json:"kind"` // stamped by collect, never by sources
+	ID     string    `json:"id"`   // Kind+ID is the notice's key
+	Label  string    `json:"label,omitempty"`
+	Verb   string    `json:"verb,omitempty"`   // e.g. "needs input"
+	Plural string    `json:"plural,omitempty"` // empty reuses Verb
+	Since  time.Time `json:"since,omitzero"`   // zero never renews, so dismissals stick
 }
 
 func (n Notice) key() string {
@@ -55,8 +44,7 @@ var (
 	handlers = map[string]func(n Notice, client string) error{}
 )
 
-// Source wires a kind's lister, which derives the kind's current notices
-// from its own state. Duplicate kinds panic.
+// Source registers a kind's lister; duplicate kinds panic.
 func Source(kind string, list func() []Notice) {
 	if _, ok := sources[kind]; ok {
 		panic("statusbox: duplicate Source for kind " + kind)
@@ -64,8 +52,7 @@ func Source(kind string, list func() []Notice) {
 	sources[kind] = list
 }
 
-// Handler wires a kind's click handler, called with the freshly derived
-// notice under the click. Duplicate kinds panic.
+// Handler registers a kind's click handler; duplicate kinds panic.
 func Handler(kind string, handle func(n Notice, client string) error) {
 	if _, ok := handlers[kind]; ok {
 		panic("statusbox: duplicate Handler for kind " + kind)
@@ -73,16 +60,13 @@ func Handler(kind string, handle func(n Notice, client string) error) {
 	handlers[kind] = handle
 }
 
-// state is the box's cache entry: the displayed notice (what a click acts
-// on) and the dismissals, keyed by kind+id.
 type state struct {
 	Display   *Notice              `json:"display,omitempty"`
 	Dismissed map[string]time.Time `json:"dismissed,omitempty"`
 }
 
-// collect gathers every source's notices, newest first, stamping Kind from
-// the registered key so dismissal and dispatch never depend on a source
-// filling it in.
+// collect stamps Kind from the registry key so dispatch never depends on a
+// source filling it in.
 func collect() []Notice {
 	var notices []Notice
 	for kind, list := range sources {
@@ -103,10 +87,8 @@ func collect() []Notice {
 	return notices
 }
 
-// renderBox renders the multibox and prunes the dismissal store: entries for
-// gone notices or claims renewed after the dismissal are dropped, so
-// dismissals self-invalidate without timers. disp is the displayed notice,
-// nil outside notification state.
+// renderBox renders the box and prunes dismissals for notices gone or renewed
+// since, so they self-invalidate without timers.
 func renderBox(notices []Notice, dismissed map[string]time.Time) (box string, disp *Notice, keep map[string]time.Time) {
 	keep = map[string]time.Time{}
 	var undismissed []Notice
@@ -159,8 +141,7 @@ func summarize(notices []Notice) string {
 	return strings.Join(parts, " · ")
 }
 
-// maxLabel caps the notification label so a long label can't push the
-// dismiss target past status-right-length.
+// maxLabel keeps a long label from pushing the dismiss target past status-right-length.
 const maxLabel = 24
 
 func truncateLabel(label string) string {
@@ -171,15 +152,13 @@ func truncateLabel(label string) string {
 	return string(r[:maxLabel-1]) + "…"
 }
 
-// escapeStatus doubles '#' so free-text labels never expand as formats or
-// styles when the status line evaluates the box.
+// escapeStatus doubles '#' so labels never expand as tmux formats.
 func escapeStatus(s string) string {
 	return strings.ReplaceAll(s, "#", "##")
 }
 
-// Publish recomputes the multibox, publishes it, and refreshes every
-// client's status line. Best-effort throughout: the box is decoration, so
-// callers (hooks especially) never fail because a status line didn't update.
+// Publish rerenders the box and refreshes every client. Best-effort: hooks
+// must never fail because a status line didn't update.
 func Publish() {
 	var st state
 	cachefile.Read(stateFile, &st)
@@ -191,10 +170,8 @@ func Publish() {
 	}
 }
 
-// RunClick handles `jmux statusline click <range> [client]`, the mouse
-// binding's dispatch: rangeContent runs the displayed notice's handler; both
-// ranges dismiss it — the notification was seen, and a renewed claim
-// reinstates it. Stale clicks republish to self-heal.
+// RunClick handles `jmux statusline click <range> [client]`: rangeContent
+// runs the displayed notice's handler, both ranges dismiss it.
 func RunClick(args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: jmux statusline click <range> [client]")
@@ -211,8 +188,8 @@ func RunClick(args []string) error {
 	}
 	switch args[0] {
 	case rangeContent:
-		// Dispatch to the current notice, not the snapshot: a notice that
-		// vanished since the render just republishes instead of acting stale.
+		// Dispatch to the current notice, not the snapshot, so a vanished one
+		// republishes instead of acting stale.
 		n, ok := find(collect(), st.Display.key())
 		if !ok {
 			Publish()
@@ -242,7 +219,6 @@ func find(notices []Notice, key string) (Notice, bool) {
 	return Notice{}, false
 }
 
-// dismiss marks the displayed notice seen and republishes.
 func dismiss(st state) {
 	if st.Dismissed == nil {
 		st.Dismissed = map[string]time.Time{}

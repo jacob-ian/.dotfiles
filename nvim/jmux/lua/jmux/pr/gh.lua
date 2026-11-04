@@ -1,17 +1,12 @@
 -- GitHub access for the pr modules: one GraphQL entry point and the cached PR
--- identity. Works in a jmux PR worktree, where the checked-out branch is the
--- PR's head, so `gh` resolves the PR for every call with no number to pass.
+-- identity.
 
 local util = require "jmux.pr.util"
 
 local M = {}
 
--- graphql runs one query/mutation with `vars` as GraphQL variables and calls
--- cb(data) with the decoded response body, or cb(nil, err) on failure — gh exits
--- non-zero when the response carries GraphQL errors, so both transport and query
--- failures land in err. The payload goes via --input as a raw JSON body, which
--- handles every variable type uniformly (nested arrays included) with no -f/-F
--- argument building. Async; cb runs on the main loop.
+-- graphql runs one query/mutation async and calls cb(data) or cb(nil, err) on
+-- the main loop. gh exits non-zero on GraphQL errors too, so both land in err.
 function M.graphql(query, vars, cb)
   local payload = vim.json.encode { query = query, variables = vars }
   vim.system({ "gh", "api", "graphql", "--input", "-" }, { stdin = payload, text = true }, function(res)
@@ -36,18 +31,14 @@ function M.owner_repo(slug)
   return slug:match "([^/]+)/(.+)"
 end
 
--- info caches the PR's { slug, number, base, id } from a single `gh pr view`.
--- Resolved lazily and cached for the whole session: one nvim instance maps to one
--- PR worktree (so the branch never changes under us), which is what keeps the
--- cached number/id valid.
+-- info is the PR's { slug, number, base, id }, cached for the session: one nvim
+-- maps to one PR worktree, so it never changes.
 local info
 
 local INFO_FIELDS = "number,baseRefOid,baseRefName,url,id"
 
--- parse_pr_info turns `gh pr view --json` output into the { slug, number, base,
--- id } identity (id is the GraphQL node id, used by mutations). The slug comes
--- from the PR url path (host-agnostic, works on GHE); a parse failure falls back
--- to a repo lookup rather than caching a half-resolved identity.
+-- parse_pr_info turns `gh pr view --json` output into the identity. The slug
+-- comes from the PR url so it works on GHE.
 local function parse_pr_info(out)
   local ok, data = pcall(vim.json.decode, out)
   if not ok or type(data) ~= "table" or not data.number then
@@ -70,11 +61,8 @@ local function parse_pr_info(out)
   }
 end
 
--- The identity also persists to the worktree's git dir (like the pending review
--- and the pv cache): a worktree maps to one PR for its lifetime, so slug/number/
--- id can never go stale, and a disk hit makes pd/pv open with zero network on a
--- fresh session. base (the base branch tip) does advance, so a disk hit still
--- refreshes in the background — see refresh_async.
+-- The identity also persists in the git dir so a fresh session opens with no
+-- network. base advances, so a disk hit still refreshes in the background.
 local function info_file()
   local dir = util.git_dir()
   return dir and (dir .. "/jmux-pr-info.json") or nil
@@ -99,10 +87,6 @@ local function write_info_cache(i)
   end
 end
 
--- refresh_async re-resolves the identity off the main loop and rewrites both
--- caches, so a disk-cached open's base is at most one open behind the base
--- branch's tip (and a worktree whose branch grew a new PR self-heals the same
--- way). Once per session — the identity doesn't drift faster than that matters.
 local refreshed = false
 local function refresh_async()
   if refreshed then
@@ -123,8 +107,6 @@ local function refresh_async()
   end)
 end
 
--- cached returns the session or disk copy of the identity, kicking the
--- background refresh on a disk hit. nil when neither exists yet.
 local function cached()
   if info then
     return info
@@ -136,10 +118,7 @@ local function cached()
   return info
 end
 
--- pr_info resolves the PR identity: the session cache, then the disk cache
--- (kicking a background refresh), then one blocking gh round trip — so only the
--- very first open of a worktree ever waits on the network. Callers that must not
--- freeze the editor even then use pr_info_async.
+-- pr_info resolves the PR identity, blocking on gh only when no cache exists.
 function M.pr_info()
   local i = cached()
   if i then
@@ -158,9 +137,7 @@ function M.pr_info()
   return i, perr
 end
 
--- pr_info_async resolves the identity off the main loop: the session or disk
--- cache immediately when present, else via vim.system so the editor stays
--- responsive (e.g. an animated loader keeps spinning) during the round trip.
+-- pr_info_async is pr_info off the main loop, for callers animating a loader.
 function M.pr_info_async(cb)
   local i = cached()
   if i then

@@ -25,7 +25,6 @@ type hookInput struct {
 	SessionID        string `json:"session_id"`
 }
 
-// The hook_event_name values jmux is wired to in settings.json.
 const (
 	eventUserPromptSubmit = "UserPromptSubmit"
 	eventNotification     = "Notification"
@@ -33,10 +32,8 @@ const (
 	eventSessionEnd       = "SessionEnd"
 )
 
-// The hook events that mean the user answered whatever claude was blocked on.
-// Approvals have no decision-time hook, so the approved tool completing (or
-// failing) stands in for one; denials and elicitation answers do fire at
-// decision time.
+// Events that mean the user answered a prompt. Approvals have no hook of
+// their own, so the approved tool completing stands in for one.
 const (
 	eventPostToolUse        = "PostToolUse"
 	eventPostToolUseFailure = "PostToolUseFailure"
@@ -44,7 +41,6 @@ const (
 	eventElicitationResult  = "ElicitationResult"
 )
 
-// The notification_type values that mean claude is blocked on the user.
 const (
 	notifyPermissionPrompt  = "permission_prompt"
 	notifyIdlePrompt        = "idle_prompt"
@@ -52,8 +48,6 @@ const (
 	notifyElicitationDialog = "elicitation_dialog"
 )
 
-// sessionStatus is a session's state as reported by its hooks — the claude
-// tag's payload.
 type sessionStatus string
 
 const (
@@ -62,12 +56,8 @@ const (
 	statusIdle       sessionStatus = "idle"
 )
 
-// tagKind doubles as the namespace prefix: session namespaces are
-// "claude:<session_id>".
 const tagKind = "claude"
 
-// kindNeedsInput is the statusbox notice kind — the event, not the domain,
-// so dismissing it never suppresses other claude notice types.
 const kindNeedsInput = tagKind + ".needs_input"
 
 type tagData struct {
@@ -77,8 +67,7 @@ type tagData struct {
 
 var registerOnce sync.Once
 
-// Register wires this package's workspace-tag renderer and statusbox notice
-// source; idempotent so main and tests can both call it.
+// Register wires this package's workspace-tag renderer and statusbox notice source.
 func Register() {
 	registerOnce.Do(func() {
 		tag.Register(tagKind, func(data json.RawMessage) (string, tag.Color) {
@@ -105,11 +94,8 @@ func Register() {
 	})
 }
 
-// noticesFromTags maps needs_input tags to notices labelled by workspace,
-// dropping tags with no pane to jump to (unset, or absent from the live
-// panes). Deduping per pane keeps the most recently updated session, so a
-// newer quiet session supersedes a stale claim from a predecessor in the
-// same pane.
+// noticesFromTags maps needs_input tags with a live pane to notices. The newest
+// session per pane wins, so a successor session supersedes a stale claim.
 func noticesFromTags(tags map[string][]tag.Tag, panes map[string]string) []statusbox.Notice {
 	type claim struct {
 		d    tagData
@@ -146,8 +132,6 @@ func noticesFromTags(tags map[string][]tag.Tag, panes map[string]string) []statu
 	return out
 }
 
-// focusPane jumps the client to the pane, resolving its window at jump time
-// so a pane that moved still focuses correctly.
 func focusPane(pane, client string) error {
 	target := tmuxctl.PaneTarget(pane)
 	if target == "" {
@@ -163,11 +147,8 @@ func claudeTag(status sessionStatus, pane string) tag.Tag {
 	return tag.New(tagKind, pane, tagData{Status: status, UpdatedAt: time.Now()})
 }
 
-// RunHook handles `jmux claude hook`, the single entry point for the hook
-// events wired in settings.json (UserPromptSubmit, Notification, Stop,
-// SessionEnd, and the answered events). Events that change the workspace's
-// claude badge republish the statusbox; a Notification also pushes an
-// interruption.
+// RunHook handles `jmux claude hook`, the entry point for every claude hook
+// event wired in settings.json.
 func RunHook() error {
 	var in hookInput
 	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
@@ -182,17 +163,12 @@ func RunHook() error {
 	return nil
 }
 
-// status maps a hook event onto the workspace's claude badge for the session
-// that fired it, so the overview shows live state per agent. The namespace
-// carries the session id so concurrent agents in one worktree don't clobber
-// each other's badge. Reports whether the badge changed, so no-op events
-// skip the statusbox republish.
+// status updates the session's claude badge for a hook event and reports
+// whether it changed.
 func status(in hookInput) bool {
 	if in.CWD == "" {
 		return false
 	}
-	// Badges key on workspace paths, but claude's cwd may be a subdirectory —
-	// map it to the worktree root the overview actually lists.
 	path := repo.WorkRoot(in.CWD)
 	if path == "" {
 		path = in.CWD
@@ -213,8 +189,8 @@ func status(in hookInput) bool {
 			return false
 		}
 	case eventPostToolUse, eventPostToolUseFailure, eventPermissionDenied, eventElicitationResult:
-		// PostToolUse fires on every tool call, so the common case — already
-		// working, mid agentic run — must stay a single cache read.
+		// PostToolUse fires on every tool call, so the common case must stay a
+		// single cache read.
 		if currentStatus(path, ns) == statusWorking {
 			return false
 		}
@@ -229,8 +205,6 @@ func status(in hookInput) bool {
 	return true
 }
 
-// currentStatus reads the session's current badge status, "" when unset or
-// undecodable.
 func currentStatus(path, ns string) sessionStatus {
 	t, ok := tag.Get(path, ns)
 	if !ok {
@@ -243,9 +217,7 @@ func currentStatus(path, ns string) sessionStatus {
 	return d.Status
 }
 
-// push interrupts the user about a Notification, unless the pane is already
-// on screen — the user is looking at the prompt the notification would point
-// them to. (Interrupt itself stays quiet whenever the terminal is frontmost.)
+// push interrupts the user about a Notification unless its pane is already on screen.
 func push(in hookInput) error {
 	if tmuxctl.PaneVisible(os.Getenv("TMUX_PANE")) {
 		return nil
@@ -275,9 +247,8 @@ func push(in hookInput) error {
 		fzfutil.Self()+" claude focus "+pane)
 }
 
-// RunFocus handles `jmux claude focus <pane>`, the macOS alert's click
-// callback. terminal-notifier runs it with a minimal PATH, hence the
-// homebrew append.
+// RunFocus handles `jmux claude focus <pane>`, the alert's click callback.
+// terminal-notifier runs it with a minimal PATH, hence the homebrew append.
 func RunFocus(args []string) error {
 	if len(args) < 1 || args[0] == "" {
 		return errors.New("usage: jmux claude focus <pane>")

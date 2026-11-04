@@ -1,5 +1,4 @@
-// Package ghctl talks to GitHub: data queries (list/search/lookup) via the
-// go-gh SDK (in-process, reusing gh's auth); the PR preview via `gh pr view`.
+// Package ghctl talks to GitHub through the go-gh SDK, reusing gh's auth.
 package ghctl
 
 import (
@@ -16,8 +15,8 @@ import (
 )
 
 const (
-	previewTimeout = 5 * time.Second  // per-keystroke `gh pr view` preview
-	queryTimeout   = 15 * time.Second // SDK data calls
+	previewTimeout = 5 * time.Second
+	queryTimeout   = 15 * time.Second
 )
 
 // PR is the subset of fields the review flow needs.
@@ -45,12 +44,11 @@ type SearchResult struct {
 	Author struct {
 		Login string
 	}
-	// Owner is the human driving a bot-authored PR (whoever last requested
-	// review or marked it ready, else its assignee); "" for human authors.
+	// Owner is the human driving a bot-authored PR; "" for human authors.
 	Owner string
 }
 
-// Available reports whether the gh CLI is on PATH (needed for the preview).
+// Available reports whether the gh CLI is on PATH.
 func Available() bool {
 	_, err := exec.LookPath("gh")
 	return err == nil
@@ -62,13 +60,11 @@ var (
 	clientErr  error
 )
 
-// rest returns a cached REST client authed via gh's resolved token.
 func rest() (*api.RESTClient, error) {
 	clientOnce.Do(func() { client, clientErr = api.DefaultRESTClient() })
 	return client, clientErr
 }
 
-// get performs a bounded GET, decoding the JSON response into out.
 func get(path string, out any) error {
 	cl, err := rest()
 	if err != nil {
@@ -82,7 +78,6 @@ func get(path string, out any) error {
 	return nil
 }
 
-// pull is the REST shape of a pull request (the fields we read).
 type pull struct {
 	Number int    `json:"number"`
 	Title  string `json:"title"`
@@ -104,7 +99,7 @@ func (p pull) toPR() PR {
 	return pr
 }
 
-// GetPR returns a single PR by number (the `jmux pr <num>` path).
+// GetPR returns a single PR by number.
 func GetPR(slug string, num int) (PR, error) {
 	var p pull
 	if err := get(fmt.Sprintf("repos/%s/pulls/%d", slug, num), &p); err != nil {
@@ -113,7 +108,7 @@ func GetPR(slug string, num int) (PR, error) {
 	return p.toPR(), nil
 }
 
-// HeadRef resolves a PR's head branch — the field search omits.
+// HeadRef resolves a PR's head branch.
 func HeadRef(slug string, num int) (string, error) {
 	p, err := GetPR(slug, num)
 	if err != nil {
@@ -122,8 +117,7 @@ func HeadRef(slug string, num int) (string, error) {
 	return p.HeadRefName, nil
 }
 
-// searchMyPRsQuery aliases the three review-queue searches into one round-trip;
-// `@me` resolves server-side, so no separate login lookup is needed.
+// searchMyPRsQuery aliases the three review-queue searches into one round trip.
 const searchMyPRsQuery = `
 query($reviewRequested: String!, $assigned: String!, $authored: String!) {
   reviewRequested: search(query: $reviewRequested, type: ISSUE, first: 100) { nodes { ...prFields } }
@@ -131,14 +125,11 @@ query($reviewRequested: String!, $assigned: String!, $authored: String!) {
   authored:        search(query: $authored,        type: ISSUE, first: 100) { nodes { ...prFields } }
 }` + prFieldsFragment
 
-// searchRepoQuery is the single-search form for one repo's open PRs.
 const searchRepoQuery = `
 query($prs: String!) {
   prs: search(query: $prs, type: ISSUE, first: 100) { nodes { ...prFields } }
 }` + prFieldsFragment
 
-// prFieldsFragment is the PR selection every picker row is built from, so
-// the cross-repo queue and a single repo's list render the same way.
 const prFieldsFragment = `
 fragment prFields on PullRequest {
   number
@@ -188,10 +179,9 @@ type actor struct {
 	Typename string `json:"__typename"`
 }
 
-// owner is the human behind a bot-authored PR: the newest non-bot actor to
-// request review or mark it ready (CODEOWNERS requests come from the bot
-// itself, so those are skipped), else the first assignee. "" for a human
-// author, or a bot PR nobody has picked up.
+// owner is the newest human to request review on or ready a bot-authored PR,
+// else its first assignee. Bot actors are skipped: CODEOWNERS requests come
+// from the bot itself.
 func (n prSearchNode) owner() string {
 	if n.Author.Typename != "Bot" {
 		return ""
@@ -213,15 +203,13 @@ var (
 	gqlErr  error
 )
 
-// graphqlClient returns a cached GraphQL client authed via gh's resolved token.
 func graphqlClient() (*api.GraphQLClient, error) {
 	gqlOnce.Do(func() { gql, gqlErr = api.DefaultGraphQLClient() })
 	return gql, gqlErr
 }
 
-// SearchMyPRs returns open PRs across all repos that request your review, are
-// assigned to you, or you authored, deduped by repo+number in that priority
-// order. A non-empty orgs scopes the search to those owners.
+// SearchMyPRs returns open PRs that request your review, are assigned to you,
+// or you authored, in that priority order.
 func SearchMyPRs(orgs []string) ([]SearchResult, error) {
 	scope := orgQualifier(orgs)
 	return searchPRs(searchMyPRsQuery, map[string]string{
@@ -238,9 +226,8 @@ func ListPRs(slug string) ([]SearchResult, error) {
 	}, "prs")
 }
 
-// searchPRs runs one of the aliased search queries, each alias bound to its
-// search string, and flattens the blocks in the given alias order, dropping
-// PRs already seen under an earlier alias.
+// searchPRs runs an aliased search query and flattens the blocks in order,
+// deduping PRs seen under an earlier alias.
 func searchPRs(query string, searches map[string]string, order ...string) ([]SearchResult, error) {
 	cl, err := graphqlClient()
 	if err != nil {
@@ -263,7 +250,7 @@ func searchPRs(query string, searches map[string]string, order ...string) ([]Sea
 	for _, alias := range order {
 		for _, n := range resp[alias].Nodes {
 			if n.Number == 0 {
-				continue // non-PR union member or null node
+				continue
 			}
 			key := n.Repository.NameWithOwner + "#" + strconv.Itoa(n.Number)
 			if seen[key] {
@@ -281,8 +268,7 @@ func searchPRs(query string, searches map[string]string, order ...string) ([]Sea
 	return out, nil
 }
 
-// orgQualifier builds the ` org:a org:b` search suffix. GitHub ORs repeated
-// `org:` qualifiers, so any listed org matches; "" for no orgs.
+// orgQualifier builds the " org:a org:b" suffix; GitHub ORs repeated org qualifiers.
 func orgQualifier(orgs []string) string {
 	var b strings.Builder
 	for _, o := range orgs {

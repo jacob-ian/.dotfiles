@@ -20,20 +20,6 @@ func HasSession(name string) bool {
 	return exec.Command("tmux", "has-session", "-t="+name).Run() == nil
 }
 
-// ListSessions returns the names of all tmux sessions. Empty when the server
-// isn't running or on error.
-func ListSessions() []string {
-	out, err := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
-	if err != nil {
-		return nil
-	}
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" {
-		return nil
-	}
-	return strings.Split(trimmed, "\n")
-}
-
 // ListClients returns the names of all attached tmux clients.
 func ListClients() []string {
 	out, err := exec.Command("tmux", "list-clients", "-F", "#{client_name}").Output()
@@ -62,27 +48,23 @@ func ClientPIDs() []int {
 	return pids
 }
 
-// SetGlobalOption sets a server-wide option (e.g. a user option like
-// "@jmux_statusbox" that status-line formats reference).
+// SetGlobalOption sets a server-wide option.
 func SetGlobalOption(key, value string) {
 	exec.Command("tmux", "set-option", "-g", key, value).Run()
 }
 
-// RefreshStatus redraws the named client's status line without touching its
-// panes.
+// RefreshStatus redraws the named client's status line.
 func RefreshStatus(client string) {
 	exec.Command("tmux", "refresh-client", "-S", "-t", client).Run()
 }
 
-// SetSessionOption sets a session-scoped option (e.g. a user option like
-// "@jmux_dir") on the named session.
+// SetSessionOption sets a session-scoped option.
 func SetSessionOption(name, key, value string) {
 	exec.Command("tmux", "set-option", "-t", name, key, value).Run()
 }
 
-// SessionDirs returns every session's originating directory in one tmux
-// call: the @jmux_dir stamp, else the active pane's path for sessions created
-// before stamping existed. Sessions with neither are skipped.
+// SessionDirs returns every session's originating directory in one call: the
+// @jmux_dir stamp, else the active pane's path.
 func SessionDirs() []string {
 	out, err := exec.Command("tmux", "list-sessions", "-F", "#{@jmux_dir}\t#{pane_current_path}").Output()
 	if err != nil {
@@ -121,9 +103,7 @@ func CountWindows(session, window string) int {
 	return n
 }
 
-// CapturePane returns the visible buffer of target (e.g. "session:window"),
-// including up to `scrollback` extra lines of history. ANSI escapes are
-// stripped.
+// CapturePane returns target's visible buffer plus up to scrollback lines of history.
 func CapturePane(target string, scrollback int) string {
 	args := []string{"capture-pane", "-p", "-t", target}
 	if scrollback > 0 {
@@ -140,8 +120,7 @@ func KillSession(name string) {
 	exec.Command("tmux", "kill-session", "-t="+name).Run()
 }
 
-// PanePIDs returns the PIDs of the processes running in session's panes (across
-// all its windows).
+// PanePIDs returns the PIDs of the processes in session's panes.
 func PanePIDs(session string) []int {
 	out, err := exec.Command("tmux", "list-panes", "-s", "-t", session, "-F", "#{pane_pid}").Output()
 	if err != nil {
@@ -170,8 +149,6 @@ func NewSession(name, cwd, windowName, cmd string) error {
 	return exec.Command("tmux", args...).Run()
 }
 
-// NewWindow creates a new window in session `target`. If `detached` is true the
-// window is created without selecting it.
 // ShellQuote single-quotes s for use inside a tmux or fzf shell command.
 func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
@@ -207,8 +184,7 @@ func SwitchClient(name string) error {
 	return exec.Command("tmux", "switch-client", "-t", name).Run()
 }
 
-// SwitchClientTo points the named client at target, or lets tmux pick the
-// client when client is empty.
+// SwitchClientTo points the named client at target; empty client lets tmux pick.
 func SwitchClientTo(client, target string) error {
 	args := []string{"switch-client"}
 	if client != "" {
@@ -229,21 +205,18 @@ func InsideTmux() bool {
 	return os.Getenv("TMUX") != ""
 }
 
-// CurrentSession returns the name of the tmux session containing the running
-// process, or "" when not inside tmux.
+// CurrentSession is the session containing this process, or "" outside tmux.
 func CurrentSession() string {
 	return current("#S")
 }
 
-// CurrentWindow returns the name of the tmux window containing the running
-// process, or "" when not inside tmux.
+// CurrentWindow is the window containing this process, or "" outside tmux.
 func CurrentWindow() string {
 	return current("#W")
 }
 
-// PaneVisible reports whether pane is currently on screen: it is the active
-// pane of the active window of a session with at least one attached client.
-// False for an empty pane id or when tmux can't resolve it.
+// PaneVisible reports whether pane is on screen: the active pane of the
+// active window of a session with an attached client.
 func PaneVisible(pane string) bool {
 	if pane == "" {
 		return false
@@ -256,8 +229,7 @@ func PaneVisible(pane string) bool {
 	return strings.TrimSpace(string(out)) == "111"
 }
 
-// PaneWindows maps every pane id to the index of its containing window, for
-// resolving stored pane ids to display labels in one tmux call.
+// PaneWindows maps every pane id to its window index in one tmux call.
 func PaneWindows() map[string]string {
 	out, err := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id} #{window_index}").Output()
 	if err != nil {
@@ -272,9 +244,8 @@ func PaneWindows() map[string]string {
 	return m
 }
 
-// PaneLabels maps every pane id to "session:window-index" — a display label
-// that doubles as a switch-client target. Membership doubles as a pane
-// liveness check.
+// PaneLabels maps every pane id to "session:window-index", which doubles as
+// a switch-client target.
 func PaneLabels() map[string]string {
 	out, err := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id} #{session_name}:#{window_index}").Output()
 	if err != nil {
@@ -290,17 +261,15 @@ func PaneLabels() map[string]string {
 	return m
 }
 
-// PaneTarget returns "session:window-index" of the window containing pane, or
-// "" on error. Deliberately pane-targeted: an untargeted display-message would
-// answer for the client's active window instead.
+// PaneTarget returns pane's "session:window-index". Pane-targeted on purpose:
+// an untargeted display-message answers for the client's active window.
 func PaneTarget(pane string) string {
 	out, err := exec.Command("tmux", "display-message", "-p", "-t", pane, "#S:#I").Output()
 	if err != nil {
 		return ""
 	}
 	target := strings.TrimSpace(string(out))
-	// A pane tmux can't resolve still expands the format, with empty fields —
-	// a bare ":" is no target.
+	// An unresolvable pane still expands the format with empty fields.
 	if strings.Trim(target, ":.") == "" {
 		return ""
 	}

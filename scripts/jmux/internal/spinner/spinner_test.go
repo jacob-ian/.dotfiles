@@ -7,10 +7,6 @@ import (
 	"testing"
 )
 
-// TestRenderCenters captures a frame (stderr is a pipe, so term size falls back
-// to 80x24) and checks the logo block and the action line are both present and
-// that every logo line starts at the same column — i.e. the block is shifted as
-// a whole and keeps its shape.
 func TestRenderCenters(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -29,8 +25,6 @@ func TestRenderCenters(t *testing.T) {
 		t.Errorf("action line missing from frame:\n%s", out)
 	}
 
-	// Each logo line still carries its own leading spaces, so it's the line's
-	// content (trimmed right only) that should land at one shared column.
 	left := -1
 	for i, l := range logo {
 		content := strings.TrimRight(l, " ")

@@ -10,7 +10,6 @@ import (
 	"jmux/internal/tag"
 )
 
-// TestMain wires the pr tag renderer, as main does for the binary.
 func TestMain(m *testing.M) {
 	Register()
 	os.Exit(m.Run())
@@ -77,8 +76,6 @@ func TestFormatItemsRowRoundTrips(t *testing.T) {
 	}
 }
 
-// Older rows (from a cache written before the base field existed) carry only the
-// head branch; rowBaseRef must degrade to "" rather than misread another field.
 func TestRowRefsTolerateMissingBaseField(t *testing.T) {
 	line := formatRow("owner/repo", 7, false, "Title", "author") + "\tfeat/x"
 	if got := rowHeadRef(line); got != "feat/x" {

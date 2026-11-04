@@ -1,6 +1,5 @@
--- The pre-PR agent review: stage comments on the working tree's uncommitted
--- changes, then hand the batch to the connected claude as a markdown brief,
--- typed and submitted into its tmux pane.
+-- The pre-PR agent review: stage comments on the working tree, then hand the
+-- batch to the connected claude as a markdown brief typed into its tmux pane.
 
 local state = require "jmux.pr.state"
 local util = require "jmux.pr.util"
@@ -25,7 +24,6 @@ local function excerpt(cm)
     local lines = vim.split(out, "\n")
     return vim.list_slice(lines, first, cm.line)
   end
-  -- comment paths are repo-relative; nvim's cwd may be a subdirectory.
   local root = util.sh { "git", "rev-parse", "--show-toplevel" }
   local path = root and (root .. "/" .. cm.path) or cm.path
   if vim.fn.filereadable(path) == 0 then
@@ -34,8 +32,8 @@ local function excerpt(cm)
   return vim.list_slice(vim.fn.readfile(path), first, cm.line)
 end
 
--- format renders the pending comments as the markdown brief, as single lines
--- (writefile treats embedded newlines as NULs).
+-- format renders the brief as single lines; writefile treats embedded
+-- newlines as NULs.
 local function format(pending)
   local out = { HEADER, "" }
   for _, cm in ipairs(pending) do
@@ -62,9 +60,8 @@ function M.review()
   require("jmux.pr.diff").review_worktree()
 end
 
--- claude_pane resolves the tmux pane of the claude connected to this nvim —
--- via its socket, not a window-name guess. nil unless exactly one lsof client
--- on the server port resolves to a pane.
+-- claude_pane finds the connected claude's tmux pane through its socket
+-- connection; nil unless exactly one client resolves to a pane.
 local function claude_pane()
   local status = require("claudecode.server.init").get_status()
   if not status.port then
@@ -105,12 +102,9 @@ local function claude_pane()
   end
 end
 
--- submit types the run instruction + Enter into the connected claude's pane
--- (the claudecode protocol can't submit). Any failure degrades to sending
--- the brief yourself.
+-- submit types the instruction into claude's pane, since the claudecode
+-- protocol can't submit; the trailing space dismisses the @ file picker.
 local function submit(file, n)
-  -- the trailing space dismisses the file picker that typing @ opens, so
-  -- Enter submits instead of selecting from the popup.
   local instruction = ("Resolve each review comment in @%s "):format(file)
   local function manual()
     vim.fn.setreg("+", instruction)
@@ -132,8 +126,7 @@ local function submit(file, n)
   end)
 end
 
--- send writes the brief to the git dir and submits it to the connected
--- claude; the staged review only clears with a claude connected, so failures retry.
+-- send writes the brief to the git dir and submits it to the connected claude.
 function M.send()
   state.use(state.AGENT_STORE)
   state.load()
@@ -145,7 +138,6 @@ function M.send()
   if not dir then
     return vim.notify("not in a git worktree", vim.log.levels.ERROR)
   end
-  -- one file per review: claude may still be reading the previous brief.
   local file = ("%s/jmux-agent-review-%s.md"):format(dir, os.date "%Y%m%d-%H%M%S")
   for i = 2, 99 do
     if vim.fn.filereadable(file) == 0 then
@@ -159,9 +151,6 @@ function M.send()
   if not ok then
     return vim.notify("claudecode.nvim not available — review written to " .. file, vim.log.levels.ERROR)
   end
-  -- the typed instruction's @path is the only file reference (a protocol
-  -- mention on top would tag it twice); the connection check still gates
-  -- clearing, and doubles as "the pane submit will reach a live claude".
   if not claudecode.is_claude_connected() then
     return vim.notify("no claude connected — staged review kept; review file at " .. file, vim.log.levels.WARN)
   end

@@ -1,7 +1,5 @@
--- Per-reviewer status derived from the pv query's PR node: a verdict for
--- everyone who reviewed, plus who's still awaited. Pure model, no rendering —
--- pv shows it as a collapsible block today, and a future dashboard pane can
--- render the same lines/marks into its own window.
+-- Per-reviewer status as a pure model: a verdict for everyone who reviewed,
+-- plus who's still awaited.
 
 local util = require "jmux.pr.util"
 
@@ -10,15 +8,11 @@ local reltime = util.reltime
 
 local M = {}
 
--- FIELDS is the PR selection this model reads (view's request picker also
--- reads reviewRequests for its exclusions).
 M.FIELDS = [[reviewRequests(first:50){ nodes{ requestedReviewer{
         __typename ... on User{ login } ... on Team{ name slug } } } }
       latestOpinionatedReviews(first:50){ nodes{ state author{login} createdAt } }]]
 
--- Display order: blocking verdicts first, then approvals, comment-only
--- reviewers, and the still-awaited last. signal ranks what the collapsed
--- header's icon should convey — blocked, then still-waiting, then done.
+-- order sorts the rows; signal ranks which state the header icon conveys.
 local STATES = {
   CHANGES_REQUESTED = { order = 1, signal = 1, icon = "✗", hl = "DiagnosticError", label = "changes requested" },
   APPROVED = { order = 2, signal = 3, icon = "✓", hl = "DiagnosticOk", label = "approved" },
@@ -27,17 +21,13 @@ local STATES = {
 }
 local ORDERED = { "CHANGES_REQUESTED", "APPROVED", "COMMENTED", "AWAITING" }
 
--- model distils the PR node into { header, header_mark, lines, marks,
--- entries }, or nil when the PR has no reviewers in any state. lines/marks
--- use the body_marks shape ({ rel, col, col_end, hl }) so any renderer can
--- indent and place them; entries[i] describes lines[i]'s reviewer (state,
--- login/slug) for renderers that act on a reviewer row.
+-- model distils the PR node into pane lines, or nil when the PR has no
+-- reviewers in any state.
 function M.model(pr)
   local author = nilable(vim.tbl_get(pr, "author", "login"))
   local entries, seen = {}, {}
 
-  -- one entry per reviewer, first writer wins — so each add_* below
-  -- supersedes the ones after it.
+  -- first writer wins, so each pass below supersedes the ones after it.
   local function add(login, entry)
     if login then
       if seen[login] then
@@ -48,9 +38,8 @@ function M.model(pr)
     entries[#entries + 1] = entry
   end
 
-  -- Requests supersede verdicts: GitHub keeps a re-requested reviewer's old
-  -- reviews, and their actionable state is the new ask. Teams render by name
-  -- and never have verdicts.
+  -- GitHub keeps a re-requested reviewer's old reviews, so requests supersede
+  -- verdicts.
   for _, rr in ipairs(vim.tbl_get(pr, "reviewRequests", "nodes") or {}) do
     local r = rr.requestedReviewer
     if type(r) == "table" then
@@ -61,8 +50,6 @@ function M.model(pr)
     end
   end
 
-  -- latestOpinionatedReviews is the current approve/request-changes per
-  -- author, matching how GitHub tallies verdicts.
   for _, r in ipairs(vim.tbl_get(pr, "latestOpinionatedReviews", "nodes") or {}) do
     local login = nilable(vim.tbl_get(r, "author", "login"))
     local state = tostring(r.state or ""):upper()
@@ -71,13 +58,10 @@ function M.model(pr)
     end
   end
 
-  -- reviewers whose latest word was only a comment: any review author with no
-  -- opinionated verdict (skipping the PR author's own review comments).
   local newest = {}
   for _, r in ipairs(vim.tbl_get(pr, "reviews", "nodes") or {}) do
     local login = nilable(vim.tbl_get(r, "author", "login"))
     if login and login ~= author then
-      -- reviews arrive time-ordered, so the last write is the newest.
       newest[login] = nilable(r.createdAt) or newest[login]
     end
   end
@@ -108,8 +92,6 @@ function M.model(pr)
     marks[#marks + 1] = { rel = #lines - 1, col = 0, col_end = #s.icon, hl = s.hl }
   end
 
-  -- the header icon carries the highest signal present — the rows themselves
-  -- say who's where, so no counts summary (it outgrows a pane title anyway).
   local head
   for _, state in ipairs(ORDERED) do
     if counts[state] and (not head or STATES[state].signal < STATES[head].signal) then
@@ -118,8 +100,8 @@ function M.model(pr)
   end
 
   local icon, hl = STATES[head].icon, STATES[head].hl
-  -- reviewDecision accounts for the branch's required approvals, so awaited
-  -- reviewers don't hold the icon back once the requirement is met.
+  -- reviewDecision reflects the branch's required approvals, so awaited
+  -- reviewers don't hold the icon back once those are met.
   if tostring(nilable(pr.reviewDecision) or ""):upper() == "APPROVED" and head ~= "CHANGES_REQUESTED" then
     icon, hl = STATES.APPROVED.icon, STATES.APPROVED.hl
   end

@@ -1,15 +1,11 @@
--- Shared UI atoms for the pr modules: the multiline prompt, the braille
--- spinner, bar/tab-title helpers, and treesitter-based syntax highlighting for
--- code spans embedded in scratch buffers.
+-- Shared UI atoms for the pr modules.
 
 local M = {}
 
--- SPINNER frames for in-flight loaders.
 M.SPINNER = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
 
--- spinner drives the braille loader: on_frame(frame) fires every 80ms (first
--- tick immediate, on the main loop) until the returned stop fn runs. No frames
--- fire after stop, so on_frame needs no own teardown guard.
+-- spinner fires on_frame every 80ms until the returned stop fn runs; no
+-- frame fires after stop.
 function M.spinner(on_frame)
   local timer, i = vim.uv.new_timer(), 0
   local function stop()
@@ -33,20 +29,18 @@ function M.spinner(on_frame)
   return stop
 end
 
--- key_hint renders an emphasized key glyph followed by a muted label for a
--- status bar; stock highlight groups so it tracks whatever colorscheme is active.
+-- key_hint renders an emphasised key followed by a muted label.
 function M.key_hint(key, label)
   return ("%%#Special#%s %%#Comment#%s"):format(key, label)
 end
 
--- bar builds a statusline-syntax string (for tabline or winbar): a Title-styled
--- label on the left and the hints flush right.
+-- bar builds a statusline-syntax string: label left, hints right.
 function M.bar(label, hints)
   return ("%%#Title# %s %%*%%=%s "):format(label, table.concat(hints, "  "))
 end
 
--- bars maps a tabpage to its set_tab_title bar's spinner, so spin() routes
--- through the current tab's bar automatically — no caller threads a spinner.
+-- bars maps a tabpage to its title bar's spinner, so spin() finds it without
+-- callers threading one.
 local bars = {}
 local function prune_bars()
   for t in pairs(bars) do
@@ -56,12 +50,9 @@ local function prune_bars()
   end
 end
 
--- set_tab_title shows a full-width jmux bar (label + hints) in the tabline, but
--- scoped to its own tabpage: the tabline is a global option, so without this it
--- would bleed onto other tabs (e.g. pv left open while you switch to pd). A
--- TabEnter watcher re-applies the bar on this tab and restores the previous
--- tabline on any other; BufWipeout tears it all down. Returns the bar string (for
--- callers that re-show it after a transient overlay) and a restore fn.
+-- set_tab_title shows a jmux bar in the tabline scoped to this tabpage: the
+-- tabline is a global option, so a TabEnter watcher re-applies it here and
+-- restores the previous tabline elsewhere.
 function M.set_tab_title(buf, label, hints)
   local saved_tabline, saved_showtabline = vim.o.tabline, vim.o.showtabline
   local title = M.bar(label, hints)
@@ -79,18 +70,15 @@ function M.set_tab_title(buf, label, hints)
   end
   local function apply(hs)
     local new = M.bar(label, hs)
-    -- an unchanged bar that's already painted skips the tabline write, so
-    -- e.g. cursor-move refreshes with identical hints don't force redraws.
+    -- an unchanged bar skips the write so cursor-move refreshes don't redraw.
     if new == title and vim.o.tabline == new then
       return
     end
     title = new
     refresh()
   end
-  -- set_hints rebuilds the bar (e.g. to reveal a key once data confirms it
-  -- applies) and re-applies it if this tab is current. While a spin is
-  -- animating it only records the hints — applying would fight the spinner
-  -- frames and flicker — and stop paints the latest recorded set.
+  -- while a spin animates, set_hints only records the hints; applying them
+  -- would fight the frames.
   local current_hints = hints
   local spinning = false
   local function set_hints(new_hints)
@@ -99,9 +87,7 @@ function M.set_tab_title(buf, label, hints)
       apply(new_hints)
     end
   end
-  -- spin animates a loader through the bar itself — tab-scoped, unlike the
-  -- global M.spin, so frames never bleed onto other tabs — and restores the
-  -- last-set hints on stop.
+  -- tab-scoped, unlike M.spin, so frames never bleed onto other tabs.
   local function spin(spin_label)
     spinning = true
     local stop = M.spinner(function(frame)
@@ -122,8 +108,7 @@ function M.set_tab_title(buf, label, hints)
     buffer = buf,
     once = true,
     callback = function()
-      -- only deregister our own spin: a replacement bar on the same tab
-      -- (title_slot re-set) may already own the slot.
+      -- a replacement bar on the same tab may already own the slot.
       if bars[tab] == spin then
         bars[tab] = nil
       end
@@ -134,13 +119,8 @@ function M.set_tab_title(buf, label, hints)
   return title, restore, set_hints, spin
 end
 
--- prompt_multiline opens a floating scratch buffer for a multi-line body and
--- behaves like editing a file: :w runs on_save(text) (re-runnable to update),
--- :q closes, :q! discards, and :q on unsaved edits warns as usual. Used because
--- vim.ui.input — and snacks' own input — are single-line. An optional `initial`
--- string prefills the buffer (e.g. a suggestion block to edit); on_open(buf), if
--- given, runs once the buffer exists (used to attach live suggestion highlights).
--- footer overrides the default hint line (e.g. "save" vs "stage").
+-- prompt_multiline opens a floating buffer that behaves like a file: :w runs
+-- on_save(text), :q closes, :q! discards. vim.ui.input is single-line.
 function M.prompt_multiline(title, on_save, initial, on_open, footer)
   require("snacks").win {
     width = 0.6,
@@ -151,8 +131,7 @@ function M.prompt_multiline(title, on_save, initial, on_open, footer)
     -- acwrite (not nofile) so :w fires BufWriteCmd instead of erroring.
     bo = { filetype = "markdown", buftype = "acwrite", bufhidden = "wipe" },
     wo = { wrap = true },
-    -- Drop snacks' default q=close so a stray q can't silently discard the
-    -- comment; closing goes through :q, which respects unsaved changes.
+    -- snacks' default q=close would silently discard the comment.
     keys = { q = false },
     on_buf = function(self)
       vim.api.nvim_buf_set_name(self.buf, "pr://comment/" .. self.buf)
@@ -174,24 +153,15 @@ function M.prompt_multiline(title, on_save, initial, on_open, footer)
       })
     end,
   }
-  -- Prefilled prompts open in normal mode so the user can navigate to the line
-  -- they want to change; an empty prompt drops straight into insert.
   if not initial then
     vim.cmd "startinsert"
   end
 end
 
--- keyspec declares a buffer's keys once: entries { mode?, lhs, rhs, desc?,
--- hint?, lhs_hint?, when?, ... }. apply(buf, map) registers the active ones
--- (map defaults to vim.keymap.set; pass lease.map for revocable buffers) and
--- deletes entries whose `when` turned false, so re-applying tracks state.
--- hints() renders the bar labels for the active hinted entries; hint may be a
--- fn for state-dependent labels, lhs_hint overrides the shown key (e.g. ⇥).
--- Extra entry fields pass through to callers iterating spec.entries.
+-- keyspec declares a buffer's keys once: apply registers the active entries
+-- and deletes those whose `when` turned false; hints renders the bar labels.
 function M.keyspec(entries)
   local ks = { entries = entries }
-  -- filter, when given, limits which entries bind — e.g. a multi-pane view
-  -- applying only its global entries to a side pane's buffer.
   function ks.apply(buf, map, filter)
     map = map or vim.keymap.set
     for _, k in ipairs(entries) do
@@ -214,9 +184,8 @@ function M.keyspec(entries)
     end
     return out
   end
-  -- ctx_hints renders the entries whose `ctx` says they apply at the cursor:
-  -- falsy no, true yes (normal hint), a string overrides the label — so a
-  -- key can read differently (or hint only) in context.
+  -- ctx_hints renders entries whose ctx applies at the cursor; a string ctx
+  -- overrides the label.
   function ks.ctx_hints()
     local out = {}
     for _, k in ipairs(entries) do
@@ -238,9 +207,7 @@ function M.keyspec(entries)
   return ks
 end
 
--- disposer collects cleanup functions at the sites that create things and
--- runs them once, in reverse order, when the owner closes — so a view's
--- teardown never has to know what its parts set up.
+-- disposer collects cleanup functions and runs them once, in reverse order.
 function M.disposer()
   local fns = {}
   local d = {}
@@ -258,18 +225,11 @@ end
 
 local PANE_NS = vim.api.nvim_create_namespace "jmux_pane"
 
--- pane creates a scratch window jmux owns, with a fresh scratch buffer: a
--- split (o.split = "left"/"right"/"above"/"below", of the current window or
--- of the whole tab with o.toplevel), a new tab appended after the last one
--- (o.tab), or — with neither — the current window and its buffer adopted.
--- Window options are set scope-local: vim.wo[win].opt writes the global
--- value too, leaking cosmetics into every later window. winfixbuf pins the
--- window to its buffer, so a stray :edit or jump can't replace the view.
--- o.width is a fn the pane owns for its lifetime, re-clamped when the screen
--- size changes — including the UI attaching after a mid-startup open, when
--- columns is still the 80 default. on_close is a disposer run once,
--- scheduled, on either death signal: the window closing, or another buffer
--- displacing this one (bufhidden=wipe kills the pane with no WinClosed).
+-- pane creates a scratch window jmux owns: a split (o.split, whole-tab with
+-- o.toplevel), a new tab at the end (o.tab), or the current window adopted.
+-- Window options are set scope-local because vim.wo writes the global value
+-- too. on_close runs once on either death signal, since bufhidden=wipe kills
+-- the pane with no WinClosed.
 function M.pane(o)
   o = o or {}
   local win, buf
@@ -311,6 +271,7 @@ function M.pane(o)
   if o.width then
     vim.api.nvim_win_set_width(win, o.width())
     local group = vim.api.nvim_create_augroup("jmux_pane_width_" .. win, { clear = true })
+    -- UIEnter too: columns is still the 80 default during a mid-startup open.
     vim.api.nvim_create_autocmd({ "UIEnter", "VimResized" }, {
       group = group,
       callback = function()
@@ -349,9 +310,7 @@ function M.pane(o)
     end
   end
 
-  -- fill paints a pure model ({ header, header_mark, lines, marks }) into
-  -- the pane: the summary header becomes the winbar title (icon coloured
-  -- with statusline highlights), the lines the body. nil empties the pane.
+  -- fill paints a pane model into the pane; nil empties it.
   function p.fill(pmodel)
     if not vim.api.nvim_buf_is_valid(buf) then
       return
@@ -384,9 +343,8 @@ function M.pane(o)
   return p
 end
 
--- panegroup ties pane lifetimes together: with an owner, the owner's death
--- closes every other pane (a dependent dying alone is allowed); without
--- one, any member's death closes the rest.
+-- panegroup ties pane lifetimes together: the owner's death closes the rest,
+-- or without an owner any member's death does.
 function M.panegroup(o)
   local function close_others(dead)
     for _, p in ipairs(o.panes) do
@@ -413,12 +371,9 @@ function M.panegroup(o)
   }
 end
 
--- hintbar drives a set_hints bar from a keyspec: collapsed shows a `? keys`
--- reminder plus the entries whose ctx applies at the cursor; ? flips to the
--- full hint list. state = { hidden = bool } is caller-owned so the
--- preference outlives the bar; extra(), when given, appends trailing notes
--- (e.g. a cache-age marker). The ? key is injected into the spec, so apply
--- the spec after constructing the bar.
+-- hintbar drives a set_hints bar from a keyspec: collapsed shows `? keys`
+-- plus contextual hints, ? flips to the full list. It injects the ? key into
+-- the spec, so apply the spec after constructing the bar.
 function M.hintbar(o)
   local bar = {}
   function bar.refresh()
@@ -442,8 +397,6 @@ function M.hintbar(o)
     end,
     desc = "toggle key hints",
   })
-  -- the collapsed bar tracks the cursor so its contextual hints stay true to
-  -- the row; the full bar is static, so it skips the work.
   function bar.attach(buf)
     vim.api.nvim_create_autocmd("CursorMoved", {
       group = vim.api.nvim_create_augroup("jmux_hintbar_" .. buf, { clear = true }),
@@ -458,9 +411,8 @@ function M.hintbar(o)
   return bar
 end
 
--- spin is the loader for async ops: the current tab's title bar when it has
--- one (tab-scoped, restores the bar's hints on stop), else a plain tab-title
--- animation restoring the prior tabline.
+-- spin runs the loader in the current tab's title bar when it has one, else
+-- as a plain tabline animation.
 function M.spin(label)
   prune_bars()
   local bar = bars[vim.api.nvim_get_current_tabpage()]
@@ -478,9 +430,8 @@ function M.spin(label)
   end
 end
 
--- act runs an async op behind the spin loader: op(done) does the work and
--- reports via done(result, err) — nil result notifies the error under the
--- label, anything else reaches on_ok.
+-- act runs op(done) behind the spin loader; done(nil, err) notifies the
+-- error, anything else reaches on_ok.
 function M.act(label, op, on_ok)
   local stop = M.spin(label)
   op(function(result, err)
@@ -495,9 +446,7 @@ function M.act(label, op, on_ok)
   end)
 end
 
--- confirm asks a no/yes question (no first, so a reflexive <CR> is safe) via
--- snacks' select: on_yes runs only on an explicit yes, on_no (optional) on
--- decline or cancel.
+-- confirm asks a no/yes question, no first so a reflexive <CR> is safe.
 function M.confirm(prompt, on_yes, on_no)
   require("snacks").picker.select({ "no", "yes" }, { prompt = prompt }, function(choice)
     if choice == "yes" then
@@ -508,20 +457,15 @@ function M.confirm(prompt, on_yes, on_no)
   end)
 end
 
--- lease tracks temporary decorations applied to buffers we don't own —
--- keymaps and extmark namespaces on real file buffers (e.g. diffview's diff
--- windows) — so one revoke() returns every buffer to its prior state.
--- Registrations are idempotent and revoke empties the lease for reuse.
+-- lease tracks keymaps and extmark namespaces applied to buffers jmux doesn't
+-- own, so one revoke() returns them all to their prior state.
 function M.lease()
   local keys, spaces = {}, {}
   local l = {}
-  -- map sets a keymap and records it for revocation. opts.buffer scopes it.
   function l.map(mode, lhs, rhs, opts)
     vim.keymap.set(mode, lhs, rhs, opts)
     keys[tostring(opts.buffer) .. "\0" .. lhs] = { mode = mode, lhs = lhs, buf = opts.buffer }
   end
-  -- ns registers a namespace as leased on buf; the marks themselves are
-  -- placed by the caller.
   function l.ns(buf, ns)
     spaces[buf .. "\0" .. ns] = { buf = buf, ns = ns }
   end
@@ -539,10 +483,8 @@ function M.lease()
   return l
 end
 
--- slot holds one replaceable resource (a float, a title bar): set(v) closes
--- the current occupant through `closer` before storing the next, clear()
--- closes and empties. The occupant is readable (and, for setups that must
--- tear down the old one before creating the new, writable) as slot.value.
+-- slot holds one replaceable resource: set closes the current occupant
+-- through closer first, clear closes and empties.
 function M.slot(closer)
   local s = {}
   function s.clear()
@@ -558,10 +500,8 @@ function M.slot(closer)
   return s
 end
 
--- title_slot holds one transient tab-title bar: set() replaces the current
--- bar (restoring the previous first, so the new bar snapshots a clean
--- tabline), clear() restores the original. For views whose lifecycle isn't an
--- owned buffer's (e.g. the diff tab, whose buffers are real files).
+-- title_slot holds one tab-title bar; set restores the previous first so the
+-- new bar snapshots a clean tabline.
 function M.title_slot()
   local s = M.slot(function(restore)
     restore()
@@ -575,14 +515,12 @@ function M.title_slot()
   return slot
 end
 
--- hover_win holds the open hover float, so re-invoking replaces it instead
--- of stacking a second one.
 local hover_win = M.slot(function(w)
   w:close()
 end)
 
--- hover shows lines in a small unfocused float anchored below the cursor,
--- closed by the first cursor movement or by leaving the source buffer.
+-- hover shows lines in an unfocused float below the cursor, closed on cursor
+-- movement or leaving the buffer.
 function M.hover(lines, title)
   local src = vim.api.nvim_get_current_buf()
   local width = title and (vim.fn.strdisplaywidth(title) + 2) or 1
@@ -610,8 +548,7 @@ function M.hover(lines, title)
   })
 end
 
--- lang_of maps a file path to a treesitter language (or nil), so each code block
--- can be highlighted with the right parser regardless of the others.
+-- lang_of maps a file path to a treesitter language, or nil.
 function M.lang_of(path)
   local ft = vim.filetype.match { filename = path }
   if not ft then
@@ -620,11 +557,8 @@ function M.lang_of(path)
   return vim.treesitter.language.get_lang(ft) or ft
 end
 
--- ts_highlight parses `text` as `lang` and lays its syntax highlights onto the
--- buffer starting at row `base`. Used on a contiguous code span (preview hunk or
--- suggestion body) so node rows map straight to base + row. Best-effort — a
--- missing parser or query just leaves the lines unhighlighted. priority defaults
--- to 100 (over Normal); callers layering over other highlights pass higher.
+-- ts_highlight lays lang's syntax highlights for text onto buf from row base;
+-- a missing parser or query leaves the lines plain.
 function M.ts_highlight(buf, ns, lang, text, base, priority)
   local ok, parser = pcall(vim.treesitter.get_string_parser, text, lang)
   if not ok or not parser then
@@ -650,10 +584,8 @@ function M.ts_highlight(buf, ns, lang, text, base, priority)
   end
 end
 
--- highlight_suggestion finds the ```suggestion fence in a comment buffer and
--- syntax-highlights its body in the reviewed file's language, so a suggestion
--- reads like code rather than plain markdown. Re-run on edit to stay live; a
--- high priority keeps it above markdown's own raw-block highlighting.
+-- highlight_suggestion highlights a ```suggestion fence body in the reviewed
+-- file's language; priority 200 keeps it above markdown's raw-block highlight.
 local SUGGEST_NS = vim.api.nvim_create_namespace "jmux_pr_suggestion"
 function M.highlight_suggestion(buf, lang)
   vim.api.nvim_buf_clear_namespace(buf, SUGGEST_NS, 0, -1)

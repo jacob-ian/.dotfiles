@@ -23,10 +23,8 @@ func TestShellQuote(t *testing.T) {
 	}
 }
 
-// TestSessionDirs drives a private tmux server (its own socket under
-// TMUX_TMPDIR, with TMUX cleared so the client doesn't follow the socket of
-// the tmux this test may be running inside) and checks that stamped sessions
-// report their stamp and unstamped ones fall back to the pane path.
+// A private tmux server: own socket under TMUX_TMPDIR, TMUX cleared so the
+// client doesn't follow the server this test runs inside.
 func TestSessionDirs(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not installed")

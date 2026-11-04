@@ -13,17 +13,14 @@ type Options struct {
 	Bindings      []string
 	Preview       string
 	PreviewWindow string
-	// Delimiter + WithNth hide trailing fields: only WithNth columns show, but
-	// the full row is still returned on selection.
+	// Delimiter + WithNth show only those columns; the full row is still returned.
 	Delimiter string
 	WithNth   string
-	// ANSI enables parsing of ANSI colour codes in the displayed rows.
-	ANSI  bool
-	Query string
+	ANSI      bool
+	Query     string
 }
 
-// Row builds `display<TAB>path`: with Delimiter "\t" and WithNth "1" fzf shows
-// only display, while bindings still get the path as {2}.
+// Row builds display<TAB>path; with Delimiter "\t" and WithNth "1" bindings get the path as {2}.
 func Row(display, path string) string {
 	return display + "\t" + path
 }
@@ -35,9 +32,7 @@ func RowPath(line string) string {
 	return line
 }
 
-// Self returns the path of the running jmux binary, for commands that
-// re-invoke it (fzf bindings, notification callbacks); falls back to "jmux"
-// (resolved via PATH) on error.
+// Self is the running binary's path, for commands that re-invoke it; "jmux" on error.
 func Self() string {
 	self, err := os.Executable()
 	if err != nil {
@@ -46,8 +41,7 @@ func Self() string {
 	return self
 }
 
-// Pick runs fzf on items and returns the selected line. Returns "" with a
-// non-nil error when the user cancels or fzf otherwise exits non-zero.
+// Pick runs fzf on items; a cancel returns "" and an error.
 func Pick(items []string, opts Options) (string, error) {
 	out, err := runFzf(items, buildArgs(opts, false))
 	if err != nil {
@@ -56,17 +50,11 @@ func Pick(items []string, opts Options) (string, error) {
 	return out, nil
 }
 
-// PickOrQuery runs fzf with --print-query, returning either the selection or
-// the user's typed query when nothing matched. Useful for "pick from this
-// list, or type a new value" flows.
-//
-// fzf exits non-zero when no item matches; that's expected here, so the error
-// is swallowed as long as a usable string came back.
+// PickOrQuery returns the selection, or the typed query when nothing matched.
+// fzf exits non-zero on no match, so that error is swallowed when a string came back.
 func PickOrQuery(items []string, opts Options) (string, error) {
 	out, err := runFzf(items, buildArgs(opts, true))
-	// --print-query prints the query on line 1 and any selection on later
-	// lines. The last non-empty line is the selection if one exists, else the
-	// query itself.
+	// --print-query puts the query on line 1 and the selection after; the last non-empty line wins.
 	lines := strings.Split(out, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		if s := strings.TrimSpace(lines[i]); s != "" {

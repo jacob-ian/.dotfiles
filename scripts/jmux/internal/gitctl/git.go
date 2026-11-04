@@ -13,12 +13,9 @@ import (
 	"jmux/internal/repo"
 )
 
-// gitReadTimeout bounds the read-only git calls below so a wedged one (e.g.
-// blocked on an index lock) can't hang an fzf preview process.
+// gitReadTimeout keeps a wedged git (e.g. an index lock) from hanging an fzf preview.
 const gitReadTimeout = 5 * time.Second
 
-// gitOut runs read-only `git args...` in dir (bounded by gitReadTimeout) and
-// returns stdout untrimmed. Stderr is discarded; writes go through gitRun.
 func gitOut(dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitReadTimeout)
 	defer cancel()
@@ -28,8 +25,7 @@ func gitOut(dir string, args ...string) (string, error) {
 	return string(out), err
 }
 
-// gitRun runs `git args...` in dir, returning an error whose message is git's
-// own stderr (so callers can pattern-match on or display it).
+// gitRun returns git's own stderr as the error message.
 func gitRun(dir string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
@@ -44,8 +40,7 @@ func gitRun(dir string, args ...string) error {
 	return nil
 }
 
-// CommonDir resolves the bare repo root for a worktree at dir.
-// Returns "" if dir is not inside a bare repo worktree.
+// CommonDir returns the bare repo root for the worktree at dir, or "".
 func CommonDir(dir string) string {
 	out, err := gitOut(dir, "rev-parse", "--git-common-dir")
 	if err != nil {
@@ -65,8 +60,6 @@ func CommonDir(dir string) string {
 	return abs
 }
 
-// Toplevel returns the root of the worktree containing dir, or "" when dir
-// isn't inside one.
 // RemoteBranches lists `origin/`-stripped remote branch names, omitting HEAD.
 func RemoteBranches(bareRoot string) ([]string, error) {
 	out, err := gitOut(bareRoot, "branch", "-r")
@@ -84,9 +77,7 @@ func RemoteBranches(bareRoot string) ([]string, error) {
 	return branches, nil
 }
 
-// DefaultBranch returns the name of origin/HEAD's target branch (e.g. "main"),
-// falling back to the bare repo's own HEAD for repos without a remote.
-// Returns "" if it can't be determined.
+// DefaultBranch is origin/HEAD's branch, falling back to the bare repo's own HEAD.
 func DefaultBranch(bareRoot string) string {
 	out, err := gitOut(bareRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
 	if err == nil {
@@ -95,11 +86,8 @@ func DefaultBranch(bareRoot string) string {
 	return repo.DefaultBranchName(bareRoot)
 }
 
-// WorktreeAdd creates a worktree at path. If createBranch is true, the branch is
-// created (-b) from base — or the bare repo's HEAD when base is "", which is
-// usually a stale local default, so callers pass origin/<default> to start from
-// the latest. Otherwise branch must already exist locally or be reachable as
-// origin/<branch> for dwim. On failure the returned error carries git's stderr.
+// WorktreeAdd creates a worktree at path; with createBranch the branch is
+// created from base (callers pass origin/<default>: the bare HEAD is usually stale).
 func WorktreeAdd(bareRoot, path, branch, base string, createBranch bool) error {
 	args := []string{"worktree", "add", path}
 	if createBranch {
@@ -108,28 +96,24 @@ func WorktreeAdd(bareRoot, path, branch, base string, createBranch bool) error {
 		args = append(args, branch)
 	}
 	if createBranch && base != "" {
-		// --no-track so branching off origin/<default> doesn't set the new branch's
-		// upstream to the default; it gets one when first pushed.
+		// --no-track: the upstream is set on first push, not to origin/<default>.
 		args = append(args, "--no-track", base)
 	}
 	return gitRun(bareRoot, args...)
 }
 
-// FetchBranch fetches branch from origin, updating origin/<branch> so a
-// following worktree-add creates a local branch that tracks it.
+// FetchBranch updates origin/<branch> so a following worktree add tracks it.
 func FetchBranch(bareRoot, branch string) error {
 	return gitRun(bareRoot, "fetch", "origin", branch)
 }
 
-// FastForward fast-forwards the branch checked out in worktreeDir to ref,
-// erroring rather than merging when the branches have diverged.
+// FastForward errors rather than merging when the branches have diverged.
 func FastForward(worktreeDir, ref string) error {
 	return gitRun(worktreeDir, "merge", "--ff-only", ref)
 }
 
-// WorktreeForBranch returns the path of the worktree that has branch checked
-// out, or "" if none does — so an existing checkout is reused rather than
-// failing a second `worktree add` (git forbids the same branch in two trees).
+// WorktreeForBranch returns the worktree with branch checked out, or "" (git
+// forbids one branch in two trees, so callers reuse it).
 func WorktreeForBranch(bareRoot, branch string) string {
 	out, err := gitOut(bareRoot, "worktree", "list", "--porcelain")
 	if err != nil {
@@ -138,8 +122,6 @@ func WorktreeForBranch(bareRoot, branch string) string {
 	return worktreeForBranch(out, branch)
 }
 
-// worktreeForBranch scans `git worktree list --porcelain` output for the path
-// whose entry checks out branch.
 func worktreeForBranch(porcelain, branch string) string {
 	want := "branch refs/heads/" + branch
 	var path string
@@ -153,9 +135,7 @@ func worktreeForBranch(porcelain, branch string) string {
 	return ""
 }
 
-// CleanErr collapses a git error to a single line, dropping git's "fatal: "
-// prefix. Useful for status-bar style notifications where the full multi-line
-// stderr would overflow.
+// CleanErr collapses a git error to one line without the "fatal: " prefix.
 func CleanErr(err error) string {
 	if err == nil {
 		return ""
@@ -168,10 +148,7 @@ func CleanErr(err error) string {
 	return s
 }
 
-// RefExists reports whether ref resolves in the repo at dir. It checks ref
-// as-is and then prefixed with `origin/`, matching the dwim that
-// `git worktree add <path> <ref>` performs when only a remote tracking branch
-// exists.
+// RefExists checks ref as-is and as origin/<ref>, matching worktree add's dwim.
 func RefExists(dir, ref string) bool {
 	for _, name := range []string{ref, "origin/" + ref} {
 		if _, err := gitOut(dir, "rev-parse", "--verify", "--quiet", name); err == nil {
@@ -181,8 +158,7 @@ func RefExists(dir, ref string) bool {
 	return false
 }
 
-// RepoSlug returns the "owner/repo" of dir's origin remote, or "". It accepts
-// the scp (git@host:owner/repo), https, and ssh:// URL forms.
+// RepoSlug returns "owner/repo" of dir's origin remote, or "".
 func RepoSlug(dir string) string {
 	out, err := gitOut(dir, "config", "--get", "remote.origin.url")
 	if err != nil {
@@ -197,8 +173,7 @@ func RepoSlug(dir string) string {
 	return parts[len(parts)-2] + "/" + parts[len(parts)-1]
 }
 
-// CurrentBranch returns the short branch name HEAD points at, or "" if
-// detached.
+// CurrentBranch returns HEAD's short branch name, or "" when detached.
 func CurrentBranch(dir string) string {
 	out, err := gitOut(dir, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
@@ -207,8 +182,7 @@ func CurrentBranch(dir string) string {
 	return strings.TrimSpace(out)
 }
 
-// AheadBehind returns commits ahead and behind ref, evaluated from dir.
-// Returns (0, 0, false) if the comparison fails (e.g. ref not present).
+// AheadBehind returns commits ahead and behind ref; false when ref doesn't resolve.
 func AheadBehind(dir, ref string) (int, int, bool) {
 	out, err := gitOut(dir, "rev-list", "--left-right", "--count", ref+"...HEAD")
 	if err != nil {
@@ -226,8 +200,7 @@ func AheadBehind(dir, ref string) (int, int, bool) {
 	return ahead, behind, true
 }
 
-// ShortStatus returns `git status --short` output from dir. The leading
-// column whitespace (e.g. " M file") is preserved.
+// ShortStatus is `git status --short`, leading column whitespace preserved.
 func ShortStatus(dir string) string {
 	out, err := gitOut(dir, "status", "--short")
 	if err != nil {
@@ -249,9 +222,8 @@ func CloneBare(dir, url, dest string) error {
 	return gitRun(dir, "clone", "--bare", url, dest)
 }
 
-// SetupBareRemote gives a fresh bare clone the remote plumbing the rest of
-// jmux assumes: a fetch refspec (clone --bare sets none, leaving FetchBranch
-// inert), populated origin/* refs, and origin/HEAD (what DefaultBranch reads).
+// SetupBareRemote adds the fetch refspec, origin/* refs and origin/HEAD that
+// `clone --bare` leaves out.
 func SetupBareRemote(bareRoot string) error {
 	if err := gitRun(bareRoot, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
 		return err
@@ -304,8 +276,7 @@ func DeleteBranch(bareRoot, branch string) error {
 	return gitRun(bareRoot, "branch", "-q", "-D", branch)
 }
 
-// WorktreeRemove removes a worktree from git's view. Use force to drop
-// uncommitted changes. bareRoot may be "" to run in the current process cwd.
+// WorktreeRemove removes a worktree; force drops uncommitted changes.
 func WorktreeRemove(bareRoot, path string, force bool) error {
 	args := []string{"worktree", "remove", path}
 	if force {

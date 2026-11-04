@@ -26,9 +26,6 @@ func TestRepoName(t *testing.T) {
 	}
 }
 
-// TestClone runs the full clone flow against a local upstream and checks the
-// layout jmux depends on: bare root, fetch refspec, origin/HEAD, and the
-// default-branch worktree.
 func TestClone(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")

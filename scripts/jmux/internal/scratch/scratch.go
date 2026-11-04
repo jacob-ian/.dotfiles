@@ -1,6 +1,5 @@
-// Package scratch implements `jmux scratch`: sessions are worktrees named
-// YYYY-MM-DD[-name] under Config.ScratchRoot, harvested into the default branch
-// by worktree.Remove.
+// Package scratch implements `jmux scratch`: dated session worktrees under
+// Config.ScratchRoot, harvested into the default branch on remove.
 package scratch
 
 import (
@@ -23,7 +22,7 @@ import (
 
 var datePrefix = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(-|$)`)
 
-// Run handles `jmux scratch` (the picker) and `jmux scratch new [name]`.
+// Run handles `jmux scratch` and `jmux scratch new [name]`.
 func Run(cfg repo.Config, args []string) error {
 	bare, err := bareRoot(cfg)
 	if err != nil {
@@ -32,8 +31,7 @@ func Run(cfg repo.Config, args []string) error {
 	if len(args) > 0 && args[0] == "new" {
 		query := strings.Join(args[1:], " ")
 		if query == "" {
-			// No items: the prefilled date would fuzzy-match today's sessions
-			// and enter would open one instead of creating.
+			// No items: the prefilled date would fuzzy-match today's sessions.
 			query, err = fzfutil.PickOrQuery(nil, fzfutil.Options{
 				Prompt: "new scratch> ",
 				Query:  time.Now().Format(time.DateOnly) + "-",
@@ -65,7 +63,7 @@ func Run(cfg repo.Config, args []string) error {
 	return session.Open(path, session.OpenOptions{WithClaude: true, Dir: cfg.WorkDir(path)})
 }
 
-// RunItems handles `jmux fzf scratch items`: the picker's reload rows.
+// RunItems handles `jmux fzf scratch items`.
 func RunItems(cfg repo.Config) {
 	bare, err := bareRoot(cfg)
 	if err != nil {
@@ -81,7 +79,6 @@ func bareRoot(cfg repo.Config) (string, error) {
 	return cfg.ScratchRoot, nil
 }
 
-// rows are newest first so today's work sits at the top.
 func rows(bare string) []string {
 	wts := repo.FeatureWorktrees(bare)
 	slices.Sort(wts)
@@ -107,8 +104,8 @@ func create(cfg repo.Config, query string) error {
 		if err := gitctl.WorktreeAdd(bare, path, name, def, true); err != nil {
 			return fmt.Errorf("git worktree add: %s", gitctl.CleanErr(err))
 		}
-		// The session works inside <name>/ (see Config.WorkDir) so its files are
-		// already where history keeps them; harvest has nothing to move.
+		// The session works inside <name>/ so its files are already where
+		// history keeps them.
 		if err := os.MkdirAll(filepath.Join(path, name), 0o755); err != nil {
 			return err
 		}
@@ -120,8 +117,8 @@ func create(cfg repo.Config, query string) error {
 	return session.Open(path, session.OpenOptions{WithClaude: true, Dir: cfg.WorkDir(path)})
 }
 
-// SessionName: empty → today; a query with its own date → as is; otherwise
-// today-<slug>. Taken names get -2, -3… appended.
+// SessionName is today, the query's own date, or today-<slug>, with -2, -3…
+// appended while taken.
 func SessionName(query, today string, taken func(string) bool) string {
 	slug := strings.Trim(strings.Join(strings.Fields(strings.ToLower(query)), "-"), "-")
 	name := today

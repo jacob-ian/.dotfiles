@@ -8,12 +8,7 @@ import (
 	"jmux/internal/tmuxctl"
 )
 
-// This file locates the terminal emulator without naming one: every attached
-// tmux client's process ancestry leads to the macOS app hosting it, so the
-// terminal is whatever app that walk reaches.
-
-// ActivateTerminal brings the app hosting an attached tmux client to the
-// front, doing nothing when there is none to find.
+// ActivateTerminal brings the app hosting an attached tmux client to the front.
 func ActivateTerminal() {
 	if id := terminalBundleID(); id != "" {
 		exec.Command("open", "-b", id).Run()
@@ -23,9 +18,8 @@ func ActivateTerminal() {
 // ancestryDepth bounds pid walks; real chains are client←shell←login←app.
 const ancestryDepth = 20
 
-// terminalFocused reports whether the frontmost macOS app hosts an attached
-// tmux client — the terminal is on screen, so the statusline multibox is
-// already in view. False on any failure, failing toward delivering alerts.
+// terminalFocused reports whether the frontmost app hosts a tmux client.
+// False on any failure, failing toward delivering alerts.
 func terminalFocused() bool {
 	asn := ""
 	if out, err := exec.Command("lsappinfo", "front").Output(); err == nil {
@@ -46,8 +40,7 @@ func terminalFocused() bool {
 	return false
 }
 
-// terminalBundleID returns the bundle id of the app hosting an attached tmux
-// client, or "" when there is none to find.
+// terminalBundleID is the bundle id of the app hosting an attached tmux client, or "".
 func terminalBundleID() string {
 	parents := processParents()
 	for _, client := range tmuxctl.ClientPIDs() {
@@ -81,9 +74,7 @@ func processParents() map[int]int {
 	return m
 }
 
-// lsappinfoValue runs lsappinfo and returns the value after '=', which is a
-// quoted string or a bare number; anything else (notably `[ NULL ]` for
-// processes that aren't apps) comes back "".
+// lsappinfoValue returns the value after '='; `[ NULL ]` (non-app processes) comes back "".
 func lsappinfoValue(args ...string) string {
 	out, err := exec.Command("lsappinfo", args...).Output()
 	if err != nil {
