@@ -4,6 +4,12 @@
 - When possible and helpful, tell the user of the idioms that you have followed
 - Prioritise idiomacy and industry standards BEFORE what is written in skills
 
+## Comments
+
+- **Don't write comments by default.** Add one only for something a reader genuinely can't see from the code: a non-obvious constraint, a workaround, or why the obvious approach was rejected. Never narrate what the code does.
+- **Keep doc comments to one or two short lines.** Say what the thing is for, not how it works; the body shows that.
+- When finishing a change, re-read the comments you added and delete any that only restate the code.
+
 ## Algorithms and Data Structures
 
 - When approaching a task AND when completing a task, investigate your code changes to search for the following:
@@ -32,3 +38,7 @@
 - **Never create a PR unless the user asked or has confirmed your offer**. Even if you have previously created a PR in the context window, subsequent PRs MUST be permitted by the user only.
 - **Never, ever, ever reply on my behalf to PR comments**.
 - **Use single line PR descriptions whenever possible**. PR descriptions should explain why the change is needed, the diff explains what the change is. This can typically be one line.
+
+## Tests
+
+- Don't use non-test-only functions/helpers inside tests. We should be validating the implementation against inputs and not relying on the same code as in production.
