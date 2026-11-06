@@ -284,3 +284,23 @@ func WorktreeRemove(bareRoot, path string, force bool) error {
 	}
 	return gitRun(bareRoot, args...)
 }
+
+// RevParse resolves ref to a commit hash; false when it doesn't exist.
+func RevParse(dir, ref string) (string, bool) {
+	out, err := gitOut(dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(out), true
+}
+
+// IsClean ignores untracked files (a reset keeps them) and treats an
+// unreadable status as dirty.
+func IsClean(dir string) bool {
+	out, err := gitOut(dir, "status", "--porcelain", "--untracked-files=no")
+	return err == nil && strings.TrimSpace(out) == ""
+}
+
+func ResetHard(dir, ref string) error {
+	return gitRun(dir, "reset", "-q", "--hard", ref)
+}

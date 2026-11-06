@@ -25,6 +25,20 @@ local function refresh()
   vim.cmd "DiffviewRefresh"
 end
 
+-- refresh_if_open re-reads the review diff from another tab; DiffviewRefresh
+-- only sees the current one.
+function M.refresh_if_open()
+  if not (pd_tab and vim.api.nvim_tabpage_is_valid(pd_tab)) then
+    return
+  end
+  local ok, lib = pcall(require, "diffview.lib")
+  for _, view in ipairs(ok and lib.views or {}) do
+    if view.tabpage == pd_tab and view.update_files then
+      view:update_files()
+    end
+  end
+end
+
 -- KEYS is the diff windows' review keys; panel = true entries also bind in
 -- the file panel.
 local KEYS = ui.keyspec {

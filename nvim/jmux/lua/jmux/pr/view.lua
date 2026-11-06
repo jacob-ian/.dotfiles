@@ -870,6 +870,27 @@ function M.view(opts)
             },
             { lhs = "<C-r>", rhs = pv_refresh, hint = "refresh", desc = "refresh" },
             {
+              lhs = "<C-p>",
+              rhs = function()
+                ui.act("pulling…", function(done)
+                  vim.system({ "jmux", "pr", "sync" }, { text = true }, function(res)
+                    vim.schedule(function()
+                      if res.code ~= 0 then
+                        return done(nil, vim.trim(res.stderr) ~= "" and vim.trim(res.stderr) or "see tmux status")
+                      end
+                      done(vim.trim(res.stdout))
+                    end)
+                  end)
+                end, function(msg)
+                  vim.notify(msg)
+                  diff.refresh_if_open()
+                  pv_refresh()
+                end)
+              end,
+              hint = "pull",
+              desc = "sync the worktree to origin, then refresh",
+            },
+            {
               lhs = "R",
               rhs = request,
               hint = "request",

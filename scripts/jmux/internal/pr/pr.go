@@ -145,24 +145,31 @@ const prEditorCmd = `nvim -c "autocmd VimEnter * ++once lua require('jmux').pr.v
 
 // review checks the PR out into a worktree and opens its session.
 func review(bareRoot string, p ghctl.PR) error {
-	var path string
+	var path, notice string
 	err := spinner.Run(fmt.Sprintf("opening PR #%d…", p.Number), func(phase chan<- string) (err error) {
-		path, err = checkoutWorktree(bareRoot, p, phase)
+		path, notice, err = checkoutWorktree(bareRoot, p, phase)
 		return
 	})
 	if err != nil {
 		return fmt.Errorf("checkout PR #%d: %s", p.Number, gitctl.CleanErr(err))
 	}
 	tag.Set(path, tagKind, tag.New(tagKind, "", tagData{Number: p.Number}))
-	return session.Open(path, session.OpenOptions{
+	if err := session.Open(path, session.OpenOptions{
 		WithClaude: true,
 		InstallCmd: worktree.DetectInstallCmd(path),
 		EditorCmd:  prEditorCmd,
-	})
+	}); err != nil {
+		return err
+	}
+	if notice != "" {
+		notify.Info(notice)
+	}
+	return nil
 }
 
-// checkoutWorktree returns the PR's head-branch worktree, creating it if absent.
-func checkoutWorktree(bareRoot string, p ghctl.PR, phase chan<- string) (string, error) {
+// checkoutWorktree returns the PR's head-branch worktree, created if absent
+// and synced to origin otherwise; notice is a sync outcome worth showing.
+func checkoutWorktree(bareRoot string, p ghctl.PR, phase chan<- string) (path, notice string, err error) {
 	branch := p.HeadRefName
 
 	// The base is fetched even when the worktree is reused so the diff's
@@ -176,24 +183,35 @@ func checkoutWorktree(bareRoot string, p ghctl.PR, phase chan<- string) (string,
 		_ = gitctl.FetchBranch(bareRoot, base)
 	}
 
-	path := filepath.Join(bareRoot, branch)
-	if repo.IsDir(path) {
-		return path, nil
+	path = filepath.Join(bareRoot, branch)
+	if !repo.IsDir(path) {
+		path = gitctl.WorktreeForBranch(bareRoot, branch)
 	}
-	if existing := gitctl.WorktreeForBranch(bareRoot, branch); existing != "" && repo.IsDir(existing) {
-		return existing, nil
+	if path != "" && repo.IsDir(path) {
+		phase <- "syncing " + branch + "…"
+		// Offline, the open goes ahead on the stale head like the base fetch does.
+		res, err := Sync(bareRoot, path, branch)
+		switch {
+		case err != nil:
+			notice = "sync " + branch + ": " + gitctl.CleanErr(err)
+		case res.Outcome == Reset, res.Outcome == Diverged:
+			notice = res.String()
+		}
+		return path, notice, nil
 	}
+
+	path = filepath.Join(bareRoot, branch)
 	phase <- "fetching " + branch + "…"
 	if err := gitctl.FetchBranch(bareRoot, branch); err != nil {
-		return "", err
+		return "", "", err
 	}
 	phase <- "creating worktree…"
 	if err := gitctl.WorktreeAdd(bareRoot, path, branch, "", false); err != nil {
-		return "", err
+		return "", "", err
 	}
 	phase <- "copying env files…"
 	worktree.CopyEnvFiles(bareRoot, path)
-	return path, nil
+	return path, "", nil
 }
 
 // resolveRepoSlug returns the bare repo containing dir (cwd when "", picked when

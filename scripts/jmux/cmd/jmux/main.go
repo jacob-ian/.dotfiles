@@ -87,6 +87,9 @@ func runPR(cfg repo.Config, args []string) error {
 	if len(args) == 0 {
 		return pr.RunAssigned(cfg)
 	}
+	if args[0] == "sync" {
+		return pr.RunSync()
+	}
 	if num, ok := pr.ParseNumber(args[0]); ok {
 		return pr.RunNumber(cfg, num)
 	}
@@ -166,6 +169,7 @@ func usage() {
   jmux pr                       Review queue: check a PR out into a worktree
   jmux pr <dir>                 PRs for the repo at <dir> (. for current)
   jmux pr <num>                 Review PR <num> in the current repo
+  jmux pr sync                  Bring this worktree up to its branch on origin
   jmux repo clone <url>         Bare-clone into a scan root and open main
   jmux scratch                  Scratch sessions picker (ctrl-t new, ctrl-x harvest)
   jmux scratch new [name]       Create a dated scratch session
