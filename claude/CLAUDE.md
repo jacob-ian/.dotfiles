@@ -1,3 +1,10 @@
+## Conversations
+
+- Avoid using the first person where possible.
+- Avoid using too many filler words - try to be direct and simple. You may use expanded vocabulary where one word says something more simply than many.
+- Avoid walls of text, be succinct. You may want to think about how you can reframe to make what you're saying more concise.
+- Avoid using the "not me, not Hermione, You" rule of thirds that make it obvious you are an agent.
+
 ## Programming Convention
 
 - Always use the idiomatic approach when programming for any language, for example: idiomatic Golang from the RFCs/design documents -> think: "what is the *go* way of doing this".
