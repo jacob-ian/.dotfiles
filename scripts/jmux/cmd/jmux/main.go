@@ -40,6 +40,10 @@ func run(args []string) error {
 		return runRepo(cfg, args[1:])
 	case "scratch":
 		return scratch.Run(cfg, args[1:])
+	case "spawn":
+		return scripted(workspace.RunSpawn(cfg, args[1:]))
+	case "open":
+		return scripted(session.RunOpen(cfg, args[1:]))
 	case "fzf":
 		return runFzf(cfg, args[1:])
 	case "claude":
@@ -150,6 +154,16 @@ func runFzf(cfg repo.Config, args []string) error {
 	return badUsage("jmux fzf: unknown command %q", strings.Join(args, " "))
 }
 
+// scripted reports err on stderr: spawn and open are run by scripts and
+// agents, which never see the tmux status line.
+func scripted(err error) error {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	return nil
+}
+
 // badUsage exits via stderr rather than the status line: argument mistakes
 // happen at a terminal.
 func badUsage(format string, args ...any) error {
@@ -166,6 +180,11 @@ func usage() {
   jmux workspace add            Pick a bare repo and create a worktree in it
   jmux workspace remove --path P [--quiet]
                                 Remove the workspace (never deletes a plain dir)
+  jmux spawn [--repo R] <branch> [prompt]
+                                Create <branch>'s workspace and start claude on the prompt
+                                (or stdin) in a background session; prints the path.
+                                R is a path in the repo or its name; default: current repo
+  jmux open <dir>               Switch to <dir>'s session, creating it if needed
   jmux pr                       Review queue: check a PR out into a worktree
   jmux pr <dir>                 PRs for the repo at <dir> (. for current)
   jmux pr <num>                 Review PR <num> in the current repo

@@ -55,6 +55,18 @@ type OpenOptions struct {
 
 // Open ensures a tmux session exists for dir and switches/attaches to it.
 func Open(dir string, opts OpenOptions) error {
+	name, err := Ensure(dir, opts)
+	if err != nil {
+		return err
+	}
+	if tmuxctl.InsideTmux() {
+		return tmuxctl.SwitchClient(name)
+	}
+	return tmuxctl.Attach(name)
+}
+
+// Ensure creates dir's tmux session if it doesn't exist and returns its name.
+func Ensure(dir string, opts OpenOptions) (string, error) {
 	name := Name(dir)
 	if !tmuxctl.HasSession(name) {
 		editorCmd := opts.EditorCmd
@@ -66,7 +78,7 @@ func Open(dir string, opts OpenOptions) error {
 			cwd = dir
 		}
 		if err := tmuxctl.NewSession(name, cwd, nvimctl.WindowName, editorCmd); err != nil {
-			return fmt.Errorf("create session %q: %w", name, err)
+			return "", fmt.Errorf("create session %q: %w", name, err)
 		}
 		tmuxctl.SetSessionOption(name, "@jmux_dir", dir)
 		if opts.WithClaude {
@@ -75,22 +87,18 @@ func Open(dir string, opts OpenOptions) error {
 				claudeCmd += " " + tmuxctl.ShellQuote(opts.Prompt)
 			}
 			if err := tmuxctl.NewWindow(name, "claude", cwd, claudeCmd, false); err != nil {
-				return fmt.Errorf("create claude window: %w", err)
+				return "", fmt.Errorf("create claude window: %w", err)
 			}
 			tmuxctl.SelectWindow(name + ":1")
 		}
 		if opts.InstallCmd != "" {
 			shellCmd := fmt.Sprintf("%s || { echo; echo '[install failed — press enter to close]'; read; }", opts.InstallCmd)
 			if err := tmuxctl.NewWindow(name, "install", cwd, shellCmd, true); err != nil {
-				return fmt.Errorf("create install window: %w", err)
+				return "", fmt.Errorf("create install window: %w", err)
 			}
 		}
 	}
-
-	if tmuxctl.InsideTmux() {
-		return tmuxctl.SwitchClient(name)
-	}
-	return tmuxctl.Attach(name)
+	return name, nil
 }
 
 // Kill terminates the named tmux session. Killing our own session would SIGHUP

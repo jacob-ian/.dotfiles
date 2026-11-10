@@ -37,39 +37,8 @@ func AddWorktree(bareRoot string) error {
 		promptName = prompt.Pick(prompts)
 	}
 
-	worktreePath := filepath.Join(bareRoot, branchName)
-	createBranch := !gitctl.RefExists(bareRoot, branchName)
-	if err := spinner.Run(fmt.Sprintf("creating %s…", branchName), func(phase chan<- string) error {
-		// Best effort: a failed fetch (offline) must not stop the add.
-		base := ""
-		if def := gitctl.DefaultBranch(bareRoot); def != "" {
-			phase <- "fetching " + def + "…"
-			_ = gitctl.FetchBranch(bareRoot, def)
-			base = "origin/" + def
-			if mainWt := filepath.Join(bareRoot, def); repo.IsDir(mainWt) {
-				phase <- "updating " + def + "…"
-				_ = gitctl.FastForward(mainWt, base)
-			}
-		}
-		// A typed name may be a remote branch not yet fetched: check it out rather
-		// than shadowing it with a fresh branch off the default.
-		if createBranch {
-			phase <- "fetching " + branchName + "…"
-			if gitctl.FetchBranch(bareRoot, branchName) == nil {
-				createBranch = false
-			}
-		}
-		if err := gitctl.WorktreeAdd(bareRoot, worktreePath, branchName, base, createBranch); err != nil {
-			flag := ""
-			if createBranch {
-				flag = " -b " + branchName
-			}
-			return fmt.Errorf("git worktree add%s: %s", flag, gitctl.CleanErr(err))
-		}
-		phase <- "copying env files…"
-		CopyEnvFiles(bareRoot, worktreePath)
-		return nil
-	}); err != nil {
+	worktreePath, err := Create(bareRoot, branchName)
+	if err != nil {
 		return err
 	}
 
@@ -85,6 +54,66 @@ func AddWorktree(bareRoot string) error {
 		InstallCmd: DetectInstallCmd(worktreePath),
 		Prompt:     opening,
 	})
+}
+
+// Spawn creates branch's worktree and starts a claude session in it on
+// prompt, without switching to it; the caller is usually another agent.
+func Spawn(bareRoot, branch, prompt string) (string, error) {
+	if repo.IsDir(filepath.Join(bareRoot, branch)) {
+		return "", fmt.Errorf("%s already has a workspace", branch)
+	}
+	path, err := Create(bareRoot, branch)
+	if err != nil {
+		return "", err
+	}
+	_, err = session.Ensure(path, session.OpenOptions{
+		WithClaude: true,
+		InstallCmd: DetectInstallCmd(path),
+		Prompt:     prompt,
+	})
+	return path, err
+}
+
+// Create adds branch's worktree under bareRoot, branching off a freshly
+// fetched default when the branch is new.
+func Create(bareRoot, branch string) (string, error) {
+	worktreePath := filepath.Join(bareRoot, branch)
+	createBranch := !gitctl.RefExists(bareRoot, branch)
+	err := spinner.Run(fmt.Sprintf("creating %s…", branch), func(phase chan<- string) error {
+		// Best effort: a failed fetch (offline) must not stop the add.
+		base := ""
+		if def := gitctl.DefaultBranch(bareRoot); def != "" {
+			phase <- "fetching " + def + "…"
+			_ = gitctl.FetchBranch(bareRoot, def)
+			base = "origin/" + def
+			if mainWt := filepath.Join(bareRoot, def); repo.IsDir(mainWt) {
+				phase <- "updating " + def + "…"
+				_ = gitctl.FastForward(mainWt, base)
+			}
+		}
+		// A typed name may be a remote branch not yet fetched: check it out rather
+		// than shadowing it with a fresh branch off the default.
+		if createBranch {
+			phase <- "fetching " + branch + "…"
+			if gitctl.FetchBranch(bareRoot, branch) == nil {
+				createBranch = false
+			}
+		}
+		if err := gitctl.WorktreeAdd(bareRoot, worktreePath, branch, base, createBranch); err != nil {
+			flag := ""
+			if createBranch {
+				flag = " -b " + branch
+			}
+			return fmt.Errorf("git worktree add%s: %s", flag, gitctl.CleanErr(err))
+		}
+		phase <- "copying env files…"
+		CopyEnvFiles(bareRoot, worktreePath)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return worktreePath, nil
 }
 
 // CopyEnvFiles copies the default checkout's gitignored local config (.env*,
