@@ -26,6 +26,8 @@ import (
 
 const tagKind = "pr"
 
+const agentLogin = "g3rtrude"
+
 type tagData struct {
 	Number int `json:"number"`
 }
@@ -250,13 +252,20 @@ func resolveBareRoot(cfg repo.Config, start string) (string, error) {
 	return repo.TrimSlash(sel), nil
 }
 
-// formatRow renders "owner/repo#12  [draft] Title  ·  author".
-func formatRow(slug string, num int, draft bool, title, login string) string {
-	marker := ""
+// formatRow renders "<marker>owner/repo#12  [draft] Title  ·  author".
+func formatRow(marker, slug string, num int, draft bool, title, login string) string {
+	state := ""
 	if draft {
-		marker = "[draft] "
+		state = "[draft] "
 	}
-	return fmt.Sprintf("%s#%d  %s%s  ·  %s", slug, num, marker, title, login)
+	return fmt.Sprintf("%s%s#%d  %s%s  ·  %s", marker, slug, num, state, title, login)
+}
+
+func rowMarker(author string) string {
+	if author == agentLogin {
+		return repo.AgentMarker
+	}
+	return "  "
 }
 
 func byline(author, owner string) string {
@@ -268,8 +277,8 @@ func byline(author, owner string) string {
 
 // formatItemsRow appends the head and base branches as hidden tab fields so
 // selection can read them back without a gh lookup.
-func formatItemsRow(slug string, num int, draft bool, title, login, headRef, baseRef string) string {
-	return formatRow(slug, num, draft, title, login) + "\t" + headRef + "\t" + baseRef
+func formatItemsRow(marker, slug string, num int, draft bool, title, login, headRef, baseRef string) string {
+	return formatRow(marker, slug, num, draft, title, login) + "\t" + headRef + "\t" + baseRef
 }
 
 // rowField returns the n-th tab-separated field, or "" for older cached rows

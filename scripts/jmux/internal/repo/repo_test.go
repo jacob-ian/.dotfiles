@@ -210,3 +210,17 @@ func TestIsScratch(t *testing.T) {
 		})
 	}
 }
+
+func TestIsAgentWorktree(t *testing.T) {
+	tests := map[string]bool{
+		"/Users/me/euc/mobile/gertrude/danh-992-header": true,
+		"/Users/me/euc/mobile/agent/DANH-945-history":   false,
+		"/Users/me/euc/gertrude-tools/main":             false,
+		"/Users/me/euc/mobile/main":                     false,
+	}
+	for path, want := range tests {
+		if got := IsAgentWorktree(path); got != want {
+			t.Errorf("IsAgentWorktree(%q) = %v, want %v", path, got, want)
+		}
+	}
+}

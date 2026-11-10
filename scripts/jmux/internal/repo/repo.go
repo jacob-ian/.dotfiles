@@ -29,12 +29,29 @@ func (c Config) IsScratch(path string) bool {
 	return p == root || strings.HasPrefix(p, root+string(filepath.Separator))
 }
 
-// Marker is the picker prefix for scratch rows, padded on other rows so paths align.
+// The coding agent's branches live under AgentBranchPrefix; its worktrees
+// and PRs get AgentMarker (nf-md-robot) in the pickers.
+const (
+	AgentBranchPrefix = "gertrude/"
+	AgentMarker       = "\U000F06A9 "
+)
+
+// Marker is the picker prefix for scratch and agent rows, padded on other
+// rows so paths align.
 func (c Config) Marker(path string) string {
-	if c.IsScratch(path) {
+	switch {
+	case c.IsScratch(path):
 		return "✎ "
+	case IsAgentWorktree(path):
+		return AgentMarker
 	}
 	return "  "
+}
+
+// IsAgentWorktree is true for a worktree under the agent's branch prefix,
+// which jmux lays out as a directory of that name.
+func IsAgentWorktree(path string) bool {
+	return strings.Contains(filepath.ToSlash(path), "/"+AgentBranchPrefix)
 }
 
 // WorkDir is where a session's windows start: a scratch worktree's nested dated

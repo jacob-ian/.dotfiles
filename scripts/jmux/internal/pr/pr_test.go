@@ -39,10 +39,21 @@ func TestParseNumber(t *testing.T) {
 }
 
 func TestFormatRowRoundTrips(t *testing.T) {
-	line := formatRow("eucalyptusvc/mobile", 42, true, "Add widget", "octocat")
-	slug, num, ok := parseRepoNumber(line)
-	if !ok || slug != "eucalyptusvc/mobile" || num != 42 {
-		t.Fatalf("parseRepoNumber(formatRow(...)) = (%q, %d, %v); line=%q", slug, num, ok, line)
+	for _, marker := range []string{"", "  ", repo.AgentMarker} {
+		line := formatRow(marker, "eucalyptusvc/mobile", 42, true, "Add widget", "octocat")
+		slug, num, ok := parseRepoNumber(line)
+		if !ok || slug != "eucalyptusvc/mobile" || num != 42 {
+			t.Fatalf("parseRepoNumber(formatRow(%q, ...)) = (%q, %d, %v); line=%q", marker, slug, num, ok, line)
+		}
+	}
+}
+
+func TestRowMarker(t *testing.T) {
+	if got := rowMarker("g3rtrude"); got != repo.AgentMarker {
+		t.Errorf("rowMarker(g3rtrude) = %q, want the agent marker", got)
+	}
+	if got := rowMarker("octocat"); got != "  " {
+		t.Errorf("rowMarker(octocat) = %q, want padding", got)
 	}
 }
 
@@ -64,7 +75,7 @@ func TestByline(t *testing.T) {
 }
 
 func TestFormatItemsRowRoundTrips(t *testing.T) {
-	line := formatItemsRow("eucalyptusvc/mobile", 42, true, "Add widget", "octocat", "feat/widget", "release/1.2")
+	line := formatItemsRow("  ", "eucalyptusvc/mobile", 42, true, "Add widget", "octocat", "feat/widget", "release/1.2")
 	if slug, num, ok := parseRepoNumber(line); !ok || slug != "eucalyptusvc/mobile" || num != 42 {
 		t.Fatalf("parseRepoNumber(formatItemsRow(...)) = (%q, %d, %v); line=%q", slug, num, ok, line)
 	}
@@ -77,7 +88,7 @@ func TestFormatItemsRowRoundTrips(t *testing.T) {
 }
 
 func TestRowRefsTolerateMissingBaseField(t *testing.T) {
-	line := formatRow("owner/repo", 7, false, "Title", "author") + "\tfeat/x"
+	line := formatRow("  ", "owner/repo", 7, false, "Title", "author") + "\tfeat/x"
 	if got := rowHeadRef(line); got != "feat/x" {
 		t.Errorf("rowHeadRef = %q, want %q", got, "feat/x")
 	}

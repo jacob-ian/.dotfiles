@@ -61,9 +61,9 @@ func findLocalRepo(cfg repo.Config, nameWithOwner string) string {
 	return ""
 }
 
-// parseRepoNumber splits a row's leading "owner/repo#12" field.
+// parseRepoNumber splits a row's leading "owner/repo#12" field, after the marker.
 func parseRepoNumber(line string) (string, int, bool) {
-	field := strings.TrimSpace(line)
+	field := strings.TrimSpace(strings.TrimPrefix(line, repo.AgentMarker))
 	if i := strings.IndexAny(field, " \t"); i >= 0 {
 		field = field[:i]
 	}
