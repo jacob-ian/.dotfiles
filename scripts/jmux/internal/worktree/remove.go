@@ -21,10 +21,7 @@ func IsManagedWorktree(path string) bool {
 }
 
 func managedBareRoot(path string) string {
-	bareRoot := repo.FindBareRoot(path)
-	if bareRoot == "" {
-		bareRoot = gitctl.CommonDir(path)
-	}
+	bareRoot := gitctl.BareRoot(path)
 	if bareRoot == "" || repo.AdminDirFor(bareRoot, path) == "" {
 		return ""
 	}

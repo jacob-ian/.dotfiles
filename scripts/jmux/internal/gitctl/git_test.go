@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -226,6 +227,57 @@ func TestLogOneline(t *testing.T) {
 			}
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("LogOneline(%q, %d) subjects = %q, want %q", tt.revRange, tt.n, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBareRoot(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	src := t.TempDir()
+	run(src, "init", "-q", "-b", "main")
+	run(src, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init")
+	bare := t.TempDir() + "/repo"
+	run(src, "clone", "-q", "--bare", src, bare)
+	run(bare, "worktree", "add", "-q", bare+"/main", "main")
+	outside := t.TempDir() + "/elsewhere"
+	run(bare, "worktree", "add", "-q", "-b", "side", outside)
+	gone := bare + "/gone"
+	run(bare, "worktree", "add", "-q", "-b", "gone", gone)
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := map[string]struct{ dir, want string }{
+		"the bare root":        {bare, bare},
+		"nested worktree":      {bare + "/main", bare},
+		"subdir of a worktree": {bare + "/main/.git/..", bare},
+		"worktree outside":     {outside, bare},
+		"deleted worktree":     {gone, bare},
+		"plain directory":      {t.TempDir(), ""},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := BareRoot(tt.dir)
+			if got != "" {
+				got, _ = filepath.EvalSymlinks(got)
+			}
+			want := tt.want
+			if want != "" {
+				want, _ = filepath.EvalSymlinks(want)
+			}
+			if got != want {
+				t.Fatalf("BareRoot(%s) = %q, want %q", tt.dir, got, want)
 			}
 		})
 	}

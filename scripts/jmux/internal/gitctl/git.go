@@ -40,6 +40,15 @@ func gitRun(dir string, args ...string) error {
 	return nil
 }
 
+// BareRoot is the bare repo that owns dir, or ""; git is only asked for
+// worktrees kept outside the bare root's tree.
+func BareRoot(dir string) string {
+	if root := repo.FindBareRoot(dir); root != "" {
+		return root
+	}
+	return CommonDir(dir)
+}
+
 // CommonDir returns the bare repo root for the worktree at dir, or "".
 func CommonDir(dir string) string {
 	out, err := gitOut(dir, "rev-parse", "--git-common-dir")

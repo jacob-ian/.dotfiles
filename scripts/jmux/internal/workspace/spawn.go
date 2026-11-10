@@ -118,13 +118,13 @@ func bareRootFor(cfg repo.Config, ref string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if root := bareRootOf(cwd); root != "" {
+		if root := gitctl.BareRoot(cwd); root != "" {
 			return root, nil
 		}
 		return "", errors.New("not inside a jmux repo; pass --repo")
 	}
 	if abs, err := filepath.Abs(ref); err == nil && repo.IsDir(abs) {
-		if root := bareRootOf(abs); root != "" {
+		if root := gitctl.BareRoot(abs); root != "" {
 			return root, nil
 		}
 		return "", fmt.Errorf("%s is not a jmux repo", ref)
@@ -142,11 +142,4 @@ func bareRootFor(cfg repo.Config, ref string) (string, error) {
 		return "", fmt.Errorf("no repo named %s", ref)
 	}
 	return "", fmt.Errorf("%s is ambiguous: %s", ref, strings.Join(matches, ", "))
-}
-
-func bareRootOf(dir string) string {
-	if root := gitctl.CommonDir(dir); root != "" {
-		return root
-	}
-	return repo.FindBareRoot(dir)
 }

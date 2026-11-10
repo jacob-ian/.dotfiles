@@ -237,7 +237,7 @@ func resolveBareRoot(cfg repo.Config, start string) (string, error) {
 		}
 		start = cwd
 	}
-	if bareRoot := gitctl.CommonDir(start); bareRoot != "" {
+	if bareRoot := gitctl.BareRoot(start); bareRoot != "" {
 		return bareRoot, nil
 	}
 

@@ -97,7 +97,7 @@ func RunSync() error {
 		return errors.New("no branch checked out")
 	}
 	// A plain clone has no common dir; it can fetch from itself.
-	bareRoot := gitctl.CommonDir(cwd)
+	bareRoot := gitctl.BareRoot(cwd)
 	if bareRoot == "" {
 		bareRoot = cwd
 	}
