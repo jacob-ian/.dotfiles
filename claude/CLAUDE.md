@@ -44,6 +44,7 @@
 - Suggest spawning whenever a side task turns up that would otherwise be dropped or derail the current one: a bug found while researching, an out-of-scope refactor, a quick fix in another repo. Offer it rather than doing it silently or leaving a note.
 - Write the brief like a few lines to a colleague: the goal in one sentence, pointers to context (ticket if any, branch, file) rather than explanations, what done looks like, and how to report (draft PR, or a short closing summary). The other agent can read the code; don't restate it or list steps.
 - Tell the user the path. `jmux open <path>` switches their tmux client there, so run it only when they ask.
+- `jmux spawn list` shows the workspaces this session has spawned with each claude's status (working, needs_input, idle, or empty before it starts). Check it when the user asks how delegated work is going, or before building on it; idle means that agent has finished its turn.
 
 ## Commit rules
 

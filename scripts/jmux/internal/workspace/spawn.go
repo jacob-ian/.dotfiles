@@ -1,27 +1,45 @@
 package workspace
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
+	"jmux/internal/claudectl"
 	"jmux/internal/gitctl"
 	"jmux/internal/repo"
+	"jmux/internal/tag"
 	"jmux/internal/worktree"
 )
 
 const spawnUsage = `usage: jmux spawn [--repo <dir|name>] <branch> [prompt]
+       jmux spawn list
 
 Creates a worktree for <branch> and starts claude in it on the prompt,
 in a new tmux session that is not switched to. Prints the workspace path.
   --repo   a path inside the repo, or a scanned repo's name;
            defaults to the repo containing the current directory
   prompt   one quoted argument; omit it to read the prompt from stdin
+  list     the workspaces this claude session has spawned, one per line as
+           "<path>\t<status>", status being working, needs_input, idle or empty
 Flags go before <branch>. Open the result with: jmux open <path>`
+
+const (
+	spawnKind    = "spawn"
+	sessionIDEnv = "CLAUDE_CODE_SESSION_ID"
+)
+
+type spawnData struct {
+	Parent string    `json:"parent"`
+	At     time.Time `json:"at"`
+}
 
 // RunSpawn handles `jmux spawn`; stdout is the new workspace's path.
 func RunSpawn(cfg repo.Config, args []string) error {
@@ -30,6 +48,9 @@ func RunSpawn(cfg repo.Config, args []string) error {
 	repoRef := fs.String("repo", "", "path or name of the repo")
 	if err := fs.Parse(args); err != nil || fs.NArg() < 1 || fs.NArg() > 2 {
 		return errors.New(spawnUsage)
+	}
+	if fs.Arg(0) == "list" {
+		return listSpawns(os.Stdout, os.Getenv(sessionIDEnv))
 	}
 	bareRoot, err := bareRootFor(cfg, *repoRef)
 	if err != nil {
@@ -43,7 +64,34 @@ func RunSpawn(cfg repo.Config, args []string) error {
 	if err != nil {
 		return err
 	}
+	if parent := os.Getenv(sessionIDEnv); parent != "" {
+		tag.Set(path, spawnKind, tag.New(spawnKind, "", spawnData{Parent: parent, At: time.Now()}))
+	}
 	fmt.Println(path)
+	return nil
+}
+
+// listSpawns writes the workspaces spawned by the claude session parent and
+// the status word of the claude in each, oldest first.
+func listSpawns(w io.Writer, parent string) error {
+	if parent == "" {
+		return errors.New("not running under claude: " + sessionIDEnv + " is unset")
+	}
+	type spawn struct {
+		path string
+		at   time.Time
+	}
+	var mine []spawn
+	for path, t := range tag.Namespace(spawnKind) {
+		var d spawnData
+		if json.Unmarshal(t.Data, &d) == nil && d.Parent == parent && repo.IsDir(path) {
+			mine = append(mine, spawn{path, d.At})
+		}
+	}
+	sort.Slice(mine, func(i, j int) bool { return mine[i].at.Before(mine[j].at) })
+	for _, s := range mine {
+		fmt.Fprintf(w, "%s\t%s\n", s.path, claudectl.Status(s.path))
+	}
 	return nil
 }
 

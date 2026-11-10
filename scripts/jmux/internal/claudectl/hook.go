@@ -94,6 +94,30 @@ func Register() {
 	})
 }
 
+// Status is the state of the newest live claude session in path's workspace:
+// "working", "needs_input", "idle", or "" when none is running.
+func Status(path string) string {
+	tags, ok := tag.All()[repo.Resolve(path)]
+	if !ok {
+		return ""
+	}
+	return string(newestStatus(tags, tmuxctl.PaneLabels()))
+}
+
+func newestStatus(tags []tag.Tag, panes map[string]string) sessionStatus {
+	var newest tagData
+	for _, t := range tags {
+		if t.Kind != tagKind || t.Pane == "" || panes[t.Pane] == "" {
+			continue
+		}
+		var d tagData
+		if json.Unmarshal(t.Data, &d) == nil && d.UpdatedAt.After(newest.UpdatedAt) {
+			newest = d
+		}
+	}
+	return newest.Status
+}
+
 // noticesFromTags maps needs_input tags with a live pane to notices. The newest
 // session per pane wins, so a successor session supersedes a stale claim.
 func noticesFromTags(tags map[string][]tag.Tag, panes map[string]string) []statusbox.Notice {

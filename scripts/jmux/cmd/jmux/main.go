@@ -184,6 +184,7 @@ func usage() {
                                 Create <branch>'s workspace and start claude on the prompt
                                 (or stdin) in a background session; prints the path.
                                 R is a path in the repo or its name; default: current repo
+  jmux spawn list               Workspaces spawned by this claude session, with status
   jmux open <dir>               Switch to <dir>'s session, creating it if needed
   jmux pr                       Review queue: check a PR out into a worktree
   jmux pr <dir>                 PRs for the repo at <dir> (. for current)

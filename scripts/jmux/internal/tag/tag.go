@@ -142,6 +142,19 @@ func UnsetPrefix(path, prefix string) {
 	cachefile.Write(storeFile, s)
 }
 
+// Namespace maps every resolved path to its ns tag, rendered or not.
+func Namespace(ns string) map[string]Tag {
+	s := store{}
+	cachefile.Read(storeFile, &s)
+	out := map[string]Tag{}
+	for path, byNS := range s {
+		if t, ok := byNS[ns]; ok {
+			out[path] = t
+		}
+	}
+	return out
+}
+
 // All maps every resolved path to its tags, ordered by namespace; tags
 // without a renderer are skipped.
 func All() map[string][]Tag {

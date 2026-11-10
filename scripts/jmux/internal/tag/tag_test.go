@@ -174,3 +174,21 @@ func TestRegisterDuplicatePanics(t *testing.T) {
 	}()
 	Register("test", func(json.RawMessage) (string, Color) { return "", "" })
 }
+
+func TestNamespaceIncludesUnrendered(t *testing.T) {
+	withCacheDir(t)
+	a, b := t.TempDir(), t.TempDir()
+	Set(a, "lineage", New("lineage", "", map[string]string{"parent": "p1"}))
+	Set(b, "test", testTag("shown"))
+
+	got := Namespace("lineage")
+	if len(got) != 1 {
+		t.Fatalf("want 1 tag, got %d", len(got))
+	}
+	if _, ok := got[repo.Resolve(a)]; !ok {
+		t.Fatalf("missing %s: %v", a, got)
+	}
+	if _, ok := All()[repo.Resolve(a)]; ok {
+		t.Fatal("unrendered tag should stay out of All")
+	}
+}

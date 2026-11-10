@@ -1,12 +1,14 @@
 package workspace
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"jmux/internal/repo"
+	"jmux/internal/tag"
 )
 
 func TestPromptArg(t *testing.T) {
@@ -44,5 +46,25 @@ func TestBareRootForName(t *testing.T) {
 	}
 	if _, err := bareRootFor(cfg, t.TempDir()); err == nil {
 		t.Fatal("plain dir: want error")
+	}
+}
+
+func TestListSpawnsFiltersByParent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	mine, theirs := t.TempDir(), t.TempDir()
+	tag.Set(mine, "spawn", tag.New("spawn", "", map[string]string{"parent": "me", "at": "2026-01-01T00:00:00Z"}))
+	tag.Set(theirs, "spawn", tag.New("spawn", "", map[string]string{"parent": "other", "at": "2026-01-01T00:00:00Z"}))
+
+	var out bytes.Buffer
+	if err := listSpawns(&out, "me"); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.HasPrefix(got, repo.Resolve(mine)+"\t") || strings.Contains(got, theirs) {
+		t.Fatalf("got %q", got)
+	}
+	if err := listSpawns(&out, ""); err == nil {
+		t.Fatal("no session id: want error")
 	}
 }
