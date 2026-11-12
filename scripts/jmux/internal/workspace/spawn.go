@@ -21,6 +21,7 @@ import (
 
 const spawnUsage = `usage: jmux spawn [--repo <dir|name>] <branch> [prompt]
        jmux spawn list
+       jmux spawn tail [-n <count>] <path>
 
 Creates a worktree for <branch> and starts claude in it on the prompt,
 in a new tmux session that is not switched to. Prints the workspace path.
@@ -29,6 +30,8 @@ in a new tmux session that is not switched to. Prints the workspace path.
   prompt   one quoted argument; omit it to read the prompt from stdin
   list     the workspaces this claude session has spawned, one per line as
            "<path>\t<status>", status being working, needs_input, idle or empty
+  tail     the last <count> (default 3) prompts and replies of the claude
+           session in workspace <path>, oldest first; tool calls are omitted
 Flags go before <branch>. Open the result with: jmux open <path>`
 
 const (
@@ -43,14 +46,19 @@ type spawnData struct {
 
 // RunSpawn handles `jmux spawn`; stdout is the new workspace's path.
 func RunSpawn(cfg repo.Config, args []string) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "list":
+			return listSpawns(os.Stdout, os.Getenv(sessionIDEnv))
+		case "tail":
+			return runTail(os.Stdout, args[1:])
+		}
+	}
 	fs := flag.NewFlagSet("spawn", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	repoRef := fs.String("repo", "", "path or name of the repo")
 	if err := fs.Parse(args); err != nil || fs.NArg() < 1 || fs.NArg() > 2 {
 		return errors.New(spawnUsage)
-	}
-	if fs.Arg(0) == "list" {
-		return listSpawns(os.Stdout, os.Getenv(sessionIDEnv))
 	}
 	bareRoot, err := bareRootFor(cfg, *repoRef)
 	if err != nil {
@@ -68,6 +76,41 @@ func RunSpawn(cfg repo.Config, args []string) error {
 		tag.Set(path, spawnKind, tag.New(spawnKind, "", spawnData{Parent: parent, At: time.Now()}))
 	}
 	fmt.Println(path)
+	return nil
+}
+
+// runTail handles `jmux spawn tail`, the parent agent's view of a child's
+// conversation so far.
+func runTail(w io.Writer, args []string) error {
+	fs := flag.NewFlagSet("tail", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	n := fs.Int("n", 3, "messages to show")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 1 || *n < 1 {
+		return errors.New(spawnUsage)
+	}
+	path, err := filepath.Abs(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	file, err := claudectl.Transcript(path)
+	if err != nil {
+		return err
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	msgs, err := claudectl.Tail(f, *n)
+	if err != nil {
+		return err
+	}
+	for i, m := range msgs {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintf(w, "--- %s %s\n%s\n", m.Role, m.At.Local().Format("2006-01-02 15:04"), m.Text)
+	}
 	return nil
 }
 

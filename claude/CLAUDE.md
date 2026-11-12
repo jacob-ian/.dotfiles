@@ -46,6 +46,7 @@
 - Write the brief like a few lines to a colleague: the goal in one sentence, pointers to context (ticket if any, branch, file) rather than explanations, what done looks like, and how to report (draft PR, or a short closing summary). The other agent can read the code; don't restate it or list steps.
 - Tell the user the path. `jmux open <path>` switches their tmux client there, so run it only when they ask.
 - `jmux spawn list` shows the workspaces this session has spawned with each claude's status (working, needs_input, idle, or empty before it starts). Check it when the user asks how delegated work is going, or before building on it; idle means that agent has finished its turn.
+- `jmux spawn tail [-n N] <path>` prints the last N prompts and replies of the claude in that workspace. Use it to read a finished agent's closing summary or see what a stuck one is asking.
 
 ## Commit rules
 
