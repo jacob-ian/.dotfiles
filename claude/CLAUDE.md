@@ -6,6 +6,7 @@
 
 - The user's tmux workspace manager. Each repo is a bare clone with one worktree per branch, named after it (`~/euc/gql-external/main`, `~/euc/gql-external/en-1234-thing`).
 - A workspace is a worktree plus its tmux session, with nvim and claude in separate windows.
+- Creating a workspace fetches first: the default branch is fetched and fast-forwarded, an existing remote branch is checked out, and a new branch starts from the fresh default. No `git fetch` or `pull` is needed before spawning.
 - It has pickers for workspaces, PRs under review and scratch sessions, and shows each claude session's status (working, needs input, idle) via claude's hooks.
 - Scratch sessions (`~/scratch`) are local to this machine. Never reference their paths or contents in tickets, PRs or anything external.
 
