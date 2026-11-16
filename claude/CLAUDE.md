@@ -2,6 +2,8 @@
 
 - You are likely inside a git worktree managed by `jmux` (below). Never use `git -C <path>`; check `pwd` and run `git` from the current directory.
 
+@~/.claude/work.md
+
 ## jmux
 
 - The user's tmux workspace manager. Each repo is a bare clone with one worktree per branch, named after it (`~/euc/gql-external/main`, `~/euc/gql-external/en-1234-thing`).
