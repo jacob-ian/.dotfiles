@@ -342,13 +342,20 @@ function M.view(opts)
   end)
   vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = buf, nowait = true, desc = "close" })
 
+  local loading = "Loading PR…"
   local function draw_loader(frame)
-    if not vim.api.nvim_buf_is_valid(buf) then
+    if not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_win_is_valid(win) then
       return
     end
-    vim.bo[buf].modifiable = true
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { frame .. " Loading PR…" })
-    vim.bo[buf].modifiable = false
+    local text = frame .. "  " .. loading
+    local height, width = vim.api.nvim_win_get_height(win), vim.api.nvim_win_get_width(win)
+    local lines = {}
+    for _ = 1, math.max(0, math.floor(height / 2) - 1) do
+      lines[#lines + 1] = ""
+    end
+    local pad = math.max(0, math.floor((width - vim.fn.strdisplaywidth(text)) / 2))
+    lines[#lines + 1] = (" "):rep(pad) .. text
+    fill(lines)
   end
   draw_loader(ui.SPINNER[1])
   -- show the loader before the first timer tick.
@@ -365,6 +372,7 @@ function M.view(opts)
       fill { "  failed to resolve PR: " .. (err or "") }
       return
     end
+    loading = ("Loading #%d…"):format(pr.number)
     local owner, repo = gh.owner_repo(pr.slug)
 
     -- outside fetch_and_render so expand state survives a refresh.
