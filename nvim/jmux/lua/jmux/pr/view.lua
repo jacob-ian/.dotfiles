@@ -283,6 +283,40 @@ local function edit_title(pr, current, on_done)
   end)
 end
 
+-- comment posts a top-level PR comment written in the multiline prompt.
+local function comment(pr, on_done)
+  local pbuf
+  ui.prompt_multiline(
+    ("comment on #%d"):format(pr.number),
+    function(text)
+      ui.act("posting comment…", function(done)
+        vim.system(
+          { "gh", "pr", "comment", tostring(pr.number), "--repo", pr.slug, "--body-file", "-" },
+          { stdin = text, text = true },
+          function(res)
+            vim.schedule(function()
+              done(res.code == 0 or nil, vim.trim(res.stderr or ""))
+            end)
+          end
+        )
+      end, function()
+        if pbuf and vim.api.nvim_buf_is_valid(pbuf) then
+          pcall(vim.api.nvim_buf_delete, pbuf, { force = true })
+        end
+        vim.notify(("commented on #%d"):format(pr.number))
+        if on_done then
+          on_done()
+        end
+      end)
+    end,
+    nil,
+    function(buf)
+      pbuf = buf
+    end,
+    " :w post · :q cancel "
+  )
+end
+
 -- view opens (or focuses) the PR conversation tab.
 function M.view(opts)
   if pv_tab and vim.api.nvim_tabpage_is_valid(pv_tab) then
@@ -917,6 +951,16 @@ function M.view(opts)
               ctx = function()
                 return thread_under_cursor() ~= nil
               end,
+            },
+            {
+              lhs = "c",
+              rhs = function()
+                comment(pr, function()
+                  fetch_and_render(ui.spin "refreshing…")
+                end)
+              end,
+              hint = "comment",
+              desc = "comment on the PR",
             },
             {
               lhs = "x",
