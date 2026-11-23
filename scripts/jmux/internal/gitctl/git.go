@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"jmux/internal/repo"
@@ -16,11 +18,16 @@ import (
 // gitReadTimeout keeps a wedged git (e.g. an index lock) from hanging an fzf preview.
 const gitReadTimeout = 5 * time.Second
 
+// gitOut runs a read-only git command without ever leaving index.lock behind:
+// optional locks are off, and a timeout sends SIGTERM, which git cleans up after.
 func gitOut(dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitReadTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = time.Second
 	out, err := cmd.Output()
 	return string(out), err
 }
